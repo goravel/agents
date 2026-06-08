@@ -1,5 +1,5 @@
 ---
-name: create-update-pr
+name: goravel-pull-request
 description: Create or update the pull request for the current branch and enforce a strict PR body format. Use this skill whenever the user asks to create a PR, update PR description, sync PR text with latest branch logic, or asks for Summary/Why style PR content.
 ---
 

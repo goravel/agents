@@ -1,5 +1,5 @@
 ---
-name: solve-pr-comments
+name: goravel-review-comments
 description: >
   Workflow for addressing pull request review comments. Covers when to change
   code, when to push back on incorrect feedback, and when to answer questions
@@ -110,7 +110,7 @@ when Y?", "Is this thread-safe?". These need an answer, not a code change.
 
 6. **Apply required code changes** for comments that identify valid issues.
 
-7. **Run focused verification** for changed code. Follow `skills/golang-test/SKILL.md`:
+7. **Run focused verification** for changed code. Follow `skills/goravel-testing/SKILL.md`:
    prefer package- or test-specific commands, and do not run `go test ./...`
    unless the user explicitly asks for all tests.
 
