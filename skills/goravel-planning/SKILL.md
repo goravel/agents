@@ -7,58 +7,129 @@ description: >
   change enables.
 ---
 
-# Make Plan
+# Goravel Planning
 
-Produce plans that are specific enough for the user to evaluate before any code
-is written.
+Produces a complete, reviewable implementation plan before any code is written. The goal is to surface every file that needs changing, every invariant to preserve, every ambiguity that needs a decision — so that implementation can proceed without surprises.
 
-## Core rule
+This skill is read-only. It explores the codebase, reads relevant files, and writes a plan. It does not edit or create source files.
 
-Every plan must show two different views when code is involved:
+## Workflow
 
-- **Actual code**: the concrete framework or internal code you expect to change.
-- **Real user code**: the end-user application code that would use or observe the
-  change.
+Follow these steps in order. Do not start writing the plan until Steps 1–4 are complete.
 
-Do not stop at abstract steps like "update middleware" or "add validation".
+### Step 1: Understand the Task
+
+Extract from the user's message:
+
+- **What** is being added or changed (new feature, new endpoint, refactor, bug fix, etc.)
+- **Business rules** — constraints, invariants, edge cases, exclusions
+- **Scope boundaries** — what components / modules / contexts this applies to (and what it explicitly does NOT apply to)
+- **Ambiguities** — anything the description leaves unclear
+
+### Step 2: Locate the Affected Code
+
+Determine which service, module, or package is the primary target. Use targeted searches to understand the project layout before reading files:
+
+```bash
+# Discover project structure
+find . -type f | head -40
+# Locate relevant files by pattern or keyword
+grep -r "<key term>" --include="*.<ext>" -l | head -20
+```
+
+Identify the root of the affected component and understand its layout (source files, tests, config, schema, migrations, etc.).
+
+### Step 3: Read Existing Patterns
+
+Read the most relevant existing files to understand:
+
+- **Schema / models** — data structures, naming conventions, existing values
+- **Core logic** — existing predicates, helpers, dispatch patterns
+- **Validation / guards** — how input is validated, what constraints are enforced
+- **Configuration / build** — how the project is built, what tooling runs after changes
+- **Tests** — how existing test suites are structured, what patterns look like
+
+Read enough to know the exact code you will reference in the plan, but do not read entire files if a targeted grep suffices.
+
+### Step 4: Identify All Touch Points
+
+Build a complete list of every file that needs to change, organized by layer. For each file, note what specifically changes and why. Common layers to consider:
+
+| Layer | Examples | What changes |
+|---|---|---|
+| Schema / models | `.thrift`, `.proto`, `.sql`, `.graphql`, type files | New fields, values, types |
+| Generated code | Auto-generated stubs, clients | Rebuilt via project tooling |
+| DB migrations | Migration files | Schema changes |
+| Core logic | Service, handler, util files | New functions, updated dispatch |
+| Validation | Validator, guard files | New rules, updated checks |
+| Tests | `*_test.*` files | New test cases covering the change |
+| Config / build | Build files, manifests | New dependencies, targets |
+
+Adapt this to the actual project structure — discover the equivalent layers by reading the codebase.
+
+### Step 5: Write the Plan
+
+Output the plan in the format below. Be specific — include exact file paths, exact new identifiers, exact code snippets for non-trivial additions. The reader should be able to implement from the plan without opening the source files themselves.
+
+---
+
+## Plan Output Format
+
+```
+## Summary
+
+<1–3 sentence description of what is being added and the key business rules it must satisfy.>
+
+Rules:
+- <rule 1>
+- <rule 2>
+- ...
+
+---
+
+## Files to Change
+
+### 1. <Layer name> — <one-line description>
+
+**File:** `<exact path>`
+
+<Explanation of what changes and why. Include the exact new code or pseudocode for non-trivial additions. For schema changes, include the full before/after. For logic changes, include the exact function signatures and key logic.>
+
+### 2. <Layer name> — ...
+
+...
+
+---
+
+## Sequence
+
+Ordered implementation steps with dependencies called out explicitly:
+
+1. <step> → <what it unblocks>
+2. <step>
+...
+N. Run tests to verify
+
+---
+
+## Real User Code Example
+
+the end-user application code that would use or observe the change. Do not stop at abstract steps like "update middleware" or "add validation".
 Show the shape of the real code.
 
-## Planning rules
+<Code snippet showing how a Goravel user would interact with the new feature or change>
 
-1. Follow the repository rule: when asked to plan or investigate, produce a plan
-   only. Do not implement until the user explicitly asks.
-2. Keep the plan grounded in the current codebase. Read the relevant files before
-   proposing code.
-3. For every non-trivial step, explain which file or component will likely change.
-4. If the work affects user-facing behavior, include a `Real user code` example.
-5. If the work is entirely internal, say that explicitly and omit the user code
-   example only when no realistic user-facing snippet exists.
-6. Never use pseudo-code placeholders inside code fences. Use realistic Goravel
-   code patterns.
+## Open Questions
 
-## Output format
+Things that must be confirmed before implementation:
 
-When a plan includes code changes, use this structure:
+1. <question> — <why it matters, what the two possible answers imply>
+2. ...
 
-````markdown
-## Plan
-1. <step>
-2. <step>
-3. <step>
-
-## Actual code
-```go
-// concrete framework code shape expected to change
+(Omit this section if there are no genuine ambiguities.)
 ```
 
-## Real user code
-```go
-// concrete application code a Goravel user would write
-```
-````
-
-If multiple steps affect different areas, include multiple paired code examples.
-Keep each example short and representative.
+---
 
 ## What counts as actual code
 
@@ -99,55 +170,16 @@ Example:
 facades.Route().Middleware(middleware.Jwt()).Get("users", userController.Index)
 ```
 
-## Good vs bad plans
+## Quality Bar for the Plan
 
-Bad:
+Before outputting, verify:
 
-````markdown
-## Plan
-1. Add middleware support.
-2. Update tests.
-````
-
-Good:
-
-````markdown
-## Plan
-1. Extend the route pipeline builder so route groups can prepend default
-   middleware before per-route middleware is appended.
-2. Update the HTTP contract and route tests to verify middleware ordering.
-3. Validate the user-facing API still reads naturally from an application route
-   file.
-
-## Actual code
-```go
-func (r *Router) UseDefaultMiddleware(middlewares ...http.Middleware) {
-	r.defaultMiddlewares = append(r.defaultMiddlewares, middlewares...)
-}
-```
-
-## Real user code
-```go
-facades.Route().Prefix("api").Group(func(route route.Router) {
-	route.Middleware(middleware.Jwt()).Get("profile", userController.Show)
-})
-```
-````
-
-## Workflow
-
-1. Read the relevant framework files.
-2. Identify the behavior change the user cares about.
-3. Write a short step-by-step plan.
-4. Add `Actual code` showing the concrete framework change shape.
-5. Add `Real user code` showing how an app developer would use it.
-6. Call out unknowns or risks if the code path is ambiguous.
-
-## Guardrails
-
-- Never present only implementation detail when the feature affects application
-  authors.
-- Never present only user-facing code without showing what framework area will
-  change.
-- Never use fake APIs that do not match Goravel naming and style.
-- Prefer concise, concrete examples over long explanations.
+- Every file that needs changing is listed — no layer silently left out
+- File paths are exact (verified by the searches in Steps 2–3)
+- Code snippets use the correct identifiers (function names, type names, constant names) as they actually exist in the codebase, not guesses
+- The sequence respects actual build and dependency order for this project
+- Open Questions are genuine ambiguities, not things that can be determined by reading the code
+- The plan does not contain implementation — only description of what to implement
+- If the work affects user-facing behavior, include `Real User Code Example`. 
+- If the work is entirely internal, say that explicitly and omit the user code example only when no realistic user-facing snippet exists.
+- Never use pseudo-code placeholders inside code fences. Use realistic Goravel code patterns.
