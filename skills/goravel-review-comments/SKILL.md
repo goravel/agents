@@ -82,16 +82,24 @@ when Y?", "Is this thread-safe?". These need an answer, not a code change.
 
 ## Workflow
 
-1. **Fetch comments**
+1. **Fetch all comments (both pages)**
    ```bash
-  gh pr view {pr_number} --json comments,reviewThreads --jq '{comments: .comments, reviewThreads: [.reviewThreads[] | select(.isResolved | not)]}'
-   # or for inline review comments:
-  gh api repos/{owner}/{repo}/pulls/{pr_number}/comments
+   # Preferred: gets all review threads (incl. inline comments) via GraphQL, not paginated
+   gh pr view {pr_number} --json reviewThreads --jq '[.reviewThreads[] | select(.isResolved | not)]'
+   # Or combined with top-level comments:
+   gh pr view {pr_number} --json comments,reviewThreads --jq '{comments: .comments, unresolvedThreads: [.reviewThreads[] | select(.isResolved | not)]}'
+   # For inline review comments via REST API — MUST use --paginate or you will miss pages:
+   gh api --paginate repos/{owner}/{repo}/pulls/{pr_number}/comments
    ```
-  Ignore resolved review threads and resolved comments. Only triage unresolved
-  feedback that still needs action. If you use the inline comment endpoint,
-  cross-check each comment against `reviewThreads` and skip any comment whose
-  thread is already resolved.
+   **Critical:** GitHub REST API endpoints return at most 30 items per page.
+   `gh api` without `--paginate` only returns page 1 and silently drops the
+   rest. Always pass `--paginate` to walk every page. `gh pr view --json`
+   uses GraphQL internally and is not affected by REST pagination.
+   
+   Ignore resolved review threads and resolved comments. Only triage unresolved
+   feedback that still needs action. If you use the inline comment endpoint,
+   cross-check each comment against `reviewThreads` and skip any comment whose
+   thread is already resolved.
 
 2. **Inspect the worktree before editing**
    ```bash
