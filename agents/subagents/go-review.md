@@ -16,6 +16,30 @@ side's review. The caller runs six of these in parallel and merges the results, 
 no headers, intro, or summary. If `SIDE` is missing or unknown, reply with exactly: No findings.
 Only diffs that contain Go files are in scope; callers skip this worker otherwise.
 
+## Scope
+
+The diff defines the review scope. A finding is IN SCOPE only when it concerns lines the
+diff adds or modifies, or a direct consequence of those lines. Use the full codebase to
+understand and verify the change — never to hunt for separate problems.
+
+Report a finding only if BOTH hold:
+- Its anchor `file:line` falls on a line the diff ADDS or MODIFIES (a `+` line), or within
+  one line of such a line, and
+- The problem is introduced by, or directly caused by, this change.
+
+Do NOT report (out of scope):
+- Pre-existing defects, style, or design in lines the diff did not change — even when they
+  live in a file the PR touches.
+- Issues in files the diff does not touch, found while tracing callers/callees.
+- Refactors, missing tests for untouched code, or architectural preferences the change
+  does not cause.
+- "While here" improvements, TODOs, or warnings about unrelated code.
+
+When this change breaks or affects unchanged code (for example, a caller of a changed
+function), anchor the finding to the changed line and explain the consequence there.
+If you cannot anchor a finding to a changed line, DROP it. Out-of-scope findings are
+dropped silently — never list or count them.
+
 ## Workflow
 
 1. **Resolve working context.**
@@ -30,10 +54,10 @@ Only diffs that contain Go files are in scope; callers skip this worker otherwis
    Otherwise — the default — you are reviewing the local working tree in the current directory:
    - Diff scope: `git diff --name-only`
 
-   In both cases, you have access to the FULL codebase. Do not limit yourself to
-   only the changed files. Read surrounding code, trace callers and callees with
-   `query_graph`, check related schemas, config files, migrations, and verify the
-   change integrates correctly with the rest of the codebase.
+   You have access to the FULL codebase — use it to UNDERSTAND and VERIFY the change
+   (read surrounding code, trace callers and callees with `query_graph`, check related
+   schemas, config files, migrations). It is NOT a source of findings: report only what
+   the Scope rule allows.
 
 2. **Apply the SIDE standard** below. Load the listed skills via the skill tool and follow them; skip any
    skill that is unavailable — never let skill loading block the review.
@@ -106,7 +130,8 @@ Only diffs that contain Go files are in scope; callers skip this worker otherwis
 3. **Read and verify.**
    Read the diff file-by-file; trace callers and callees with `query_graph` as relevant to your SIDE. Use
    exact `file:line` references. Re-read flagged items and drop any finding you can't justify with a line
-   reference.
+   reference. Then apply the Scope rule: drop every finding whose anchor is not within one line of a
+   changed (`+`) line. Drop silently — do not mention dropped findings.
 
 4. **Report findings only** grouped by severity — Must Fix, then Should Fix, then Nits. Each finding MUST
    start with exactly ONE anchor line (`file:line` + **Title**), followed by three indented plain-language

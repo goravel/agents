@@ -84,6 +84,12 @@ The review agent supplies one of two data shapes. Apply the template above to wh
   check.
 - The anchor line (`file:line` + **Title**) is the merge/dedupe key and is mandatory; the description
   lines and example block are ignored for matching.
+- **Scope.** A finding must be anchored to a line the reviewed diff adds or modifies (a `+` line),
+  within one line of such a line. Drop pre-existing issues in unchanged code, findings in files
+  the diff does not touch, and unrelated refactors or "while here" suggestions. When a change
+  affects unchanged code, anchor the finding to the changed line and explain the consequence
+  there. The review agent applies a final added-line filter (±1 line) after merging, so an
+  unanchored or out-of-scope finding is discarded silently.
 - Write each finding in plain language for a busy developer who did not write the code:
   - Title = a short noun phrase (≤8 words), no jargon — e.g. "Shared slice returned to caller".
   - One problem per finding; never bundle two issues.

@@ -73,24 +73,46 @@ emit the consolidated review to the conversation.
       performance, standard, testing, architecture. The go-review subagent reviews Go only — never call it
       for a diff with no Go files. Prompt each with `SIDE=<name>`, the diff scope, the detected
       language(s), and the working context from step 1e (`WORKTREE_DIR` + `BASE_BRANCH`). Ask each to
-      return findings only (no headers/intro/summary).
+      return findings only (no headers/intro/summary). Tell each worker only findings anchored to lines
+      the PR adds or modifies (within one line) are in scope, per the Scope rule in the go-review
+      subagent; it must drop out-of-scope findings silently.
    c. If the diff scope contains no `.go` files, do NOT spawn the go-review subagent. Perform a generic,
       language-agnostic review inline: read the diff file-by-file and cover the same six dimensions
       (safety, logic, performance, style/conventions, testing, architecture) using general best practices
-      for the detected language(s), producing the finding set.
+      for the detected language(s), producing the finding set. Apply the same scope rule: report only
+      findings on lines the diff adds or modifies (within one line), or a direct consequence of them; drop
+      the rest silently.
    d. Merge the six results (step b) or the inline generic result (step c): dedupe by `file:line` + Title
       (anchor line only; ignore the description lines and example blocks), then rank Must Fix → Should Fix
       → Nits → a merged finding set.
+   e. Scope filter (defense-in-depth) — compute the added-line ranges once and drop from the POSTED
+      list every merged finding whose anchor `file:line` is not inside one (allowing ±1 line of
+      tolerance):
+      ```bash
+      git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD -U0 | rg '^diff --git |^@@'
+      ```
+      Parse each `diff --git a/... b/...` file entry with its `@@ -a,b +c,d @@` hunks on the `+`
+      side: the added range is `c..c+d-1` (`d` defaults to 1 when omitted; `d=0` means deletions
+      only, no added lines). A finding is in scope when its file's anchor line satisfies
+      `c-1 <= line <= c+d` for any of that file's added ranges. Keep the UNFILTERED merged set from
+      step 2d; the filter only decides which findings are POSTED. Drops are SILENT: add no count,
+      no section, and no summary line to the posted review or the conversation; the only trace is
+      a finding's absence.
 
-3. Round reconciliation.
+3. Round reconciliation — prior findings reconcile against the UNFILTERED merged set from step 2d
+   (an out-of-scope prior finding stays open, counted on its `[ROUND k]` line, and is never counted
+   as resolved or ticked in step 6); NEW findings come only from the POSTED (scope-filtered) list
+   from step 2e.
    - Prior rounds = the de-duplicated rounds from step 1f.
    - Build each round's finding set from its anchor lines, keyed by file path + Title (the line number is
      ignored, so a finding whose code merely shifted still matches); ignore checkbox state, the
      description lines, and example blocks.
-   - For each merged finding: an anchor matching a prior round's finding → still open (count it on that
-     round's `[ROUND k]` line; do NOT list it); no match → NEW (list under its severity heading).
-   - Each prior finding with no current counterpart → resolved: count it in its round's `Resolved: <N>`
-     and queue it for step 6.
+   - For each prior-round finding: an anchor matching a finding in the UNFILTERED merged set → still
+     open (count it on its `[ROUND k]` line; do NOT list it); otherwise → resolved (see below).
+   - List as NEW only POSTED findings (step 2e) with no prior-round match, under their severity
+     heading. NEW counts come only from the POSTED list, so a scope-filtered finding is never listed.
+   - Each prior finding with no current counterpart in the UNFILTERED merged set → resolved: count it
+     in its round's `Resolved: <N>` and queue it for step 6.
    - Current round number `N = 1 + <highest prior round number from step 1f>`
      (including offset marker-less rounds); embed `<!-- round: N -->`.
    - No prior round → emit only the `[NEW]` line and flat findings.
