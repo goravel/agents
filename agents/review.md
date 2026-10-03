@@ -114,10 +114,11 @@ emit the consolidated review to the conversation.
    - Stateless: re-derive from the fetched input every run. A withdrawal holds only while the current code
      supports the claim, so a later regression correctly resurfaces.
 
-5. Verdict — count per severity per status. Emit the `[NEW]` line plus one `[ROUND k](<url>)` line per
-   prior round, ordered newest-first by comment timestamp (not by `k`). If there are zero findings and
-   every `[ROUND k]` open count is zero, emit exactly `✅ Review clean — no findings.` (this string keys
-   the implement orchestrator's convergence check), still followed by the Verdict line(s).
+5. Verdict — count per severity per status and supply the NEW + ROUND data shape to the
+   `goravel-review-template` skill: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior
+   round, ordered newest-first by comment timestamp (not by `k`). If Must Fix, Should Fix, and
+   Nits are all zero and every `[ROUND k]` open count is zero, the skill emits
+   `✅ Review clean — no findings.`.
 
 6. Tick resolved findings in prior PR comments. For every prior automated review comment from step 1f
    whose endpoint is editable (issue or inline comment), tick `[ ]` → `[x]` on the ANCHOR line of each
@@ -132,8 +133,8 @@ emit the consolidated review to the conversation.
    never a raw `[ ]` substring.
 
 7. Emit the consolidated review to the conversation. Load the `goravel-review-template` skill via
-   the skill tool and format the output exactly per it, using the PRIMARY form (`[NEW]` +
-   `[ROUND k](<url>)` Verdict lines and the `<!-- round: N -->` marker).
+   the skill tool and format the output exactly per it, supplying the NEW + ROUND data shape
+   (round marker, `[NEW]` + `[ROUND k](<url>)` Verdict lines, folded Nits).
 
 8. Clean up (after step 7, so step 4 has already verified against the worktree):
    ```bash
