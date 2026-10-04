@@ -3,8 +3,8 @@ name: goravel-review-template
 description: >
   Canonical output format and finding grammar for code reviews. Use when emitting, writing, or
   formatting a code review — defines the Summary/Verdict/Findings structure, Must Fix / Should
-  Fix / Nits headings, the one-line anchor plus Problem/Impact/Fix shape, and the PRIMARY vs
-  SUBAGENT variants. Load via the skill tool before producing any review output.
+  Fix / Nits headings, the one-line anchor plus Problem/Impact/Fix shape, and the two data shapes
+  (NEW and NEW + ROUND). Load via the skill tool before producing any review output.
 ---
 
 # Review Output Format
@@ -42,25 +42,54 @@ This is an AI-generated code review. Please double-check each finding before act
 ### Should Fix
 1. [ ] ...
 
+<details>
+<summary>Nits (<N>)</summary>
+
 ### Nits
-1. [ ] ...
+1. [ ] `path/file.ext:LINE` **Short plain-language title**
+   **Problem:** <...>
+   **Impact:** <...>
+   **Fix:** <...>
+   ```go
+   // before
+   <...>
+   // after
+   <...>
+   ```
 
-## Variants
+</details>
 
-- **PRIMARY** (full, round-tracked reviews): emit the `<!-- round: N -->` marker, the `[NEW]` line,
-  and one `[ROUND k](<url>)` line per prior round (newest-first by comment timestamp). List NEW
-  findings only.
-- **SUBAGENT** (findings-only / aggregated output): omit the round marker, the `[NEW]` line, and the
-  `[ROUND k]` lines; show only the plain line `- Must Fix: <N> · Should Fix: <N> · Nits: <N>`.
-  List ALL current findings.
-- **Clean sentinel**: zero findings (PRIMARY: also every `[ROUND k]` open count zero) → emit exactly
-  `✅ Review clean — no findings.`, followed by the Verdict line(s). The convergence check keys on
-  this exact string.
+## Inputs
+
+The review agent supplies one of two data shapes. Apply the template above to whichever it is:
+
+- **NEW** — the current finding set only. Use when the output is not round-tracked (a local
+  artifact, a findings-only handoff).
+- **NEW + ROUND** — the current finding set plus prior-round data: the current round number `N`
+  and, per prior round, its `html_url`, per-severity open counts, and `Resolved` count. Use when
+  the output is posted as a round-tracked PR review comment.
 
 ## Rules
 
+- **NEW shape.** Emit the `[NEW]` Verdict line and the findings. Omit the `<!-- round: N -->`
+  marker and every `[ROUND k]` line.
+- **NEW + ROUND shape.** Emit the `<!-- round: N -->` marker and one `[ROUND k](<url>)` line per
+  prior round, newest-first by comment timestamp.
+- **Folded Nits (both shapes).** Always wrap the entire `### Nits` block in `<details>` /
+  `<summary>Nits (<N>)</summary>`: keep every numbered anchor line byte-for-byte and leave a blank
+  line after `<summary>` and before `</details>`. Omit the whole block when there are no Nits.
+- **Clean sentinel.** Emit exactly `✅ Review clean — no findings.`, followed by the Verdict
+  line(s), when the NEW shape has zero findings, or the NEW + ROUND shape has zero findings and
+  every `[ROUND k]` open count is zero. This string keys the implement orchestrator's convergence
+  check.
 - The anchor line (`file:line` + **Title**) is the merge/dedupe key and is mandatory; the description
   lines and example block are ignored for matching.
+- **Scope.** A finding must be anchored to a line the reviewed diff adds or modifies (a `+` line),
+  within one line of such a line. Drop pre-existing issues in unchanged code, findings in files
+  the diff does not touch, and unrelated refactors or "while here" suggestions. When a change
+  affects unchanged code, anchor the finding to the changed line and explain the consequence
+  there. The review agent applies a final added-line filter (±1 line) after merging, so an
+  unanchored or out-of-scope finding is discarded silently.
 - Write each finding in plain language for a busy developer who did not write the code:
   - Title = a short noun phrase (≤8 words), no jargon — e.g. "Shared slice returned to caller".
   - One problem per finding; never bundle two issues.
