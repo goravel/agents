@@ -9,8 +9,6 @@ description: >
 
 - Don't run `go test ./...` unless ask to run all tests explicitly.
 - Prefer `go test <pkg>` or `-run <TestName>` over `go test ./...` (slow).
-- Use `-race` only on the final full-suite pass (`go test -race ./...`), not on every iteration — it is
-  ~10–25× slower and rarely finds new issues in already-reviewed code.
 - Use table-driven tests covering happy path, failure, and edge cases.
 - Skip trivial getters/setters unless they contain non-trivial logic.
 - Use `testify/assert` with `assert.*(t, *)` or `require.*(t, *)` directly, not `assert.New(t)`.

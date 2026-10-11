@@ -7,7 +7,7 @@ permissions:
     resource: "*"
     effect: deny
   - action: edit
-    resource: "../**"
+    resource: "/tmp/**"
     effect: allow
   - action: subagent
     resource: "*"
