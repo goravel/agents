@@ -1,5 +1,5 @@
 ---
-name: goravel-review-comments
+name: Goravel Review Comments
 description: >
   Workflow for addressing pull request review comments. Covers when to change
   code, when to push back on incorrect feedback, and when to answer questions
