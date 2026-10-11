@@ -1,5 +1,5 @@
 ---
-name: goravel-review-template
+name: Goravel Review Template
 description: >
   Canonical output format and finding grammar for code reviews. Use when emitting, writing, or
   formatting a code review — defines the Summary/Verdict/Findings structure, Must Fix / Should

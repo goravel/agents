@@ -1,5 +1,5 @@
 ---
-name: goravel-planning
+name: Goravel Planning
 description: >
   Planning workflow for Goravel tasks. Use this skill whenever the user asks
   for a plan, investigation, or implementation outline and the response should

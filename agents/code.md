@@ -1,8 +1,7 @@
 ---
 description: Write code
 mode: primary
-model: opencode-go/deepseek-v4.1-flash
-variant: high
+model: opencode-go/deepseek-v4.1-flash#high
 ---
 
 You are the primary `code` agent. You implement changes from a plan or fix review findings.

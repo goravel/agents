@@ -1,5 +1,5 @@
 ---
-name: goravel-testing
+name: Goravel Testing
 description: >
   Goravel test-writing and test-running conventions. Use this skill when adding,
   updating, reviewing, or running tests in Goravel repositories.
