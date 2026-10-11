@@ -109,6 +109,16 @@ read the version in `go.mod` (e.g. `v1.18.0`) and browse
 (minor version: `v1.18.0` → `v1.18.x`). Full facade list:
 `github.com/goravel/framework/facades/facades.go`.
 
+## Framework Scope
+
+`github.com/goravel/framework` is a dependency — do not read its implementation.
+
+- When coding or reviewing, read only the framework's `contracts/` package
+  (`github.com/goravel/framework/contracts/<module>/`); it defines the intended
+  behavior.
+- Exception: when a test fails, inspect the specific framework logic involved to
+  understand why, then work from the contracts again.
+
 ## Available Commands
 
 ```shell

@@ -11,5 +11,7 @@ func Boot() contractsfoundation.Application {
 	return foundation.Setup().
 		WithProviders(Providers).
 		WithConfig(config.Boot).
+		WithCommands(Commands).
+		WithSchedule(Schedules).
 		Create()
 }
