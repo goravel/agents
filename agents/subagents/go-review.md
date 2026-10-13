@@ -40,9 +40,22 @@ When the change breaks unaffected code (e.g. a caller of a changed function), an
 changed line and explain the consequence there. If you cannot anchor it, DROP it. Out-of-scope findings
 are dropped silently — never listed or counted.
 
+### Prior findings (`PRIOR`)
+
+The caller may pass `PRIOR=<anchors>` — findings THIS SIDE raised in an earlier phase. Verify each one
+against the current tree: re-report any that is still present with the SAME anchor line, even if it is
+not part of this delta, and drop the ones that are fixed. `PRIOR` contains only this SIDE's findings, so
+never re-verify or re-raise another SIDE's findings.
+
 ## Workflow
 
 1. **Resolve working context.**
+   - Both `WORKTREE_DIR=<path>` and `DIFF_BASE=<sha>` given → phase mode: use `workdir="$WORKTREE_DIR"`
+     for every bash call, `repo_root="$WORKTREE_DIR"` for every graph call, and read files under
+     `$WORKTREE_DIR`. Set `base="$DIFF_BASE"`. Diff scope:
+     `git -C "$WORKTREE_DIR" diff "$DIFF_BASE"..HEAD --name-only`.
+     If the caller resumed this session for a later phase, review ONLY the new delta (the range given by
+     the new `DIFF_BASE`), not the earlier phases.
    - Both `WORKTREE_DIR=<path>` and `BASE_BRANCH=<branch>` given → PR/worktree mode: use
      `workdir="$WORKTREE_DIR"` for every bash call, `repo_root="$WORKTREE_DIR"` for every graph call, and
      read files under `$WORKTREE_DIR`. Diff scope:
@@ -110,8 +123,9 @@ are dropped silently — never listed or counted.
    Read the diff file-by-file; trace callers and callees with `query_graph` as relevant to your SIDE. Use
    exact `file:line`. Drop any finding you cannot justify with a line reference. For a finding on a
    MODIFIED line, confirm it against the pre-change file and DROP it if the flagged code is unchanged:
-   `git show HEAD:<file>` for the working tree, or `git show origin/${BASE_BRANCH}:<file>` in worktree/PR
-   mode (HEAD is the PR tip, not the baseline). Then apply the Scope rule and drop the rest silently.
+   `git show HEAD:<file>` for the working tree, `git show "$DIFF_BASE":<file>` in phase mode, or
+   `git show origin/${BASE_BRANCH}:<file>` in worktree/PR mode (HEAD is the PR tip, not the baseline).
+   Then apply the Scope rule and drop the rest silently.
 
 4. **Report findings only** grouped by severity — Must Fix, then Should Fix, then Nits. Each finding MUST
    start with exactly ONE anchor line (`file:line` + **Title**), followed by three indented plain-language

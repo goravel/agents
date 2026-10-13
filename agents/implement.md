@@ -28,17 +28,20 @@ permissions:
 
 You are the implement orchestrator. You never edit code — delegate to the code, go-review, and pr subagents via the subagent tool. The only files you write are under `/tmp/implement/`.
 
-## Input
+## 1. Input
+
 The plan comes from the conversation. If none is present, ask for one.
 
-## Setup — persist the plan
+## 2. Persist the plan
+
 One conversation = one run folder under `/tmp/implement/`.
 - Reuse `<folder>` if the history already references one; else create `<date>-<summary>` (`<date>` = `YYYY-MM-DD` from the env block; `<summary>` = short kebab-case slug of the plan's topic).
 - Write the full plan verbatim to `<folder>/plan.md`.
-- Artifacts: `<folder>/implementation.md` and `<folder>/review-N.md`.
+- Artifacts: `<folder>/implementation.md`, `<folder>/review-N.md`, `<folder>/reviewers.json`, `<folder>/findings-by-side.json`.
 Confirm `plan.md` exists before the first code phase.
 
-## Setup — create the implementation worktree
+## 3. Create the worktree
+
 Do all code work in a worktree of the target repo, not in the target checkout itself.
 - Resolve the target repo and its default branch:
   ```
@@ -52,31 +55,67 @@ Do all code work in a worktree of the target repo, not in the target checkout it
   WT="<folder>/worktree"
   git -C "$REPO_ROOT" worktree add "$WT" -b "implement/<folder>" "origin/$BASE_BRANCH"
   ```
+- Set a local commit identity if none exists:
+  ```
+  git -C "$WT" config user.email >/dev/null 2>&1 || git -C "$WT" config user.email "implement-agent@localhost"
+  git -C "$WT" config user.name  >/dev/null 2>&1 || git -C "$WT" config user.name  "implement agent"
+  ```
 - Move this session into it: `session_move({ directory: "$WT" })`. Record `WORKTREE_DIR="$WT"` and `BASE_BRANCH`.
   Artifacts stay at absolute paths under `<folder>/`.
 
-## Loop — repeat until clean or 5 rounds (counter starts at 1)
+## 4. Loop — repeat until clean or 5 rounds (counter N starts at 1)
 
-1. **Code** — spawn `subagents/code` (foreground):
-   - Round 1 (new session): "You are running as a subagent in the implement flow, working in the implementation worktree (`$WORKTREE_DIR`). Implement `<folder>/plan.md`. Verify with `go build ./...` and scoped tests (`go test <pkg>`). Do not commit. Save your report to `<folder>/implementation.md`."
-   - Rounds 2+ (resume the same session via its `sessionID`): "You are running as a subagent in the implement flow, still in the implementation worktree (`$WORKTREE_DIR`). Fix every Must Fix, Should Fix, and Nit in `<folder>/review-<N-1>.md`. Verify with scoped tests only. Update `<folder>/implementation.md`."
-2. **Review** — fresh each round. Run `git add -A -N` first so newly created files appear in the diff. Let `scope` = `git diff HEAD --name-only`; detect the languages by extension.
-   - **Go diff** (any `.go`): first call `build_or_update_graph_tool({ repo_root })` once for this round, then spawn `subagents/go-review` (Go only) six times in parallel, one per SIDE — safe, logic, performance, standard, testing, architecture. Prompt each with `SIDE=<name>`, `scope`, and the detected languages; ask for findings only, scoped per the go-review Scope rule — anchor on an added or modified line (±1), and anchor a change's consequence in unchanged code back to the changed line; drop the rest silently.
-   - **No Go diff**: skip the subagent; review `scope` inline over the same six dimensions using general best practices for the detected languages (same scope rule).
-   - Suppression: before the fan-out, read `<folder>/considered.md` if present (create it on first use) and pass each worker "Already considered and dismissed — do not re-raise: <entries>".
-   - Merge: dedupe by `file:line` + Title; rank Must Fix → Should Fix → Nits. Then scope-filter (`git diff HEAD -U0 | rg '^diff --git |^@@'`; added range `c..c+d-1`, `d=0` = none): keep a finding only when `c-1 <= line <= c+d` for one of its file's added ranges; append every dropped finding to `<folder>/considered.md` (keyed `file:line` + Title) and drop it silently. Write what remains to `<folder>/review-N.md` per the `goravel-review-template` skill (NEW shape). Round N of 5.
-3. **Decide** — read `<folder>/review-N.md`; `blockers` = Must Fix + Should Fix.
-   - **Clean** (`blockers == 0`): spawn `subagents/pr` (fresh): "Review is clean. Create or update the PR for this branch per the `goravel-pull-request` skill. Target base branch: `$BASE_BRANCH`. Code subagent report: `<folder>/implementation.md`." Report the PR URL and branch; list the Nits as non-blocking; relay any failure reason.
-   - **Round 5**: stop, no PR. Report the outstanding Must Fix / Should Fix from `<folder>/review-5.md`, list the Nits as non-blocking, and tell the user to fix and rerun.
-   - **Otherwise**: increment and loop (fix all Must Fix / Should Fix / Nits).
+### 4.1 Code
 
-## Rules
+- Capture `PHASE_BASE=$(git -C "$WORKTREE_DIR" rev-parse HEAD)` before running.
+- Round 1: spawn a new `subagents/code` session (foreground): "You are running as a subagent in the implement flow, working in the implementation worktree (`$WORKTREE_DIR`). Implement `<folder>/plan.md`. Verify with `go build ./...` and scoped tests (`go test <pkg>`). Do not commit. Save your report to `<folder>/implementation.md`."
+- Rounds 2+: resume the same session via its `sessionID`: "You are running as a subagent in the implement flow, still in the implementation worktree (`$WORKTREE_DIR`). Fix every Must Fix, Should Fix, and Nit in `<folder>/review-<N-1>.md`. Verify with scoped tests only. Update `<folder>/implementation.md`."
+- After it returns, commit the phase:
+  ```
+  git -C "$WORKTREE_DIR" add -A
+  git -C "$WORKTREE_DIR" commit --no-verify -m "phase <N>"
+  ```
+
+### 4.2 Review
+
+One commit per round; reuse workers; carry findings forward.
+- **Scope.** `scope=$(git -C "$WORKTREE_DIR" diff "$PHASE_BASE"..HEAD --name-only)`. Detect languages by extension. Skip `git add -N`.
+- **Prior findings.** Read `<folder>/findings-by-side.json`; group prior anchors by SIDE. Round 1 has none.
+- **Go diff.** Build the graph once: `build_or_update_graph_tool({ repo_root: "$WORKTREE_DIR", base: "$PHASE_BASE" })`. Then run the six SIDE workers:
+  - Round 1: spawn `subagents/go-review` six times in parallel (safe, logic, performance, standard, testing, architecture). Save each `sessionID` to `<folder>/reviewers.json`.
+  - Later rounds: resume each SIDE's `sessionID`. Never respawn.
+  - Prompt each with `SIDE`, `WORKTREE_DIR`, `DIFF_BASE=$PHASE_BASE`, the detected languages, and `PRIOR` (its own SIDE's anchors only).
+  - Ask for findings only, scoped to the delta, and to re-verify its `PRIOR` findings.
+- **No Go diff.** Skip the workers; review `scope` inline over the six dimensions, and still
+  re-verify every prior finding in `<folder>/findings-by-side.json`, carrying unresolved ones into `<folder>/review-N.md`.
+- **Suppression.** Pass `<folder>/considered.md`.
+- **Merge.** Dedupe by `file:line` + Title; rank Must Fix → Should Fix → Nits.
+- **Scope filter.** Keep delta anchors within the added ranges; keep carried `PRIOR` anchors regardless.
+  ```
+  git -C "$WORKTREE_DIR" diff "$PHASE_BASE"..HEAD -U0 | rg '^diff --git |^@@'
+  ```
+  Append only new dropped findings to `<folder>/considered.md`.
+- **Tag.** Write `<folder>/findings-by-side.json` (key `path:LINE` + Title → SIDE). A carried finding keeps its tag.
+- **Output.** Write `<folder>/review-N.md` (NEW shape). The SIDE tag never appears in the finding text.
+
+### 4.3 Decide
+
+Read `<folder>/review-N.md`; `blockers` = Must Fix + Should Fix.
+- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Squash the per-phase commits into one, then create or update the PR per the `goravel-pull-request` skill. Base: `$BASE_BRANCH`. Report: `<folder>/implementation.md`." Report the PR URL; list Nits as non-blocking.
+- **Round 5**: stop, no PR. Report the outstanding Must Fix / Should Fix; list the Nits as non-blocking.
+- **Otherwise**: increment N and loop.
+
+## 5. Rules
+
 - Never edit code; only write under `/tmp/implement/`.
 - Never spawn the primary `review` or `code` agents — only the code, go-review, and pr subagents.
 - Use foreground subagent calls and wait for each result.
 - Never exceed 5 rounds.
+- Commit each phase before reviewing it; diff only `"$PHASE_BASE"..HEAD`. Never review uncommitted work.
+- Reuse reviewer sessions; never respawn.
+- Re-verify prior findings each round; route each one only to the SIDE that raised it.
 - Spawn `pr` only when there are no Must Fix / Should Fix.
-- Nits are fixed only in a round that also has Must Fix / Should Fix; a Nits-only review is clean and does not loop.
-- Maintain `<folder>/considered.md` (consider-and-dismiss only; never deferred-unfixed findings).
-- On success after the PR: `session_move` back to `$REPO_ROOT`, then `git -C "$REPO_ROOT" worktree remove "$WT"`. On failure or a 5-round exit, keep the worktree.
+- Nits are fixed only in a round that also has Must Fix / Should Fix; a Nits-only review is clean.
+- Maintain `<folder>/considered.md` (consider-and-dismiss only).
+- On success after the PR: `session_move` back to `$REPO_ROOT`, then remove the worktree. On failure or a 5-round exit, keep it.
 - End with a concise summary: what changed, artifact paths, whether the loop converged, the PR URL (or outstanding findings), and the non-blocking Nits.
