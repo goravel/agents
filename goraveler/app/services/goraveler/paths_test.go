@@ -44,3 +44,18 @@ func TestRepoDirAllowsSymlinkedWorkspaceAncestor(t *testing.T) {
 	// legitimate repo inside it is accepted rather than judged as escaping.
 	require.Equal(t, filepath.Join(resolveSymlinks(realRoot), "goravel", "goravel"), repoDir(link, "goravel/goravel"))
 }
+
+func TestRepoDirInResolvesUnresolvedSymlinkedRoot(t *testing.T) {
+	realRoot := t.TempDir()
+	link := filepath.Join(t.TempDir(), "ws-link")
+	require.NoError(t, os.Symlink(realRoot, link))
+
+	// root is passed in its unresolved form (a symlinked ancestor that exists,
+	// but the root path itself was captured before the workspace existed), while
+	// the cloned repo directory now exists. repoDirIn must resolve the root on
+	// the same basis as the child instead of judging it an escape.
+	root := filepath.Join(link, "sub")
+	require.NoError(t, os.MkdirAll(filepath.Join(realRoot, "sub", "goravel", "goravel"), 0o755))
+
+	require.Equal(t, filepath.Join(resolveSymlinks(realRoot), "sub", "goravel", "goravel"), repoDirIn(root, "goravel/goravel"))
+}

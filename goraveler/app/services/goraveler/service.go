@@ -28,6 +28,12 @@ type dispatcher interface {
 	Run(ctx context.Context, req dispatchRequest) error
 }
 
+// checkouter ensures a repository is checked out under the workspace.
+type checkouter interface {
+	// Ensure clones the repository into dir when it does not already exist.
+	Ensure(ctx context.Context, dir, repository string) error
+}
+
 // retryTracker counts consecutive failures per key.
 type retryTracker interface {
 	// RecordFailure records a failed attempt and reports whether the cap is reached.
@@ -47,14 +53,15 @@ type handleStore interface {
 
 // Service polls the relay for @goraveler mentions and dispatches agents.
 //
-// The router, dispatcher, retry tracker and handle store are injected because
-// their policies (agent choice, CLI invocation, retry cap, dedupe) are the
-// interesting parts to substitute in tests. The HTTP client and logger are
-// resolved from the global facades on purpose: they are framework singletons
-// and the app facades are the supported way to reach them.
+// The router, dispatcher, checkouter, retry tracker and handle store are
+// injected because their policies (agent choice, CLI invocation, checkout,
+// retry cap, dedupe) are the interesting parts to substitute in tests. The HTTP
+// client and logger are resolved from the global facades on purpose: they are
+// framework singletons and the app facades are the supported way to reach them.
 type Service struct {
 	router     agentRouter
 	dispatcher dispatcher
+	checkouts  checkouter
 	retry      retryTracker
 	handles    handleStore
 	// warnOnce guards the allow-all warning. NewService passes one shared
@@ -74,10 +81,9 @@ type Service struct {
 
 // serviceConfig groups the relay-facing settings so they cannot be transposed.
 type serviceConfig struct {
-	baseURL    string
-	apiToken   string
-	workspace  string
-	eventsPath string
+	baseURL   string
+	apiToken  string
+	workspace string
 	// allowedSenders, when non-empty, restricts which GitHub senders may
 	// trigger an agent run; keys are lowercased. An empty set allows every
 	// sender.
@@ -97,11 +103,11 @@ func NewService() *Service {
 		newCacheRetryTracker(),
 		newCacheHandleStore(),
 		allowAllWarning,
+		newGitCheckouter(),
 		serviceConfig{
 			baseURL:        config.GetString("goraveler.base_url"),
 			apiToken:       config.GetString("goraveler.api_token"),
 			workspace:      config.GetString("goraveler.workspace"),
-			eventsPath:     config.GetString("goraveler.events_path"),
 			allowedSenders: parseSenders(config.GetString("goraveler.allowed_senders")),
 		},
 	)
@@ -109,21 +115,17 @@ func NewService() *Service {
 
 // newService is the shared constructor used by NewService and by tests; it wires
 // a Service from explicit dependencies.
-func newService(router agentRouter, dispatcher dispatcher, retry retryTracker, handles handleStore, warnOnce *sync.Once, cfg serviceConfig) *Service {
-	eventsPath := cfg.eventsPath
-	if eventsPath != "" && !strings.HasPrefix(eventsPath, "/") {
-		eventsPath = "/" + eventsPath
-	}
-
+func newService(router agentRouter, dispatcher dispatcher, retry retryTracker, handles handleStore, warnOnce *sync.Once, checkouts checkouter, cfg serviceConfig) *Service {
 	return &Service{
 		router:         router,
 		dispatcher:     dispatcher,
+		checkouts:      checkouts,
 		retry:          retry,
 		handles:        handles,
 		warnOnce:       warnOnce,
 		apiToken:       cfg.apiToken,
 		workspaceRoot:  resolveWorkspace(cfg.workspace),
-		eventsURL:      strings.TrimRight(cfg.baseURL, "/") + eventsPath,
+		eventsURL:      strings.TrimRight(cfg.baseURL, "/"),
 		allowedSenders: cfg.allowedSenders,
 	}
 }
@@ -264,8 +266,13 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 		return err
 	}
 
+	dir := repoDirIn(s.workspaceRoot, ev.Repository)
+	if err := s.checkouts.Ensure(ctx, dir, ev.Repository); err != nil {
+		return err
+	}
+
 	return s.dispatcher.Run(ctx, dispatchRequest{
-		dir:    repoDirIn(s.workspaceRoot, ev.Repository),
+		dir:    dir,
 		agent:  agent,
 		prompt: ev.prompt(instruction),
 	})

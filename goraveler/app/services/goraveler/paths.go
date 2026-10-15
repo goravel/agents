@@ -14,10 +14,16 @@ func resolveWorkspace(workspace string) string {
 	return resolveSymlinks(filepath.Clean(expandHome(workspace)))
 }
 
-// repoDirIn resolves the checkout directory for a repository under a
-// pre-resolved workspace root. A repository path that resolves outside the root
-// is rejected and the root is returned instead.
+// repoDirIn resolves the checkout directory for a repository under the workspace
+// root. The root is symlink-resolved internally, since it may still be in its
+// unresolved form: a root captured before the first clone stays unresolved while
+// its cloned child resolves, which would otherwise look like an escape. A
+// repository path that resolves outside the root is rejected and the root is
+// returned instead.
 func repoDirIn(root, repository string) string {
+	// Resolve the root on the same basis as the child below.
+	root = resolveSymlinks(root)
+
 	dir := filepath.Join(root, filepath.FromSlash(repository))
 	if dir == root {
 		return dir

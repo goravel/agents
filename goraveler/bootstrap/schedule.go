@@ -10,8 +10,8 @@ import (
 func Schedules() []schedule.Event {
 	return []schedule.Event{
 		facades.Schedule().
-			Command("goraveler:poll").
-			EveryFiveMinutes().
+			Command("poll-events").
+			EveryFiveSeconds().
 			SkipIfStillRunning(),
 	}
 }

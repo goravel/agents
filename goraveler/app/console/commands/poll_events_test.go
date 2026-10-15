@@ -10,15 +10,14 @@ import (
 	"github.com/goravel/framework/testing/mock"
 )
 
-func TestGoravelerPollHandle(t *testing.T) {
+func TestPollEventsHandle(t *testing.T) {
 	factory := mock.Factory()
 	factory.Log()
 
 	configMock := factory.Config()
-	configMock.EXPECT().GetString("goraveler.base_url").Return("http://relay.test").Once()
+	configMock.EXPECT().GetString("goraveler.base_url").Return("http://relay.test/webhooks/events").Once()
 	configMock.EXPECT().GetString("goraveler.api_token").Return("token").Once()
 	configMock.EXPECT().GetString("goraveler.workspace").Return("/tmp/ws").Once()
-	configMock.EXPECT().GetString("goraveler.events_path").Return("/webhooks/events").Once()
 	configMock.EXPECT().GetString("goraveler.allowed_senders").Return("bowen").Once()
 
 	httpMock := factory.Http()
@@ -31,7 +30,7 @@ func TestGoravelerPollHandle(t *testing.T) {
 	httpMock.EXPECT().WithHeader("X-Api-Token", "token").Return(httpMock).Once()
 	httpMock.EXPECT().Get("http://relay.test/webhooks/events").Return(getResp, nil).Once()
 
-	command := &GoravelerPoll{}
+	command := &PollEvents{}
 	require.NoError(t, command.Handle(nil))
 
 	configMock.AssertExpectations(t)

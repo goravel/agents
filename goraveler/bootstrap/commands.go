@@ -9,6 +9,6 @@ import (
 // Commands returns the application console commands.
 func Commands() []console.Command {
 	return []console.Command{
-		&commands.GoravelerPoll{},
+		&commands.PollEvents{},
 	}
 }

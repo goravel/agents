@@ -7,26 +7,26 @@ import (
 	"goravel/app/services/goraveler"
 )
 
-// GoravelerPoll polls the relay for @goraveler mentions and runs agents.
-type GoravelerPoll struct{}
+// PollEvents polls the relay for @goraveler mentions and runs agents.
+type PollEvents struct{}
 
 // Signature returns the command signature.
-func (c *GoravelerPoll) Signature() string {
-	return "goraveler:poll"
+func (c *PollEvents) Signature() string {
+	return "poll-events"
 }
 
 // Description returns the command description.
-func (c *GoravelerPoll) Description() string {
+func (c *PollEvents) Description() string {
 	return "Poll the relay for @goraveler mentions and dispatch agents"
 }
 
 // Extend returns the command extensions.
-func (c *GoravelerPoll) Extend() command.Extend {
+func (c *PollEvents) Extend() command.Extend {
 	return command.Extend{}
 }
 
 // Handle runs one poll cycle.
-func (c *GoravelerPoll) Handle(ctx console.Context) error {
+func (c *PollEvents) Handle(ctx console.Context) error {
 	goraveler.NewService().Poll(ctx)
 
 	return nil
