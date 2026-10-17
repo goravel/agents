@@ -1,4 +1,4 @@
-package goraveler
+package agent
 
 import (
 	"strconv"
@@ -16,6 +16,21 @@ func parseSenders(raw string) map[string]struct{} {
 	}
 
 	return senders
+}
+
+// normalizeMention turns the configured handle into a mention: it trims
+// surrounding space, ensures the leading `@` and falls back to DefaultMention
+// when the value is blank.
+func normalizeMention(raw string) string {
+	mention := strings.TrimSpace(raw)
+	if mention == "" {
+		return DefaultMention
+	}
+	if !strings.HasPrefix(mention, "@") {
+		mention = "@" + mention
+	}
+
+	return mention
 }
 
 // retryKey identifies an event for retry accounting, preferring the relay's

@@ -1,4 +1,4 @@
-package goraveler
+package agent
 
 import (
 	"testing"
@@ -28,6 +28,26 @@ func TestParseSenders(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			require.Equal(t, test.want, parseSenders(test.raw))
+		})
+	}
+}
+
+func TestNormalizeMention(t *testing.T) {
+	tests := []struct {
+		name string
+		raw  string
+		want string
+	}{
+		{name: "empty falls back to the default", raw: "", want: DefaultMention},
+		{name: "blank falls back to the default", raw: "   ", want: DefaultMention},
+		{name: "keeps the leading at sign", raw: "@bot", want: "@bot"},
+		{name: "adds the leading at sign", raw: "bot", want: "@bot"},
+		{name: "trims without changing case", raw: " @Goravel-Agent ", want: "@Goravel-Agent"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, normalizeMention(test.raw))
 		})
 	}
 }

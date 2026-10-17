@@ -1,0 +1,32 @@
+package config
+
+import (
+	"os"
+	"path/filepath"
+
+	"goravel/app/facades"
+)
+
+func init() {
+	config := facades.Config()
+	config.Add("agent", map[string]any{
+		// Full URL of the relay events endpoint.
+		"base_url": config.Env("AGENT_BASE_URL", "http://localhost:4500/webhooks/events"),
+
+		// Token sent as the X-Api-Token header on every relay request.
+		"api_token": config.Env("AGENT_API_TOKEN", ""),
+
+		// Directory holding repository checkouts; repositories are cloned here on
+		// demand. Defaults to a `goravel-agent` directory under the system temp dir.
+		"workspace": config.Env("AGENT_WORKSPACE", filepath.Join(os.TempDir(), "goravel-agent")),
+
+		// Comma-separated GitHub senders allowed to trigger agent runs. Required:
+		// the poller refuses to run when this is empty.
+		"allowed_senders": config.Env("AGENT_ALLOWED_SENDERS", ""),
+
+		// Handle that triggers an agent run, e.g. `@goravel-agent review`. Blank
+		// falls back to the built-in default (`@goravel-agent`); a value without
+		// the leading `@` is normalized.
+		"mention": config.Env("AGENT_MENTION", ""),
+	})
+}

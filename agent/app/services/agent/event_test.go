@@ -1,4 +1,4 @@
-package goraveler
+package agent
 
 import (
 	"testing"
@@ -19,7 +19,7 @@ const sampleRelayResponse = `{
 			"action": "created",
 			"repository": "goravel/goravel",
 			"sender": "bowen",
-			"payload": "{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goraveler review\"}}"
+			"payload": "{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"
 		},
 		{
 			"id": 2,
@@ -63,11 +63,11 @@ func TestEventInstruction(t *testing.T) {
 	env, err := parseEnvelope([]byte(sampleRelayResponse))
 	require.NoError(t, err)
 
-	instruction, ok := env.Data[0].instruction(mentionHandle)
+	instruction, ok := env.Data[0].instruction(DefaultMention)
 	require.True(t, ok)
 	require.Equal(t, "review", instruction)
 
-	_, ok = env.Data[1].instruction(mentionHandle)
+	_, ok = env.Data[1].instruction(DefaultMention)
 	require.False(t, ok)
 }
 
@@ -80,67 +80,87 @@ func TestEventInstructionFallbacks(t *testing.T) {
 	}{
 		{
 			name:    "comment body",
-			payload: `{"number":1,"comment":{"id":9,"body":"@goraveler plan this"}}`,
+			payload: `{"number":1,"comment":{"id":9,"body":"@goravel-agent plan this"}}`,
 			want:    "plan this",
 			ok:      true,
 		},
 		{
 			name:    "issue body",
-			payload: `{"number":2,"issue":{"number":2,"body":"@goraveler implement"}}`,
+			payload: `{"number":2,"issue":{"number":2,"body":"@goravel-agent implement"}}`,
 			want:    "implement",
 			ok:      true,
 		},
 		{
 			name:    "pull request body",
-			payload: `{"number":3,"pull_request":{"number":3,"body":"@goraveler review please"}}`,
+			payload: `{"number":3,"pull_request":{"number":3,"body":"@goravel-agent review please"}}`,
 			want:    "review please",
 			ok:      true,
 		},
 		{
 			name:    "mention without instruction",
-			payload: `{"number":4,"comment":{"id":1,"body":"hi @goraveler"}}`,
+			payload: `{"number":4,"comment":{"id":1,"body":"hi @goravel-agent"}}`,
 			ok:      false,
 		},
 		{
 			name:    "longer handle is not a mention",
-			payload: `{"number":4,"comment":{"id":1,"body":"@goraveler2 review"}}`,
+			payload: `{"number":4,"comment":{"id":1,"body":"@goravel-agent2 review"}}`,
 			ok:      false,
 		},
 		{
 			name:    "prefixed word is not a mention",
-			payload: `{"number":4,"comment":{"id":1,"body":"ping bob@goraveler.com please"}}`,
+			payload: `{"number":4,"comment":{"id":1,"body":"ping bob@goravel-agent.com please"}}`,
 			ok:      false,
 		},
 		{
 			name:    "hyphen before handle is not a mention",
-			payload: `{"number":4,"comment":{"id":1,"body":"ping bob-@goraveler.com please"}}`,
+			payload: `{"number":4,"comment":{"id":1,"body":"ping bob-@goravel-agent.com please"}}`,
 			ok:      false,
 		},
 		{
-			name:    "hyphenated handle is not a mention",
-			payload: `{"number":4,"comment":{"id":1,"body":"@goraveler-review please"}}`,
+			name:    "hyphenated suffix is not a mention",
+			payload: `{"number":4,"comment":{"id":1,"body":"@goravel-agent-review please"}}`,
+			ok:      false,
+		},
+		{
+			name:    "pluralised handle is not a mention",
+			payload: `{"number":4,"comment":{"id":1,"body":"@goravel-agents review"}}`,
+			ok:      false,
+		},
+		{
+			name:    "org prefix alone is not a mention",
+			payload: `{"number":4,"comment":{"id":1,"body":"@goravel review"}}`,
+			ok:      false,
+		},
+		{
+			name:    "underscored handle is not a mention",
+			payload: `{"number":4,"comment":{"id":1,"body":"@goravel_agent review"}}`,
+			ok:      false,
+		},
+		{
+			name:    "space separated handle is not a mention",
+			payload: `{"number":4,"comment":{"id":1,"body":"@goravel agent review"}}`,
 			ok:      false,
 		},
 		{
 			name:    "valid mention after a rejected one",
-			payload: `{"number":4,"comment":{"id":1,"body":"@goraveler2 then @goraveler review"}}`,
+			payload: `{"number":4,"comment":{"id":1,"body":"@goravel-agent2 then @goravel-agent review"}}`,
 			want:    "review",
 			ok:      true,
 		},
 		{
 			name:    "handle followed by punctuation",
-			payload: `{"number":4,"comment":{"id":1,"body":"@goraveler, please review"}}`,
+			payload: `{"number":4,"comment":{"id":1,"body":"@goravel-agent, please review"}}`,
 			want:    "please review",
 			ok:      true,
 		},
 		{
 			name:    "bare decorated mention is not an instruction",
-			payload: `{"number":4,"comment":{"id":1,"body":"**@goraveler**"}}`,
+			payload: `{"number":4,"comment":{"id":1,"body":"**@goravel-agent**"}}`,
 			ok:      false,
 		},
 		{
 			name:    "case-insensitive handle",
-			payload: `{"number":4,"comment":{"id":1,"body":"@Goraveler review"}}`,
+			payload: `{"number":4,"comment":{"id":1,"body":"@Goravel-Agent review"}}`,
 			want:    "review",
 			ok:      true,
 		},
@@ -154,7 +174,7 @@ func TestEventInstructionFallbacks(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			event := &event{Payload: test.payload}
-			got, ok := event.instruction(mentionHandle)
+			got, ok := event.instruction(DefaultMention)
 			require.Equal(t, test.ok, ok)
 			require.Equal(t, test.want, got)
 		})
@@ -193,7 +213,7 @@ func TestEventPrompt(t *testing.T) {
 	event := &event{
 		Event:      "issue_comment",
 		Repository: "goravel/goravel",
-		Payload:    `{"number":123,"comment":{"id":24680,"body":"@goraveler review"}}`,
+		Payload:    `{"number":123,"comment":{"id":24680,"body":"@goravel-agent review"}}`,
 	}
 
 	want := "Repository: goravel/goravel\n" +
@@ -209,7 +229,7 @@ func TestEventPromptWithoutComment(t *testing.T) {
 	event := &event{
 		Event:      "issues",
 		Repository: "goravel/framework",
-		Payload:    `{"issue":{"number":5,"body":"@goraveler plan"}}`,
+		Payload:    `{"issue":{"number":5,"body":"@goravel-agent plan"}}`,
 	}
 
 	want := "Repository: goravel/framework\n" +

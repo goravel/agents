@@ -1,6 +1,6 @@
 //go:generate go tool mockery
 
-package goraveler
+package agent
 
 import (
 	"context"
@@ -10,7 +10,7 @@ import (
 	"sync"
 
 	"goravel/app/facades"
-	"goravel/app/services/goraveler/dispatch"
+	"goravel/app/services/agent/dispatch"
 )
 
 const (
@@ -22,7 +22,7 @@ const (
 	deleteConcurrency = 5
 )
 
-// Service polls the relay for @goraveler mentions and dispatches agents.
+// Service polls the relay for @goravel-agent mentions and dispatches agents.
 //
 // The router, dispatcher, checkouter, retry tracker and handle store are
 // injected because their policies (agent choice, CLI invocation, checkout,
@@ -36,25 +36,28 @@ type Service struct {
 	retry      RetryTracker
 	handles    HandleStore
 
+	// mention is the handle that triggers an agent run (AGENT_MENTION).
+	mention string
+
 	apiToken string
 	// workspaceRoot is the symlink-resolved workspace root.
 	workspaceRoot string
 	eventsURL     string
 
 	// allowedSenders restricts which GitHub senders may trigger an agent run
-	// (GORAVELER_ALLOWED_SENDERS). It is validated non-empty in NewService.
+	// (AGENT_ALLOWED_SENDERS). It is validated non-empty in NewService.
 	allowedSenders map[string]struct{}
 }
 
 // NewService wires a Service from application configuration. It fails when
-// GORAVELER_ALLOWED_SENDERS is empty, since running with no allowlist would let
+// AGENT_ALLOWED_SENDERS is empty, since running with no allowlist would let
 // any GitHub sender trigger agent runs.
 func NewService() (*Service, error) {
 	config := facades.Config()
 
-	senders := parseSenders(config.GetString("goraveler.allowed_senders"))
+	senders := parseSenders(config.GetString("agent.allowed_senders"))
 	if len(senders) == 0 {
-		return nil, errors.New("goraveler: GORAVELER_ALLOWED_SENDERS must not be empty")
+		return nil, errors.New("agent: AGENT_ALLOWED_SENDERS must not be empty")
 	}
 
 	return &Service{
@@ -63,9 +66,10 @@ func NewService() (*Service, error) {
 		checkouts:      newGitCheckouter(),
 		retry:          newCacheRetryTracker(),
 		handles:        newCacheHandleStore(),
-		apiToken:       config.GetString("goraveler.api_token"),
-		workspaceRoot:  resolveWorkspace(config.GetString("goraveler.workspace")),
-		eventsURL:      strings.TrimRight(config.GetString("goraveler.base_url"), "/"),
+		mention:        normalizeMention(config.GetString("agent.mention")),
+		apiToken:       config.GetString("agent.api_token"),
+		workspaceRoot:  resolveWorkspace(config.GetString("agent.workspace")),
+		eventsURL:      strings.TrimRight(config.GetString("agent.base_url"), "/"),
 		allowedSenders: senders,
 	}, nil
 }
@@ -91,11 +95,11 @@ func (s *Service) Poll(ctx context.Context) {
 		WithHeader(apiTokenHeader, s.apiToken).
 		Get(s.eventsURL)
 	if err != nil {
-		facades.Log().Errorf("goraveler: fetch events: %v", err)
+		facades.Log().Errorf("agent: fetch events: %v", err)
 		return
 	}
 	if response.Failed() {
-		facades.Log().Errorf("goraveler: fetch events: status %d", response.Status())
+		facades.Log().Errorf("agent: fetch events: status %d", response.Status())
 		// Drain the body so the connection is released.
 		_, _ = response.Body()
 		return
@@ -103,13 +107,13 @@ func (s *Service) Poll(ctx context.Context) {
 
 	body, err := response.Body()
 	if err != nil {
-		facades.Log().Errorf("goraveler: read events response: %v", err)
+		facades.Log().Errorf("agent: read events response: %v", err)
 		return
 	}
 
 	env, err := parseEnvelope([]byte(body))
 	if err != nil {
-		facades.Log().Errorf("goraveler: parse events envelope: %v", err)
+		facades.Log().Errorf("agent: parse events envelope: %v", err)
 		return
 	}
 
@@ -123,34 +127,34 @@ func (s *Service) Poll(ctx context.Context) {
 		}
 
 		if _, err := ev.payload(); err != nil {
-			facades.Log().Errorf("goraveler: decode event payload %d: %v", ev.ID, err)
+			facades.Log().Errorf("agent: decode event payload %d: %v", ev.ID, err)
 		}
 
-		instruction, ok := ev.instruction(mentionHandle)
+		instruction, ok := ev.instruction(s.mention)
 		if !ok {
 			toDelete = append(toDelete, ev.ID)
 			continue
 		}
 
 		if !s.allowed(ev.Sender) {
-			facades.Log().Infof("goraveler: skip event %d: sender %q is not allowed", ev.ID, ev.Sender)
+			facades.Log().Infof("agent: skip event %d: sender %q is not allowed", ev.ID, ev.Sender)
 			toDelete = append(toDelete, ev.ID)
 			continue
 		}
 
 		key := retryKey(ev)
 		if s.handles.Has(key) {
-			facades.Log().Infof("goraveler: skip event %d: already handled", ev.ID)
+			facades.Log().Infof("agent: skip event %d: already handled", ev.ID)
 			toDelete = append(toDelete, ev.ID)
 			continue
 		}
 
 		if err := s.handle(ctx, ev, instruction); err != nil {
-			facades.Log().Errorf("goraveler: handle event %d: %v", ev.ID, err)
+			facades.Log().Errorf("agent: handle event %d: %v", ev.ID, err)
 			if !s.retry.RecordFailure(key) {
 				continue
 			}
-			facades.Log().Errorf("goraveler: giving up on event %d after %d attempts", ev.ID, maxAttempts)
+			facades.Log().Errorf("agent: giving up on event %d after %d attempts", ev.ID, maxAttempts)
 			// Remember the give-up so a failed acknowledgement cannot replay it.
 			s.handles.Mark(key)
 		} else {
@@ -216,16 +220,16 @@ func (s *Service) deleteEvent(ctx context.Context, id uint64) {
 		WithHeader(apiTokenHeader, s.apiToken).
 		Delete(url, nil)
 	if err != nil {
-		facades.Log().Errorf("goraveler: delete event %d: %v", id, err)
+		facades.Log().Errorf("agent: delete event %d: %v", id, err)
 		return
 	}
 
 	// The framework only reads and closes the body inside Body()/Bind()/Json().
 	if _, err := res.Body(); err != nil {
-		facades.Log().Errorf("goraveler: read delete response %d: %v", id, err)
+		facades.Log().Errorf("agent: read delete response %d: %v", id, err)
 	}
 
 	if res.Failed() {
-		facades.Log().Errorf("goraveler: delete event %d: status %d", id, res.Status())
+		facades.Log().Errorf("agent: delete event %d: status %d", id, res.Status())
 	}
 }
