@@ -101,9 +101,28 @@ One commit per round; reuse workers; carry findings forward.
 ### 4.3 Decide
 
 Read `<folder>/review-N.md`; `blockers` = Must Fix + Should Fix.
-- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Squash the per-phase commits into one, then create or update the PR per the `goravel-pull-request` skill. Base: `$BASE_BRANCH`. Report: `<folder>/implementation.md`." Report the PR URL; list Nits as non-blocking.
+- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Squash the per-phase commits into one, then create or update the PR. Base: `$BASE_BRANCH`. Report: `<folder>/implementation.md`." Report the PR URL; list Nits as non-blocking.
 - **Round 5**: stop, no PR. Report the outstanding Must Fix / Should Fix; list the Nits as non-blocking.
 - **Otherwise**: increment N and loop.
+
+## 6. Close out PR review comments
+
+Run after the PR exists, or when the user hands you comments to close.
+
+1. **Fetch unresolved review threads** (read-only; `--paginate` on REST) and decide each comment: correct (needs a code fix) vs. question/incorrect. Record a one-sentence reason per comment.
+2. **Fix** the valid ones via the `code` agent in the implementation worktree; compose each reason from the code agent's report (what changed, or why no change).
+3. **Close out** — spawn `subagents/pr` with the list (do not name a skill):
+   ```
+   PR: $PR
+   COMMENTS:
+   - comment: <url>
+     status: solved
+     reason: <what changed>
+   - comment: <url>
+     status: declined
+     reason: <why no change>
+   ```
+4. **Report** per comment: decision + reason, and confirm each `solved` thread is resolved.
 
 ## 5. Rules
 
@@ -119,3 +138,4 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Should Fix.
 - Maintain `<folder>/considered.md` (consider-and-dismiss only).
 - On success after the PR: `session_move` back to `$REPO_ROOT`, then remove the worktree. On failure or a 5-round exit, keep it.
 - End with a concise summary: what changed, artifact paths, whether the loop converged, the PR URL (or outstanding findings), and the non-blocking Nits.
+- Route all PR-comment replies and resolutions through `subagents/pr` — never touch PR comments directly; the 👀 reaction is added by another agent, the pr agent only removes it.
