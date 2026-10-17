@@ -2,7 +2,6 @@
 description: Create or update the pull request for the current branch using the goravel-pull-request skill. Commits and pushes pending changes first. On the default branch, creates a feature branch before opening the PR. Use after an implement loop passes cleanly.
 mode: subagent
 model: opencode-go/deepseek-v4.1-flash#high
-hidden: true
 permissions:
   - action: edit
     resource: "*"
