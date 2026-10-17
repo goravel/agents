@@ -53,12 +53,11 @@ func TestParseAgent(t *testing.T) {
 }
 
 func TestRouterAgentInstructions(t *testing.T) {
-	prompt := routerAgent{}.Instructions()
-
-	require.NotEmpty(t, prompt)
-	require.Contains(t, prompt, agentReview)
-	require.Contains(t, prompt, agentPlan)
-	require.Contains(t, prompt, agentImplement)
+	// The prompt is pinned exactly: the reply vocabulary must stay the agent
+	// names parseAgent accepts, on a single line and without any other framing.
+	require.Equal(t,
+		"Reply with exactly one word from: review, plan, implement. Do not add any other text.",
+		routerAgent{}.Instructions())
 }
 
 func TestAIRouterAgentFor(t *testing.T) {

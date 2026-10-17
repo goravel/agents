@@ -28,9 +28,9 @@ type AgentRouter interface {
 }
 
 // Dispatcher runs an agent for a dispatch request. The request struct lives in
-// its own package so the generated mocks, which live outside this package, do
-// not import it: the in-package tests that use those mocks would otherwise be
-// an import cycle.
+// its own package so the generated mocks do not have to import the service
+// package: the in-package tests that use those mocks would otherwise be an
+// import cycle.
 type Dispatcher interface {
 	Run(ctx context.Context, req dispatch.Request) error
 }
@@ -87,9 +87,7 @@ type routerAgent struct{}
 // Instructions returns the system prompt that constrains the reply to one of
 // the supported agent names.
 func (routerAgent) Instructions() string {
-	return "You are a routing assistant. Given a user's instruction for a GitHub " +
-		"repository, reply with exactly one word identifying the agent that should " +
-		"handle it: " + strings.Join(supportedAgents, ", ") + ". Do not add any other text."
+	return "Reply with exactly one word from: " + strings.Join(supportedAgents, ", ") + ". Do not add any other text."
 }
 
 // Messages returns the prior conversation, which is empty for stateless routing.
