@@ -17,6 +17,9 @@ import (
 
 	mockshttp "github.com/goravel/framework/mocks/http/client"
 	"github.com/goravel/framework/testing/mock"
+
+	mocksgoraveler "goravel/app/mocks/services/goraveler"
+	"goravel/app/services/goraveler/dispatch"
 )
 
 const (
@@ -46,63 +49,6 @@ var relayQueryParams = map[string]string{
 	"limit":    "50",
 }
 
-type fakeRouter struct {
-	agent string
-	err   error
-	got   []string
-}
-
-func (f *fakeRouter) AgentFor(_ context.Context, instruction string) (string, error) {
-	f.got = append(f.got, instruction)
-	return f.agent, f.err
-}
-
-type dispatchCall struct {
-	repoDir string
-	agent   string
-	prompt  string
-}
-
-type fakeDispatcher struct {
-	err   error
-	calls []dispatchCall
-}
-
-func (f *fakeDispatcher) Run(_ context.Context, req dispatchRequest) error {
-	f.calls = append(f.calls, dispatchCall{repoDir: req.dir, agent: req.agent, prompt: req.prompt})
-	return f.err
-}
-
-type fakeRetry struct {
-	exceeded map[string]bool
-	resets   []string
-}
-
-func (f *fakeRetry) RecordFailure(key string) bool {
-	return f.exceeded[key]
-}
-
-func (f *fakeRetry) Reset(key string) {
-	f.resets = append(f.resets, key)
-}
-
-type fakeHandleStore struct {
-	handled map[string]bool
-	marked  []string
-}
-
-func (f *fakeHandleStore) Has(key string) bool {
-	return f.handled[key]
-}
-
-func (f *fakeHandleStore) Mark(key string) {
-	if f.handled == nil {
-		f.handled = map[string]bool{}
-	}
-	f.handled[key] = true
-	f.marked = append(f.marked, key)
-}
-
 // testConfig groups the relay-facing settings used to build a test Service.
 type testConfig struct {
 	baseURL        string
@@ -113,7 +59,7 @@ type testConfig struct {
 
 // newTestService wires a Service from explicit dependencies, mirroring NewService
 // without the configuration lookup.
-func newTestService(router agentRouter, dispatcher dispatcher, retry retryTracker, handles handleStore, checkouts checkouter, cfg testConfig) *Service {
+func newTestService(router AgentRouter, dispatcher Dispatcher, retry RetryTracker, handles HandleStore, checkouts Checkouter, cfg testConfig) *Service {
 	return &Service{
 		router:         router,
 		dispatcher:     dispatcher,
@@ -140,23 +86,13 @@ func relayConfigSenders(apiToken, workspace, senders string) testConfig {
 	return cfg
 }
 
-// checkoutCall records one Ensure invocation.
-type checkoutCall struct{ dir, repository string }
+// testService builds a Service with a fresh handle store and checkouter, which
+// are returned so the caller can set their expectations.
+func testService(t *testing.T, router AgentRouter, dispatcher Dispatcher, retry RetryTracker) (*Service, *mocksgoraveler.HandleStore, *mocksgoraveler.Checkouter) {
+	handles := mocksgoraveler.NewHandleStore(t)
+	checkouts := mocksgoraveler.NewCheckouter(t)
 
-// fakeCheckouter records Ensure calls and returns a canned error.
-type fakeCheckouter struct {
-	err   error
-	calls []checkoutCall
-}
-
-func (f *fakeCheckouter) Ensure(_ context.Context, dir, repository string) error {
-	f.calls = append(f.calls, checkoutCall{dir: dir, repository: repository})
-	return f.err
-}
-
-// testService builds a Service with a fresh fake handle store.
-func testService(router agentRouter, dispatcher dispatcher, retry retryTracker) *Service {
-	return newTestService(router, dispatcher, retry, &fakeHandleStore{}, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	return newTestService(router, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws")), handles, checkouts
 }
 
 // deleteRecorder collects delete URLs across the poller's worker pool.
@@ -201,23 +137,34 @@ func TestServicePollDispatchesMentionsAndDeletes(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/2", nil).Return(deleteResp, nil).Once()
 
-	router := &fakeRouter{agent: agentReview}
-	dispatcher := &fakeDispatcher{}
-	retry := &fakeRetry{exceeded: map[string]bool{}}
-	checkouts := &fakeCheckouter{}
+	router := mocksgoraveler.NewAgentRouter(t)
+	router.EXPECT().AgentFor(testifymock.Anything, "review").Return(agentReview, nil).Once()
 
-	service := newTestService(router, dispatcher, retry, &fakeHandleStore{}, checkouts, relayConfig("token", "/tmp/ws"))
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+	dispatcher.EXPECT().
+		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
+			return req.Dir == "/tmp/ws/goravel/goravel" &&
+				req.Agent == agentReview &&
+				strings.Contains(req.Prompt, "Repository: goravel/goravel")
+		})).
+		Return(nil).
+		Once()
+
+	retry := mocksgoraveler.NewRetryTracker(t)
+	retry.EXPECT().Reset("d-1").Once()
+
+	handles := mocksgoraveler.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	handles.EXPECT().Mark("d-1").Once()
+
+	checkouts := mocksgoraveler.NewCheckouter(t)
+	checkouts.EXPECT().
+		Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").
+		Return(nil).
+		Once()
+
+	service := newTestService(router, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
-
-	require.Equal(t, []string{"review"}, router.got)
-	require.Len(t, dispatcher.calls, 1)
-	require.Equal(t, agentReview, dispatcher.calls[0].agent)
-	require.Equal(t, "/tmp/ws/goravel/goravel", dispatcher.calls[0].repoDir)
-	require.Contains(t, dispatcher.calls[0].prompt, "Repository: goravel/goravel")
-
-	require.Equal(t, []checkoutCall{{dir: "/tmp/ws/goravel/goravel", repository: "goravel/goravel"}}, checkouts.calls)
-
-	require.Equal(t, []string{"d-1"}, retry.resets)
 
 	httpMock.AssertExpectations(t)
 }
@@ -236,18 +183,29 @@ func TestServicePollCloneError(t *testing.T) {
 	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Once()
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 
-	dispatcher := &fakeDispatcher{}
-	retry := &fakeRetry{exceeded: map[string]bool{"d-1": false}}
-	handles := &fakeHandleStore{handled: map[string]bool{}}
-	checkouts := &fakeCheckouter{err: errors.New("clone failed")}
+	router := mocksgoraveler.NewAgentRouter(t)
+	router.EXPECT().AgentFor(testifymock.Anything, "review").Return(agentReview, nil).Once()
 
-	service := newTestService(&fakeRouter{agent: agentReview}, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws"))
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+
+	retry := mocksgoraveler.NewRetryTracker(t)
+	retry.EXPECT().RecordFailure("d-1").Return(false).Once()
+
+	handles := mocksgoraveler.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+
+	checkouts := mocksgoraveler.NewCheckouter(t)
+	checkouts.EXPECT().
+		Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").
+		Return(errors.New("clone failed")).
+		Once()
+
+	service := newTestService(router, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
 	// A checkout failure keeps the event for a retry and never dispatches.
-	require.Empty(t, dispatcher.calls)
-	require.Empty(t, handles.marked)
-	require.Equal(t, []checkoutCall{{dir: "/tmp/ws/goravel/goravel", repository: "goravel/goravel"}}, checkouts.calls)
+	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
+	handles.AssertNotCalled(t, "Mark", testifymock.Anything)
 	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
@@ -266,17 +224,29 @@ func TestServicePollKeepsFailedEventWhenRetryNotExceeded(t *testing.T) {
 	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Once()
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 
-	router := &fakeRouter{agent: agentReview}
-	dispatcher := &fakeDispatcher{err: errors.New("opencode failed")}
-	retry := &fakeRetry{exceeded: map[string]bool{"d-1": false}}
-	handles := &fakeHandleStore{handled: map[string]bool{}}
+	router := mocksgoraveler.NewAgentRouter(t)
+	router.EXPECT().AgentFor(testifymock.Anything, "review").Return(agentReview, nil).Once()
 
-	service := newTestService(router, dispatcher, retry, handles, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).
+		Return(errors.New("opencode failed")).
+		Once()
+
+	retry := mocksgoraveler.NewRetryTracker(t)
+	retry.EXPECT().RecordFailure("d-1").Return(false).Once()
+
+	handles := mocksgoraveler.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+
+	checkouts := mocksgoraveler.NewCheckouter(t)
+	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+
+	service := newTestService(router, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
 	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
-	require.Empty(t, retry.resets)
-	require.Empty(t, handles.marked)
+	retry.AssertNotCalled(t, "Reset", testifymock.Anything)
+	handles.AssertNotCalled(t, "Mark", testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
 
@@ -294,17 +264,22 @@ func TestServicePollKeepsEventWhenRoutingFails(t *testing.T) {
 	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Once()
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 
-	router := &fakeRouter{err: errors.New("router exploded")}
-	dispatcher := &fakeDispatcher{}
-	retry := &fakeRetry{exceeded: map[string]bool{"d-1": false}}
-	handles := &fakeHandleStore{handled: map[string]bool{}}
+	router := mocksgoraveler.NewAgentRouter(t)
+	router.EXPECT().AgentFor(testifymock.Anything, "review").Return("", errors.New("router exploded")).Once()
 
-	service := newTestService(router, dispatcher, retry, handles, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+	retry := mocksgoraveler.NewRetryTracker(t)
+	retry.EXPECT().RecordFailure("d-1").Return(false).Once()
+	handles := mocksgoraveler.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	checkouts := mocksgoraveler.NewCheckouter(t)
+
+	service := newTestService(router, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
-	require.Empty(t, dispatcher.calls)
-	require.Empty(t, retry.resets)
-	require.Empty(t, handles.marked)
+	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
+	retry.AssertNotCalled(t, "Reset", testifymock.Anything)
+	handles.AssertNotCalled(t, "Mark", testifymock.Anything)
 	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
@@ -327,17 +302,29 @@ func TestServicePollDeletesWhenRetryExceeded(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
-	router := &fakeRouter{agent: agentReview}
-	dispatcher := &fakeDispatcher{err: errors.New("opencode failed")}
-	retry := &fakeRetry{exceeded: map[string]bool{"d-1": true}}
-	handles := &fakeHandleStore{handled: map[string]bool{}}
+	router := mocksgoraveler.NewAgentRouter(t)
+	router.EXPECT().AgentFor(testifymock.Anything, "review").Return(agentReview, nil).Once()
 
-	service := newTestService(router, dispatcher, retry, handles, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).
+		Return(errors.New("opencode failed")).
+		Once()
+
+	retry := mocksgoraveler.NewRetryTracker(t)
+	retry.EXPECT().RecordFailure("d-1").Return(true).Once()
+
+	handles := mocksgoraveler.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	// A gave-up event is marked so a failed acknowledgement cannot replay it.
+	handles.EXPECT().Mark("d-1").Once()
+
+	checkouts := mocksgoraveler.NewCheckouter(t)
+	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+
+	service := newTestService(router, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
-	require.Empty(t, retry.resets)
-	// A gave-up event is marked so a failed acknowledgement cannot replay it.
-	require.Equal(t, []string{"d-1"}, handles.marked)
+	retry.AssertNotCalled(t, "Reset", testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
 
@@ -357,14 +344,22 @@ func TestServicePollHandlesDeleteError(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).
 		Return(nil, errors.New("connection reset")).Once()
 
-	router := &fakeRouter{agent: agentReview}
-	dispatcher := &fakeDispatcher{}
-	retry := &fakeRetry{exceeded: map[string]bool{}}
+	router := mocksgoraveler.NewAgentRouter(t)
+	router.EXPECT().AgentFor(testifymock.Anything, "review").Return(agentReview, nil).Once()
 
-	service := testService(router, dispatcher, retry)
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
+
+	retry := mocksgoraveler.NewRetryTracker(t)
+	retry.EXPECT().Reset("d-1").Once()
+
+	service, handles, checkouts := testService(t, router, dispatcher, retry)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	handles.EXPECT().Mark("d-1").Once()
+	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+
 	service.Poll(context.Background())
 
-	require.Equal(t, []string{"d-1"}, retry.resets)
 	httpMock.AssertExpectations(t)
 }
 
@@ -387,14 +382,22 @@ func TestServicePollHandlesDeleteFailureStatus(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
-	router := &fakeRouter{agent: agentReview}
-	dispatcher := &fakeDispatcher{}
-	retry := &fakeRetry{exceeded: map[string]bool{}}
+	router := mocksgoraveler.NewAgentRouter(t)
+	router.EXPECT().AgentFor(testifymock.Anything, "review").Return(agentReview, nil).Once()
 
-	service := testService(router, dispatcher, retry)
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
+
+	retry := mocksgoraveler.NewRetryTracker(t)
+	retry.EXPECT().Reset("d-1").Once()
+
+	service, handles, checkouts := testService(t, router, dispatcher, retry)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	handles.EXPECT().Mark("d-1").Once()
+	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+
 	service.Poll(context.Background())
 
-	require.Equal(t, []string{"d-1"}, retry.resets)
 	httpMock.AssertExpectations(t)
 }
 
@@ -455,7 +458,8 @@ func TestServicePollDeletesFullPageThroughPool(t *testing.T) {
 		httpMock.EXPECT().Delete(url, nil).Return(deleteResp, nil).Once()
 	}
 
-	service := testService(&fakeRouter{}, &fakeDispatcher{}, &fakeRetry{})
+	// None of the events carries a mention, so nothing is routed or dispatched.
+	service, _, _ := testService(t, mocksgoraveler.NewAgentRouter(t), mocksgoraveler.NewDispatcher(t), mocksgoraveler.NewRetryTracker(t))
 
 	done := make(chan struct{})
 	go func() {
@@ -500,11 +504,13 @@ func TestServicePollStopsOnFetchError(t *testing.T) {
 	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Once()
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(nil, errors.New("network down")).Once()
 
-	dispatcher := &fakeDispatcher{}
-	service := testService(&fakeRouter{agent: agentReview}, dispatcher, &fakeRetry{})
+	router := mocksgoraveler.NewAgentRouter(t)
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+
+	service, _, _ := testService(t, router, dispatcher, mocksgoraveler.NewRetryTracker(t))
 	service.Poll(context.Background())
 
-	require.Empty(t, dispatcher.calls)
+	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
@@ -524,11 +530,13 @@ func TestServicePollStopsOnFailedStatus(t *testing.T) {
 	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Once()
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 
-	dispatcher := &fakeDispatcher{}
-	service := testService(&fakeRouter{agent: agentReview}, dispatcher, &fakeRetry{})
+	router := mocksgoraveler.NewAgentRouter(t)
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+
+	service, _, _ := testService(t, router, dispatcher, mocksgoraveler.NewRetryTracker(t))
 	service.Poll(context.Background())
 
-	require.Empty(t, dispatcher.calls)
+	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
@@ -547,11 +555,13 @@ func TestServicePollStopsOnBodyError(t *testing.T) {
 	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Once()
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 
-	dispatcher := &fakeDispatcher{}
-	service := testService(&fakeRouter{agent: agentReview}, dispatcher, &fakeRetry{})
+	router := mocksgoraveler.NewAgentRouter(t)
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+
+	service, _, _ := testService(t, router, dispatcher, mocksgoraveler.NewRetryTracker(t))
 	service.Poll(context.Background())
 
-	require.Empty(t, dispatcher.calls)
+	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
@@ -570,11 +580,13 @@ func TestServicePollStopsOnInvalidEnvelope(t *testing.T) {
 	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Once()
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 
-	dispatcher := &fakeDispatcher{}
-	service := testService(&fakeRouter{agent: agentReview}, dispatcher, &fakeRetry{})
+	router := mocksgoraveler.NewAgentRouter(t)
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+
+	service, _, _ := testService(t, router, dispatcher, mocksgoraveler.NewRetryTracker(t))
 	service.Poll(context.Background())
 
-	require.Empty(t, dispatcher.calls)
+	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
@@ -618,17 +630,32 @@ func TestNewServiceRejectsEmptySenders(t *testing.T) {
 }
 
 func TestServiceBaseURLTrimsTrailingSlash(t *testing.T) {
-	service := newTestService(&fakeRouter{}, &fakeDispatcher{}, &fakeRetry{}, &fakeHandleStore{}, &fakeCheckouter{}, testConfig{
-		baseURL:        "http://relay.test/webhooks/events/",
-		apiToken:       "token",
-		workspace:      "/tmp/ws",
-		allowedSenders: parseSenders("bowen"),
-	})
+	service := newTestService(
+		mocksgoraveler.NewAgentRouter(t),
+		mocksgoraveler.NewDispatcher(t),
+		mocksgoraveler.NewRetryTracker(t),
+		mocksgoraveler.NewHandleStore(t),
+		mocksgoraveler.NewCheckouter(t),
+		testConfig{
+			baseURL:        "http://relay.test/webhooks/events/",
+			apiToken:       "token",
+			workspace:      "/tmp/ws",
+			allowedSenders: parseSenders("bowen"),
+		},
+	)
+
 	require.Equal(t, "http://relay.test/webhooks/events", service.eventsURL)
 }
 
 func TestServiceAllowedSenders(t *testing.T) {
-	service := newTestService(&fakeRouter{}, &fakeDispatcher{}, &fakeRetry{}, &fakeHandleStore{}, &fakeCheckouter{}, relayConfigSenders("token", "/tmp/ws", "Bowen, alice"))
+	service := newTestService(
+		mocksgoraveler.NewAgentRouter(t),
+		mocksgoraveler.NewDispatcher(t),
+		mocksgoraveler.NewRetryTracker(t),
+		mocksgoraveler.NewHandleStore(t),
+		mocksgoraveler.NewCheckouter(t),
+		relayConfigSenders("token", "/tmp/ws", "Bowen, alice"),
+	)
 
 	require.True(t, service.allowed("bowen"))
 	require.True(t, service.allowed("BOWEN"))
@@ -654,16 +681,16 @@ func TestServicePollSkipsDisallowedSender(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
-	router := &fakeRouter{agent: agentReview}
-	dispatcher := &fakeDispatcher{}
-	retry := &fakeRetry{exceeded: map[string]bool{}}
+	router := mocksgoraveler.NewAgentRouter(t)
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+	retry := mocksgoraveler.NewRetryTracker(t)
 
-	service := newTestService(router, dispatcher, retry, &fakeHandleStore{}, &fakeCheckouter{}, relayConfigSenders("token", "/tmp/ws", "alice"))
+	service := newTestService(router, dispatcher, retry, mocksgoraveler.NewHandleStore(t), mocksgoraveler.NewCheckouter(t), relayConfigSenders("token", "/tmp/ws", "alice"))
 	service.Poll(context.Background())
 
 	// The skipped event is still acknowledged so it does not block the page.
-	require.Empty(t, dispatcher.calls)
-	require.Empty(t, retry.resets)
+	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
+	retry.AssertNotCalled(t, "Reset", testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
 
@@ -687,15 +714,25 @@ func TestServicePollDispatchesAllowedSender(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
-	router := &fakeRouter{agent: agentReview}
-	dispatcher := &fakeDispatcher{}
-	retry := &fakeRetry{exceeded: map[string]bool{}}
+	router := mocksgoraveler.NewAgentRouter(t)
+	router.EXPECT().AgentFor(testifymock.Anything, "review").Return(agentReview, nil).Once()
 
-	service := newTestService(router, dispatcher, retry, &fakeHandleStore{}, &fakeCheckouter{}, relayConfigSenders("token", "/tmp/ws", "bowen"))
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
+
+	retry := mocksgoraveler.NewRetryTracker(t)
+	retry.EXPECT().Reset("d-1").Once()
+
+	handles := mocksgoraveler.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	handles.EXPECT().Mark("d-1").Once()
+
+	checkouts := mocksgoraveler.NewCheckouter(t)
+	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+
+	service := newTestService(router, dispatcher, retry, handles, checkouts, relayConfigSenders("token", "/tmp/ws", "bowen"))
 	service.Poll(context.Background())
 
-	require.Len(t, dispatcher.calls, 1)
-	require.Equal(t, []string{"d-1"}, retry.resets)
 	httpMock.AssertExpectations(t)
 }
 
@@ -717,16 +754,17 @@ func TestServicePollSkipsAlreadyHandledEvent(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
-	handles := &fakeHandleStore{handled: map[string]bool{"d-1": true}}
-	dispatcher := &fakeDispatcher{}
-	retry := &fakeRetry{exceeded: map[string]bool{}}
+	handles := mocksgoraveler.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(true).Once()
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+	retry := mocksgoraveler.NewRetryTracker(t)
 
-	service := newTestService(&fakeRouter{agent: agentReview}, dispatcher, retry, handles, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	service := newTestService(mocksgoraveler.NewAgentRouter(t), dispatcher, retry, handles, mocksgoraveler.NewCheckouter(t), relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
 	// The already-handled event is skipped but still acknowledged.
-	require.Empty(t, dispatcher.calls)
-	require.Empty(t, retry.resets)
+	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
+	retry.AssertNotCalled(t, "Reset", testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
 
@@ -748,14 +786,25 @@ func TestServicePollMarksHandledOnSuccess(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
-	handles := &fakeHandleStore{handled: map[string]bool{}}
-	retry := &fakeRetry{exceeded: map[string]bool{}}
+	router := mocksgoraveler.NewAgentRouter(t)
+	router.EXPECT().AgentFor(testifymock.Anything, "review").Return(agentReview, nil).Once()
 
-	service := newTestService(&fakeRouter{agent: agentReview}, &fakeDispatcher{}, retry, handles, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
+
+	retry := mocksgoraveler.NewRetryTracker(t)
+	retry.EXPECT().Reset("d-1").Once()
+
+	handles := mocksgoraveler.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	handles.EXPECT().Mark("d-1").Once()
+
+	checkouts := mocksgoraveler.NewCheckouter(t)
+	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+
+	service := newTestService(router, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
-	require.Equal(t, []string{"d-1"}, handles.marked)
-	require.Equal(t, []string{"d-1"}, retry.resets)
 	httpMock.AssertExpectations(t)
 }
 
@@ -777,12 +826,22 @@ func TestServicePollHandlesDeleteBodyError(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
-	retry := &fakeRetry{exceeded: map[string]bool{}}
+	router := mocksgoraveler.NewAgentRouter(t)
+	router.EXPECT().AgentFor(testifymock.Anything, "review").Return(agentReview, nil).Once()
 
-	service := testService(&fakeRouter{agent: agentReview}, &fakeDispatcher{}, retry)
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
+
+	retry := mocksgoraveler.NewRetryTracker(t)
+	retry.EXPECT().Reset("d-1").Once()
+
+	service, handles, checkouts := testService(t, router, dispatcher, retry)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	handles.EXPECT().Mark("d-1").Once()
+	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+
 	service.Poll(context.Background())
 
-	require.Equal(t, []string{"d-1"}, retry.resets)
 	httpMock.AssertExpectations(t)
 }
 
@@ -806,12 +865,13 @@ func TestServicePollDeletesEventWithInvalidPayload(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
-	dispatcher := &fakeDispatcher{}
-	service := testService(&fakeRouter{agent: agentReview}, dispatcher, &fakeRetry{exceeded: map[string]bool{}})
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+
+	service, _, _ := testService(t, mocksgoraveler.NewAgentRouter(t), dispatcher, mocksgoraveler.NewRetryTracker(t))
 	service.Poll(context.Background())
 
 	// The undecodable event is not a mention, so it is acknowledged and deleted.
-	require.Empty(t, dispatcher.calls)
+	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
 
@@ -836,15 +896,11 @@ func TestServicePollSkipsNonActionableAction(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
-	dispatcher := &fakeDispatcher{}
-	service := testService(&fakeRouter{agent: agentReview}, dispatcher, &fakeRetry{exceeded: map[string]bool{}})
+	dispatcher := mocksgoraveler.NewDispatcher(t)
+
+	service, _, _ := testService(t, mocksgoraveler.NewAgentRouter(t), dispatcher, mocksgoraveler.NewRetryTracker(t))
 	service.Poll(context.Background())
 
-	require.Empty(t, dispatcher.calls)
+	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertExpectations(t)
-}
-
-func TestRetryKey(t *testing.T) {
-	require.Equal(t, "d-1", retryKey(&event{ID: 7, DeliveryID: "d-1"}))
-	require.Equal(t, "7", retryKey(&event{ID: 7}))
 }

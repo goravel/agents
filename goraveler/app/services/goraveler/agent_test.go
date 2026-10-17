@@ -14,6 +14,8 @@ import (
 	mocksai "github.com/goravel/framework/mocks/ai"
 	mocksprocess "github.com/goravel/framework/mocks/process"
 	"github.com/goravel/framework/testing/mock"
+
+	"goravel/app/services/goraveler/dispatch"
 )
 
 func TestParseAgent(t *testing.T) {
@@ -152,10 +154,10 @@ func TestOpencodeDispatcherRun(t *testing.T) {
 	result.EXPECT().Failed().Return(false).Once()
 
 	dispatcher := newOpencodeDispatcher()
-	require.NoError(t, dispatcher.Run(context.Background(), dispatchRequest{
-		dir:    "/tmp/ws/goravel/goravel",
-		agent:  "review",
-		prompt: "do it",
+	require.NoError(t, dispatcher.Run(context.Background(), dispatch.Request{
+		Dir:    "/tmp/ws/goravel/goravel",
+		Agent:  "review",
+		Prompt: "do it",
 	}))
 
 	processMock.AssertExpectations(t)
@@ -186,10 +188,10 @@ func TestOpencodeDispatcherRunFailure(t *testing.T) {
 	result.EXPECT().ExitCode().Return(2).Once()
 
 	dispatcher := newOpencodeDispatcher()
-	err := dispatcher.Run(context.Background(), dispatchRequest{
-		dir:    "/tmp/ws/goravel/framework",
-		agent:  "plan",
-		prompt: "do it",
+	err := dispatcher.Run(context.Background(), dispatch.Request{
+		Dir:    "/tmp/ws/goravel/framework",
+		Agent:  "plan",
+		Prompt: "do it",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), `"boom"`)
@@ -217,10 +219,10 @@ func TestOpencodeDispatcherRunStartError(t *testing.T) {
 	result.EXPECT().Error().Return(errors.New("start failed")).Once()
 
 	dispatcher := newOpencodeDispatcher()
-	err := dispatcher.Run(context.Background(), dispatchRequest{
-		dir:    "/tmp/ws/goravel/goravel",
-		agent:  "review",
-		prompt: "do it",
+	err := dispatcher.Run(context.Background(), dispatch.Request{
+		Dir:    "/tmp/ws/goravel/goravel",
+		Agent:  "review",
+		Prompt: "do it",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "start failed")

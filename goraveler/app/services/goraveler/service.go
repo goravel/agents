@@ -1,3 +1,5 @@
+//go:generate go tool mockery
+
 package goraveler
 
 import (
@@ -8,6 +10,7 @@ import (
 	"sync"
 
 	"goravel/app/facades"
+	"goravel/app/services/goraveler/dispatch"
 )
 
 const (
@@ -19,39 +22,6 @@ const (
 	deleteConcurrency = 5
 )
 
-// agentRouter chooses which agent should handle an instruction.
-type agentRouter interface {
-	AgentFor(ctx context.Context, instruction string) (string, error)
-}
-
-// dispatcher runs an agent for a dispatch request.
-type dispatcher interface {
-	Run(ctx context.Context, req dispatchRequest) error
-}
-
-// checkouter ensures a repository is checked out under the workspace.
-type checkouter interface {
-	// Ensure clones the repository into dir when it does not already exist.
-	Ensure(ctx context.Context, dir, repository string) error
-}
-
-// retryTracker counts consecutive failures per key.
-type retryTracker interface {
-	// RecordFailure records a failed attempt and reports whether the cap is reached.
-	RecordFailure(key string) bool
-	// Reset clears the failure counter for a key.
-	Reset(key string)
-}
-
-// handleStore records events that have been handled so a failed acknowledgement
-// does not replay the agent run on the next tick.
-type handleStore interface {
-	// Has reports whether the key was already recorded.
-	Has(key string) bool
-	// Mark records the key.
-	Mark(key string)
-}
-
 // Service polls the relay for @goraveler mentions and dispatches agents.
 //
 // The router, dispatcher, checkouter, retry tracker and handle store are
@@ -60,11 +30,11 @@ type handleStore interface {
 // client and logger are resolved from the global facades on purpose: they are
 // framework singletons and the app facades are the supported way to reach them.
 type Service struct {
-	router     agentRouter
-	dispatcher dispatcher
-	checkouts  checkouter
-	retry      retryTracker
-	handles    handleStore
+	router     AgentRouter
+	dispatcher Dispatcher
+	checkouts  Checkouter
+	retry      RetryTracker
+	handles    HandleStore
 
 	apiToken string
 	// workspaceRoot is the symlink-resolved workspace root.
@@ -106,19 +76,6 @@ func (s *Service) allowed(sender string) bool {
 	_, ok := s.allowedSenders[strings.ToLower(sender)]
 
 	return ok
-}
-
-// parseSenders splits a comma-separated allowlist into lowercased sender keys,
-// ignoring blank entries.
-func parseSenders(raw string) map[string]struct{} {
-	senders := make(map[string]struct{})
-	for _, part := range strings.Split(raw, ",") {
-		if part = strings.ToLower(strings.TrimSpace(part)); part != "" {
-			senders[part] = struct{}{}
-		}
-	}
-
-	return senders
 }
 
 // Poll fetches one page of events, handles every mention, and deletes the
@@ -208,16 +165,6 @@ func (s *Service) Poll(ctx context.Context) {
 	s.deleteEvents(ctx, toDelete)
 }
 
-// retryKey identifies an event for retry accounting, preferring the relay's
-// delivery id and falling back to the event id when it is absent.
-func retryKey(ev *event) string {
-	if ev.DeliveryID != "" {
-		return ev.DeliveryID
-	}
-
-	return strconv.FormatUint(ev.ID, 10)
-}
-
 // handle routes the instruction to an agent and runs it against the target repo.
 func (s *Service) handle(ctx context.Context, ev *event, instruction string) error {
 	agent, err := s.router.AgentFor(ctx, instruction)
@@ -230,10 +177,10 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 		return err
 	}
 
-	return s.dispatcher.Run(ctx, dispatchRequest{
-		dir:    dir,
-		agent:  agent,
-		prompt: ev.prompt(instruction),
+	return s.dispatcher.Run(ctx, dispatch.Request{
+		Dir:    dir,
+		Agent:  agent,
+		Prompt: ev.prompt(instruction),
 	})
 }
 

@@ -17,7 +17,15 @@ const (
 	handledTTL = 24 * time.Hour
 )
 
-// cacheRetryTracker is a retryTracker backed by the application cache.
+// RetryTracker counts consecutive failures per key.
+type RetryTracker interface {
+	// RecordFailure records a failed attempt and reports whether the cap is reached.
+	RecordFailure(key string) bool
+	// Reset clears the failure counter for a key.
+	Reset(key string)
+}
+
+// cacheRetryTracker is a RetryTracker backed by the application cache.
 type cacheRetryTracker struct{}
 
 // newCacheRetryTracker returns a cache-backed retry tracker.
@@ -54,7 +62,16 @@ func attemptsKey(key string) string {
 	return attemptsKeyPrefix + key
 }
 
-// cacheHandleStore is a handleStore backed by the application cache.
+// HandleStore records events that have been handled so a failed acknowledgement
+// does not replay the agent run on the next tick.
+type HandleStore interface {
+	// Has reports whether the key was already recorded.
+	Has(key string) bool
+	// Mark records the key.
+	Mark(key string)
+}
+
+// cacheHandleStore is a HandleStore backed by the application cache.
 type cacheHandleStore struct{}
 
 // newCacheHandleStore returns a cache-backed handle store.

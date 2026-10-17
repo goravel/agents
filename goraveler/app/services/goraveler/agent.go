@@ -13,6 +13,7 @@ import (
 	"github.com/goravel/framework/contracts/process"
 
 	"goravel/app/facades"
+	"goravel/app/services/goraveler/dispatch"
 )
 
 const (
@@ -20,6 +21,19 @@ const (
 	agentPlan      = "plan"
 	agentImplement = "implement"
 )
+
+// AgentRouter chooses which agent should handle an instruction.
+type AgentRouter interface {
+	AgentFor(ctx context.Context, instruction string) (string, error)
+}
+
+// Dispatcher runs an agent for a dispatch request. The request struct lives in
+// its own package so the generated mocks, which live outside this package, do
+// not import it: the in-package tests that use those mocks would otherwise be
+// an import cycle.
+type Dispatcher interface {
+	Run(ctx context.Context, req dispatch.Request) error
+}
 
 // supportedAgents is the single source of truth for the agent names: the
 // parser's accepted set and the routing prompt are both derived from it.
@@ -96,14 +110,6 @@ const (
 	stderrLimit = 64 * 1024
 )
 
-// dispatchRequest is one agent invocation: which directory to run in, which
-// agent, and the prompt.
-type dispatchRequest struct {
-	dir    string
-	agent  string
-	prompt string
-}
-
 // opencodeDispatcher runs agents through the opencode CLI.
 type opencodeDispatcher struct {
 	bin      string
@@ -125,7 +131,7 @@ func newOpencodeDispatcher() *opencodeDispatcher {
 // (GORAVELER_API_TOKEN, OPENAI_*, database credentials, ...) are not inherited.
 // Output is not buffered in full: only a bounded prefix of stderr is captured
 // (and later escaped) for the error message, and the live stream is suppressed.
-func (d *opencodeDispatcher) Run(ctx context.Context, req dispatchRequest) error {
+func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) error {
 	var (
 		mu     sync.Mutex
 		stderr []byte
@@ -148,7 +154,7 @@ func (d *opencodeDispatcher) Run(ctx context.Context, req dispatchRequest) error
 
 	result := facades.Process().
 		WithContext(ctx).
-		Path(req.dir).
+		Path(req.Dir).
 		Timeout(d.deadline).
 		DisableBuffering().
 		Quietly().
@@ -156,7 +162,7 @@ func (d *opencodeDispatcher) Run(ctx context.Context, req dispatchRequest) error
 		Run("env", "-i",
 			"PATH="+os.Getenv("PATH"),
 			"HOME="+os.Getenv("HOME"),
-			d.bin, "run", "--agent", req.agent, "--", req.prompt)
+			d.bin, "run", "--agent", req.Agent, "--", req.Prompt)
 
 	if result.Failed() {
 		mu.Lock()

@@ -1,0 +1,15 @@
+with-expecter: true
+disable-version-string: true
+packages:
+  goravel/app/services/goraveler:
+    config:
+      dir: "{{.ConfigDir}}/app/mocks/services/goraveler"
+      outpkg: "goraveler"
+      mockname: "{{.InterfaceName}}"
+      filename: "{{.InterfaceName}}.go"
+    interfaces:
+      AgentRouter:
+      Dispatcher:
+      Checkouter:
+      RetryTracker:
+      HandleStore:

@@ -21,6 +21,12 @@ const (
 	cloneTimeout = 5 * time.Minute
 )
 
+// Checkouter ensures a repository is checked out under the workspace.
+type Checkouter interface {
+	// Ensure clones the repository into dir when it does not already exist.
+	Ensure(ctx context.Context, dir, repository string) error
+}
+
 // gitCheckouter clones GitHub repositories into the workspace on demand.
 type gitCheckouter struct{}
 
