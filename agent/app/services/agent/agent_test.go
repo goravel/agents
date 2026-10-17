@@ -1,4 +1,4 @@
-package goraveler
+package agent
 
 import (
 	"context"
@@ -15,7 +15,7 @@ import (
 	mocksprocess "github.com/goravel/framework/mocks/process"
 	"github.com/goravel/framework/testing/mock"
 
-	"goravel/app/services/goraveler/dispatch"
+	"goravel/app/services/agent/dispatch"
 )
 
 func TestParseAgent(t *testing.T) {

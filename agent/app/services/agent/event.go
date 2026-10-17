@@ -1,4 +1,4 @@
-package goraveler
+package agent
 
 import (
 	"encoding/json"
@@ -8,8 +8,9 @@ import (
 )
 
 const (
-	// mentionHandle is the handle that triggers an agent run.
-	mentionHandle = "@goraveler"
+	// DefaultMention is the handle that triggers an agent run when AGENT_MENTION
+	// is not configured.
+	DefaultMention = "@goravel-agent"
 	// platformGitHub is the only platform the poller consumes.
 	platformGitHub = "github"
 	// eventPage is the single page fetched on every tick.
@@ -146,8 +147,10 @@ func commentText(payload *githubPayload) string {
 // mentionInstruction reports whether the text mentions the handle and, if so,
 // returns the text that follows it. Matching is case-insensitive and, as with
 // GitHub logins, `-` counts as a handle character on both boundaries, so
-// `@goraveler2`, `@goraveler-bot` and `bob@goraveler.com` are not mentions while
-// `@Goraveler, please review` is. All slicing stays on the original text.
+// `@goravel-agent2`, `@goravel-agent-bot` and `bob@goravel-agent.com` are not
+// mentions while `@Goravel-Agent, please review` is. The hyphen inside the
+// handle is literal: `@goravel_agent` and `@goravel agent` are not mentions.
+// All slicing stays on the original text.
 func mentionInstruction(payload *githubPayload, mention string) (string, bool) {
 	if mention == "" {
 		return "", false

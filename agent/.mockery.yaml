@@ -1,10 +1,10 @@
 with-expecter: true
 disable-version-string: true
 packages:
-  goravel/app/services/goraveler:
+  goravel/app/services/agent:
     config:
-      dir: "{{.ConfigDir}}/app/mocks/services/goraveler"
-      outpkg: "goraveler"
+      dir: "{{.ConfigDir}}/app/mocks/services/agent"
+      outpkg: "agent"
       mockname: "{{.InterfaceName}}"
       filename: "{{.InterfaceName}}.go"
     interfaces:

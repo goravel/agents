@@ -1,4 +1,4 @@
-package goraveler
+package agent
 
 import (
 	"time"
@@ -10,9 +10,9 @@ const (
 	// attemptsTTL is how long a failure counter is retained.
 	attemptsTTL = 24 * time.Hour
 	// attemptsKeyPrefix namespaces failure counters.
-	attemptsKeyPrefix = "goraveler:attempts:"
+	attemptsKeyPrefix = "agent:attempts:"
 	// handledKeyPrefix namespaces successfully handled events.
-	handledKeyPrefix = "goraveler:handled:"
+	handledKeyPrefix = "agent:handled:"
 	// handledTTL is how long a handled event is remembered.
 	handledTTL = 24 * time.Hour
 )
@@ -43,7 +43,7 @@ func (t *cacheRetryTracker) RecordFailure(key string) bool {
 	count := cache.GetInt(cacheKey, 0) + 1
 	if err := cache.Put(cacheKey, count, attemptsTTL); err != nil {
 		// A transient cache outage must not drop an otherwise retryable event.
-		facades.Log().Errorf("goraveler: record attempt %q: %v", key, err)
+		facades.Log().Errorf("agent: record attempt %q: %v", key, err)
 		return false
 	}
 
@@ -93,7 +93,7 @@ func (s *cacheHandleStore) Mark(key string) {
 	}
 
 	if err := facades.Cache().Put(handledKey(key), true, handledTTL); err != nil {
-		facades.Log().Errorf("goraveler: record handled %q: %v", key, err)
+		facades.Log().Errorf("agent: record handled %q: %v", key, err)
 	}
 }
 

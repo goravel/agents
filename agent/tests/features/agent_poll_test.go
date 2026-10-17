@@ -93,11 +93,12 @@ const (
 	// The opencode run timeout the dispatcher applies.
 	opencodeTimeout = 30 * time.Minute
 
-	// mentionPage is one GitHub issue comment containing the @goraveler mention.
+	// mentionPage is one GitHub issue comment containing the @goravel-agent
+	// mention.
 	mentionPage = `{"data":[
 		{"id":1,"delivery_id":"d-1","event":"issue_comment","action":"created",
 		 "repository":"goravel/goravel","sender":"bowen",
-		 "payload":"{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goraveler review\"}}"}
+		 "payload":"{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"}
 	],"total":1,"page":1,"limit":50}`
 
 	// expectedPrompt is the exact instruction the poller builds for mentionPage;
@@ -110,19 +111,19 @@ const (
 		"review"
 )
 
-type GoravelerPollTestSuite struct {
+type AgentPollTestSuite struct {
 	suite.Suite
 	tests.TestCase
 }
 
-func TestGoravelerPollTestSuite(t *testing.T) {
-	suite.Run(t, new(GoravelerPollTestSuite))
+func TestAgentPollTestSuite(t *testing.T) {
+	suite.Run(t, new(AgentPollTestSuite))
 }
 
-// TestPollDispatchesMention covers the happy path: receiving a `@goraveler
+// TestPollDispatchesMention covers the happy path: receiving a `@goravel-agent
 // review` event routes an agent, runs opencode against the checkout and
 // acknowledges the event.
-func (s *GoravelerPollTestSuite) TestPollDispatchesMention() {
+func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 	// Routing always goes through facades.AI, so require a configured provider.
 	provider := facades.Config().GetString("ai.default")
 	if provider == "" {
@@ -146,14 +147,14 @@ func (s *GoravelerPollTestSuite) TestPollDispatchesMention() {
 	repoDir := filepath.Join(resolved, "goravel", "goravel")
 	s.Require().NoError(os.MkdirAll(repoDir, 0o755))
 
-	originalConfig := facades.Config().Get("goraveler")
-	facades.Config().Add("goraveler", map[string]any{
+	originalConfig := facades.Config().Get("agent")
+	facades.Config().Add("agent", map[string]any{
 		"base_url":        srv.URL + "/webhooks/events",
 		"api_token":       "test-token",
 		"workspace":       resolved,
 		"allowed_senders": "bowen",
 	})
-	s.T().Cleanup(func() { facades.Config().Add("goraveler", originalConfig) })
+	s.T().Cleanup(func() { facades.Config().Add("agent", originalConfig) })
 
 	// The dispatcher's opencode run is the only external process: mock it. The
 	// agent name is chosen by the live AI, so accept any supported agent.
