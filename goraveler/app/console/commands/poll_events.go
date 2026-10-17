@@ -27,7 +27,12 @@ func (c *PollEvents) Extend() command.Extend {
 
 // Handle runs one poll cycle.
 func (c *PollEvents) Handle(ctx console.Context) error {
-	goraveler.NewService().Poll(ctx)
+	service, err := goraveler.NewService()
+	if err != nil {
+		return err
+	}
+
+	service.Poll(ctx)
 
 	return nil
 }

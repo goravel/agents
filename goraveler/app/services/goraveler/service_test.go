@@ -16,7 +16,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	mockshttp "github.com/goravel/framework/mocks/http/client"
-	mockslog "github.com/goravel/framework/mocks/log"
 	"github.com/goravel/framework/testing/mock"
 )
 
@@ -31,6 +30,7 @@ const (
 			"event": "issue_comment",
 			"action": "created",
 			"repository": "goravel/goravel",
+			"sender": "bowen",
 			"payload": "{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goraveler review\"}}"
 		}
 	],
@@ -103,17 +103,37 @@ func (f *fakeHandleStore) Mark(key string) {
 	f.marked = append(f.marked, key)
 }
 
-// relayConfig builds the test relay configuration.
-func relayConfig(apiToken, workspace string) serviceConfig {
-	return serviceConfig{
-		baseURL:   relayEventsBaseURL,
-		apiToken:  apiToken,
-		workspace: workspace,
+// testConfig groups the relay-facing settings used to build a test Service.
+type testConfig struct {
+	baseURL        string
+	apiToken       string
+	workspace      string
+	allowedSenders map[string]struct{}
+}
+
+// newTestService wires a Service from explicit dependencies, mirroring NewService
+// without the configuration lookup.
+func newTestService(router agentRouter, dispatcher dispatcher, retry retryTracker, handles handleStore, checkouts checkouter, cfg testConfig) *Service {
+	return &Service{
+		router:         router,
+		dispatcher:     dispatcher,
+		checkouts:      checkouts,
+		retry:          retry,
+		handles:        handles,
+		apiToken:       cfg.apiToken,
+		workspaceRoot:  resolveWorkspace(cfg.workspace),
+		eventsURL:      strings.TrimRight(cfg.baseURL, "/"),
+		allowedSenders: cfg.allowedSenders,
 	}
 }
 
+// relayConfig builds the test relay configuration.
+func relayConfig(apiToken, workspace string) testConfig {
+	return testConfig{baseURL: relayEventsBaseURL, apiToken: apiToken, workspace: workspace, allowedSenders: parseSenders("bowen")}
+}
+
 // relayConfigSenders is relayConfig with a sender allowlist.
-func relayConfigSenders(apiToken, workspace, senders string) serviceConfig {
+func relayConfigSenders(apiToken, workspace, senders string) testConfig {
 	cfg := relayConfig(apiToken, workspace)
 	cfg.allowedSenders = parseSenders(senders)
 
@@ -134,9 +154,9 @@ func (f *fakeCheckouter) Ensure(_ context.Context, dir, repository string) error
 	return f.err
 }
 
-// testService builds a Service with a fresh fake handle store and warning guard.
+// testService builds a Service with a fresh fake handle store.
 func testService(router agentRouter, dispatcher dispatcher, retry retryTracker) *Service {
-	return newService(router, dispatcher, retry, &fakeHandleStore{}, &sync.Once{}, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	return newTestService(router, dispatcher, retry, &fakeHandleStore{}, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
 }
 
 // deleteRecorder collects delete URLs across the poller's worker pool.
@@ -165,8 +185,8 @@ func TestServicePollDispatchesMentionsAndDeletes(t *testing.T) {
 	deleteResp := mockshttp.NewResponse(t)
 
 	body := `{"data":[
-		{"id":1,"delivery_id":"d-1","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goraveler review\"}}"},
-		{"id":2,"delivery_id":"d-2","event":"issues","action":"opened","repository":"goravel/framework","payload":"{\"number\":5,\"issue\":{\"number\":5,\"body\":\"nothing to see\"}}"}
+		{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goraveler review\"}}"},
+		{"id":2,"delivery_id":"d-2","sender":"bowen","event":"issues","action":"opened","repository":"goravel/framework","payload":"{\"number\":5,\"issue\":{\"number\":5,\"body\":\"nothing to see\"}}"}
 	],"total":2,"page":1,"limit":50}`
 
 	getResp.EXPECT().Failed().Return(false).Once()
@@ -186,7 +206,7 @@ func TestServicePollDispatchesMentionsAndDeletes(t *testing.T) {
 	retry := &fakeRetry{exceeded: map[string]bool{}}
 	checkouts := &fakeCheckouter{}
 
-	service := newService(router, dispatcher, retry, &fakeHandleStore{}, &sync.Once{}, checkouts, relayConfig("token", "/tmp/ws"))
+	service := newTestService(router, dispatcher, retry, &fakeHandleStore{}, checkouts, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
 	require.Equal(t, []string{"review"}, router.got)
@@ -221,7 +241,7 @@ func TestServicePollCloneError(t *testing.T) {
 	handles := &fakeHandleStore{handled: map[string]bool{}}
 	checkouts := &fakeCheckouter{err: errors.New("clone failed")}
 
-	service := newService(&fakeRouter{agent: agentReview}, dispatcher, retry, handles, &sync.Once{}, checkouts, relayConfig("token", "/tmp/ws"))
+	service := newTestService(&fakeRouter{agent: agentReview}, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
 	// A checkout failure keeps the event for a retry and never dispatches.
@@ -251,7 +271,7 @@ func TestServicePollKeepsFailedEventWhenRetryNotExceeded(t *testing.T) {
 	retry := &fakeRetry{exceeded: map[string]bool{"d-1": false}}
 	handles := &fakeHandleStore{handled: map[string]bool{}}
 
-	service := newService(router, dispatcher, retry, handles, &sync.Once{}, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	service := newTestService(router, dispatcher, retry, handles, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
 	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
@@ -279,7 +299,7 @@ func TestServicePollKeepsEventWhenRoutingFails(t *testing.T) {
 	retry := &fakeRetry{exceeded: map[string]bool{"d-1": false}}
 	handles := &fakeHandleStore{handled: map[string]bool{}}
 
-	service := newService(router, dispatcher, retry, handles, &sync.Once{}, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	service := newTestService(router, dispatcher, retry, handles, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
 	require.Empty(t, dispatcher.calls)
@@ -312,7 +332,7 @@ func TestServicePollDeletesWhenRetryExceeded(t *testing.T) {
 	retry := &fakeRetry{exceeded: map[string]bool{"d-1": true}}
 	handles := &fakeHandleStore{handled: map[string]bool{}}
 
-	service := newService(router, dispatcher, retry, handles, &sync.Once{}, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	service := newTestService(router, dispatcher, retry, handles, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
 	require.Empty(t, retry.resets)
@@ -391,7 +411,7 @@ func TestServicePollDeletesFullPageThroughPool(t *testing.T) {
 	want := make([]string, 0, count)
 	for i := 1; i <= count; i++ {
 		events = append(events, fmt.Sprintf(
-			`{"id":%d,"delivery_id":"d-%d","event":"issues","action":"opened","repository":"goravel/framework","payload":"{\"number\":%d,\"issue\":{\"number\":%d,\"body\":\"no mention\"}}"}`,
+			`{"id":%d,"delivery_id":"d-%d","sender":"bowen","event":"issues","action":"opened","repository":"goravel/framework","payload":"{\"number\":%d,\"issue\":{\"number\":%d,\"body\":\"no mention\"}}"}`,
 			i, i, i, i,
 		))
 		want = append(want, fmt.Sprintf("http://relay.test/webhooks/events/%d", i))
@@ -568,7 +588,9 @@ func TestNewServiceReadsConfig(t *testing.T) {
 	configMock.EXPECT().GetString("goraveler.workspace").Return("/srv/code").Once()
 	configMock.EXPECT().GetString("goraveler.allowed_senders").Return("bowen, alice").Once()
 
-	service := NewService()
+	service, err := NewService()
+	require.NoError(t, err)
+	require.NotNil(t, service)
 
 	require.Equal(t, "http://relay.test/webhooks/events", service.eventsURL)
 	require.Equal(t, "secret", service.apiToken)
@@ -582,70 +604,36 @@ func TestNewServiceReadsConfig(t *testing.T) {
 	configMock.AssertExpectations(t)
 }
 
-func TestServiceBaseURLTrimsTrailingSlash(t *testing.T) {
-	service := newService(&fakeRouter{}, &fakeDispatcher{}, &fakeRetry{}, &fakeHandleStore{}, &sync.Once{}, &fakeCheckouter{}, serviceConfig{
-		baseURL:   "http://relay.test/webhooks/events/",
-		apiToken:  "token",
-		workspace: "/tmp/ws",
-	})
-	require.Equal(t, "http://relay.test/webhooks/events", service.eventsURL)
-}
-
-func TestNewServiceSharesWarnGuard(t *testing.T) {
+func TestNewServiceRejectsEmptySenders(t *testing.T) {
 	factory := mock.Factory()
-	logMock := mockslog.NewLog(t)
-	factory.App().EXPECT().MakeLog().Return(logMock).Once()
-	logMock.EXPECT().Warning("goraveler: GORAVELER_ALLOWED_SENDERS is empty; any sender may trigger a run").Once()
-
-	// The guard is package-owned; install a fresh one for this test and restore
-	// the previous value afterwards.
-	previous := allowAllWarning
-	allowAllWarning = &sync.Once{}
-	t.Cleanup(func() { allowAllWarning = previous })
-
 	configMock := factory.Config()
-	for i := 0; i < 2; i++ {
-		configMock.EXPECT().GetString("goraveler.base_url").Return("http://relay.test/webhooks/events").Once()
-		configMock.EXPECT().GetString("goraveler.api_token").Return("token").Once()
-		configMock.EXPECT().GetString("goraveler.workspace").Return("/tmp/ws").Once()
-		configMock.EXPECT().GetString("goraveler.allowed_senders").Return("").Once()
-	}
 
-	first := NewService()
-	second := NewService()
+	configMock.EXPECT().GetString("goraveler.allowed_senders").Return("  ,  ").Once()
 
-	// Two NewService-built Services share the package guard, so the warning
-	// fires once (the log mock expects a single Warning).
-	require.True(t, first.allowed("anyone"))
-	require.True(t, second.allowed("someone"))
+	service, err := NewService()
+	require.Nil(t, service)
+	require.EqualError(t, err, "goraveler: GORAVELER_ALLOWED_SENDERS must not be empty")
 
 	configMock.AssertExpectations(t)
 }
 
+func TestServiceBaseURLTrimsTrailingSlash(t *testing.T) {
+	service := newTestService(&fakeRouter{}, &fakeDispatcher{}, &fakeRetry{}, &fakeHandleStore{}, &fakeCheckouter{}, testConfig{
+		baseURL:        "http://relay.test/webhooks/events/",
+		apiToken:       "token",
+		workspace:      "/tmp/ws",
+		allowedSenders: parseSenders("bowen"),
+	})
+	require.Equal(t, "http://relay.test/webhooks/events", service.eventsURL)
+}
+
 func TestServiceAllowedSenders(t *testing.T) {
-	factory := mock.Factory()
-	logMock := mockslog.NewLog(t)
-	factory.App().EXPECT().MakeLog().Return(logMock).Once()
-	logMock.EXPECT().Warning("goraveler: GORAVELER_ALLOWED_SENDERS is empty; any sender may trigger a run").Once()
+	service := newTestService(&fakeRouter{}, &fakeDispatcher{}, &fakeRetry{}, &fakeHandleStore{}, &fakeCheckouter{}, relayConfigSenders("token", "/tmp/ws", "Bowen, alice"))
 
-	// One guard shared by both Services, mirroring the process-wide guard used
-	// by NewService.
-	warnOnce := &sync.Once{}
-
-	service := newService(&fakeRouter{}, &fakeDispatcher{}, &fakeRetry{}, &fakeHandleStore{}, warnOnce, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
-
-	// An empty allowlist allows everyone and warns exactly once across Services.
-	require.True(t, service.allowed("anyone"))
-	require.True(t, service.allowed("anyone else"))
-
-	second := newService(&fakeRouter{}, &fakeDispatcher{}, &fakeRetry{}, &fakeHandleStore{}, warnOnce, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
-	require.True(t, second.allowed("someone")) // no second Warning expected
-
-	allowed := newService(&fakeRouter{}, &fakeDispatcher{}, &fakeRetry{}, &fakeHandleStore{}, &sync.Once{}, &fakeCheckouter{}, relayConfigSenders("token", "/tmp/ws", "Bowen, alice"))
-	require.True(t, allowed.allowed("bowen"))
-	require.True(t, allowed.allowed("BOWEN"))
-	require.True(t, allowed.allowed("Alice"))
-	require.False(t, allowed.allowed("mallory"))
+	require.True(t, service.allowed("bowen"))
+	require.True(t, service.allowed("BOWEN"))
+	require.True(t, service.allowed("Alice"))
+	require.False(t, service.allowed("mallory"))
 }
 
 func TestServicePollSkipsDisallowedSender(t *testing.T) {
@@ -670,7 +658,7 @@ func TestServicePollSkipsDisallowedSender(t *testing.T) {
 	dispatcher := &fakeDispatcher{}
 	retry := &fakeRetry{exceeded: map[string]bool{}}
 
-	service := newService(router, dispatcher, retry, &fakeHandleStore{}, &sync.Once{}, &fakeCheckouter{}, relayConfigSenders("token", "/tmp/ws", "bowen"))
+	service := newTestService(router, dispatcher, retry, &fakeHandleStore{}, &fakeCheckouter{}, relayConfigSenders("token", "/tmp/ws", "alice"))
 	service.Poll(context.Background())
 
 	// The skipped event is still acknowledged so it does not block the page.
@@ -703,7 +691,7 @@ func TestServicePollDispatchesAllowedSender(t *testing.T) {
 	dispatcher := &fakeDispatcher{}
 	retry := &fakeRetry{exceeded: map[string]bool{}}
 
-	service := newService(router, dispatcher, retry, &fakeHandleStore{}, &sync.Once{}, &fakeCheckouter{}, relayConfigSenders("token", "/tmp/ws", "bowen"))
+	service := newTestService(router, dispatcher, retry, &fakeHandleStore{}, &fakeCheckouter{}, relayConfigSenders("token", "/tmp/ws", "bowen"))
 	service.Poll(context.Background())
 
 	require.Len(t, dispatcher.calls, 1)
@@ -733,7 +721,7 @@ func TestServicePollSkipsAlreadyHandledEvent(t *testing.T) {
 	dispatcher := &fakeDispatcher{}
 	retry := &fakeRetry{exceeded: map[string]bool{}}
 
-	service := newService(&fakeRouter{agent: agentReview}, dispatcher, retry, handles, &sync.Once{}, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	service := newTestService(&fakeRouter{agent: agentReview}, dispatcher, retry, handles, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
 	// The already-handled event is skipped but still acknowledged.
@@ -763,7 +751,7 @@ func TestServicePollMarksHandledOnSuccess(t *testing.T) {
 	handles := &fakeHandleStore{handled: map[string]bool{}}
 	retry := &fakeRetry{exceeded: map[string]bool{}}
 
-	service := newService(&fakeRouter{agent: agentReview}, &fakeDispatcher{}, retry, handles, &sync.Once{}, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
+	service := newTestService(&fakeRouter{agent: agentReview}, &fakeDispatcher{}, retry, handles, &fakeCheckouter{}, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
 
 	require.Equal(t, []string{"d-1"}, handles.marked)
@@ -859,87 +847,4 @@ func TestServicePollSkipsNonActionableAction(t *testing.T) {
 func TestRetryKey(t *testing.T) {
 	require.Equal(t, "d-1", retryKey(&event{ID: 7, DeliveryID: "d-1"}))
 	require.Equal(t, "7", retryKey(&event{ID: 7}))
-}
-
-func TestCacheRetryTrackerRecordFailure(t *testing.T) {
-	key := attemptsKey("d-1")
-	cacheMock := mock.Factory().Cache()
-
-	cacheMock.EXPECT().GetInt(key, 0).Return(0).Once()
-	cacheMock.EXPECT().Put(key, 1, attemptsTTL).Return(nil).Once()
-	cacheMock.EXPECT().GetInt(key, 0).Return(1).Once()
-	cacheMock.EXPECT().Put(key, 2, attemptsTTL).Return(nil).Once()
-	cacheMock.EXPECT().GetInt(key, 0).Return(2).Once()
-	cacheMock.EXPECT().Put(key, 3, attemptsTTL).Return(nil).Once()
-
-	tracker := newCacheRetryTracker()
-	require.False(t, tracker.RecordFailure("d-1"))
-	require.False(t, tracker.RecordFailure("d-1"))
-	require.True(t, tracker.RecordFailure("d-1"))
-
-	cacheMock.AssertExpectations(t)
-}
-
-func TestCacheRetryTrackerKeepsEventWhenPutFails(t *testing.T) {
-	key := attemptsKey("d-1")
-	factory := mock.Factory()
-	factory.Log()
-	cacheMock := factory.Cache()
-	cacheMock.EXPECT().GetInt(key, 0).Return(0).Once()
-	cacheMock.EXPECT().Put(key, 1, attemptsTTL).Return(errors.New("cache down")).Once()
-
-	require.False(t, newCacheRetryTracker().RecordFailure("d-1"))
-
-	cacheMock.AssertExpectations(t)
-}
-
-func TestCacheRetryTrackerReset(t *testing.T) {
-	key := attemptsKey("d-1")
-	cacheMock := mock.Factory().Cache()
-	cacheMock.EXPECT().Forget(key).Return(true).Once()
-
-	newCacheRetryTracker().Reset("d-1")
-
-	cacheMock.AssertExpectations(t)
-}
-
-func TestCacheRetryTrackerSkipsEmptyDeliveryID(t *testing.T) {
-	// No cache mock is registered: the tracker must not touch the cache.
-	tracker := newCacheRetryTracker()
-
-	require.False(t, tracker.RecordFailure(""))
-	tracker.Reset("")
-}
-
-func TestCacheHandleStore(t *testing.T) {
-	key := handledKey("d-1")
-	cacheMock := mock.Factory().Cache()
-	cacheMock.EXPECT().Has(key).Return(true).Once()
-	cacheMock.EXPECT().Put(key, true, handledTTL).Return(nil).Once()
-
-	store := newCacheHandleStore()
-	require.True(t, store.Has("d-1"))
-	store.Mark("d-1")
-
-	cacheMock.AssertExpectations(t)
-}
-
-func TestCacheHandleStoreSkipsEmptyKey(t *testing.T) {
-	// No cache mock is registered: an empty key must not touch the cache.
-	store := newCacheHandleStore()
-
-	require.False(t, store.Has(""))
-	store.Mark("")
-}
-
-func TestCacheHandleStoreLogsPutError(t *testing.T) {
-	key := handledKey("d-1")
-	factory := mock.Factory()
-	factory.Log()
-	cacheMock := factory.Cache()
-	cacheMock.EXPECT().Put(key, true, handledTTL).Return(errors.New("cache down")).Once()
-
-	newCacheHandleStore().Mark("d-1")
-
-	cacheMock.AssertExpectations(t)
 }

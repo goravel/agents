@@ -2,6 +2,7 @@ package goraveler
 
 import (
 	"context"
+	"errors"
 	"strconv"
 	"strings"
 	"sync"
@@ -64,86 +65,44 @@ type Service struct {
 	checkouts  checkouter
 	retry      retryTracker
 	handles    handleStore
-	// warnOnce guards the allow-all warning. NewService passes one shared
-	// process-wide guard so the warning fires once per process, not per tick.
-	warnOnce *sync.Once
 
 	apiToken string
 	// workspaceRoot is the symlink-resolved workspace root.
 	workspaceRoot string
 	eventsURL     string
 
-	// allowedSenders, when non-empty, restricts which GitHub senders may
-	// trigger an agent run (GORAVELER_ALLOWED_SENDERS). An empty set allows
-	// every sender.
+	// allowedSenders restricts which GitHub senders may trigger an agent run
+	// (GORAVELER_ALLOWED_SENDERS). It is validated non-empty in NewService.
 	allowedSenders map[string]struct{}
 }
 
-// serviceConfig groups the relay-facing settings so they cannot be transposed.
-type serviceConfig struct {
-	baseURL   string
-	apiToken  string
-	workspace string
-	// allowedSenders, when non-empty, restricts which GitHub senders may
-	// trigger an agent run; keys are lowercased. An empty set allows every
-	// sender.
-	allowedSenders map[string]struct{}
-}
-
-// allowAllWarning is the process-wide guard for the allow-all warning.
-var allowAllWarning = &sync.Once{}
-
-// NewService builds a Service from the application configuration.
-func NewService() *Service {
+// NewService wires a Service from application configuration. It fails when
+// GORAVELER_ALLOWED_SENDERS is empty, since running with no allowlist would let
+// any GitHub sender trigger agent runs.
+func NewService() (*Service, error) {
 	config := facades.Config()
 
-	return newService(
-		newAIRouter(),
-		newOpencodeDispatcher(),
-		newCacheRetryTracker(),
-		newCacheHandleStore(),
-		allowAllWarning,
-		newGitCheckouter(),
-		serviceConfig{
-			baseURL:        config.GetString("goraveler.base_url"),
-			apiToken:       config.GetString("goraveler.api_token"),
-			workspace:      config.GetString("goraveler.workspace"),
-			allowedSenders: parseSenders(config.GetString("goraveler.allowed_senders")),
-		},
-	)
-}
-
-// newService is the shared constructor used by NewService and by tests; it wires
-// a Service from explicit dependencies.
-func newService(router agentRouter, dispatcher dispatcher, retry retryTracker, handles handleStore, warnOnce *sync.Once, checkouts checkouter, cfg serviceConfig) *Service {
-	return &Service{
-		router:         router,
-		dispatcher:     dispatcher,
-		checkouts:      checkouts,
-		retry:          retry,
-		handles:        handles,
-		warnOnce:       warnOnce,
-		apiToken:       cfg.apiToken,
-		workspaceRoot:  resolveWorkspace(cfg.workspace),
-		eventsURL:      strings.TrimRight(cfg.baseURL, "/"),
-		allowedSenders: cfg.allowedSenders,
+	senders := parseSenders(config.GetString("goraveler.allowed_senders"))
+	if len(senders) == 0 {
+		return nil, errors.New("goraveler: GORAVELER_ALLOWED_SENDERS must not be empty")
 	}
+
+	return &Service{
+		router:         newAIRouter(),
+		dispatcher:     newOpencodeDispatcher(),
+		checkouts:      newGitCheckouter(),
+		retry:          newCacheRetryTracker(),
+		handles:        newCacheHandleStore(),
+		apiToken:       config.GetString("goraveler.api_token"),
+		workspaceRoot:  resolveWorkspace(config.GetString("goraveler.workspace")),
+		eventsURL:      strings.TrimRight(config.GetString("goraveler.base_url"), "/"),
+		allowedSenders: senders,
+	}, nil
 }
 
 // allowed reports whether the sender may trigger an agent run. Comparison is
-// case-insensitive; an empty allowlist allows every sender, warning once per
-// guard so operators notice the restriction is off.
+// case-insensitive; the allowlist is validated non-empty in NewService.
 func (s *Service) allowed(sender string) bool {
-	if len(s.allowedSenders) == 0 {
-		if s.warnOnce != nil {
-			s.warnOnce.Do(func() {
-				facades.Log().Warning("goraveler: GORAVELER_ALLOWED_SENDERS is empty; any sender may trigger a run")
-			})
-		}
-
-		return true
-	}
-
 	_, ok := s.allowedSenders[strings.ToLower(sender)]
 
 	return ok

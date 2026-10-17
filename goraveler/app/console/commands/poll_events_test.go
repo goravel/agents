@@ -36,3 +36,18 @@ func TestPollEventsHandle(t *testing.T) {
 	configMock.AssertExpectations(t)
 	httpMock.AssertExpectations(t)
 }
+
+func TestPollEventsHandleRejectsEmptySenders(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+
+	configMock := factory.Config()
+	configMock.EXPECT().GetString("goraveler.allowed_senders").Return("").Once()
+
+	// NewService returns before any HTTP call when the allowlist is empty, so no
+	// HTTP mock is registered: touching the client would fail this test.
+	command := &PollEvents{}
+	require.EqualError(t, command.Handle(nil), "goraveler: GORAVELER_ALLOWED_SENDERS must not be empty")
+
+	configMock.AssertExpectations(t)
+}
