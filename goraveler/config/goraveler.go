@@ -20,8 +20,8 @@ func init() {
 		// demand. Defaults to a `goraveler` directory under the system temp dir.
 		"workspace": config.Env("GORAVELER_WORKSPACE", filepath.Join(os.TempDir(), "goraveler")),
 
-		// Comma-separated GitHub senders allowed to trigger agent runs;
-		// empty allows every sender.
+		// Comma-separated GitHub senders allowed to trigger agent runs. Required:
+		// the poller refuses to run when this is empty.
 		"allowed_senders": config.Env("GORAVELER_ALLOWED_SENDERS", ""),
 	})
 }
