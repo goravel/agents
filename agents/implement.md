@@ -108,7 +108,7 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Should Fix.
 ## 5. Rules
 
 - Never edit code; only write under `/tmp/implement/`.
-- The implementation subagent is the `code` agent (mode `all`) — spawn it with `agent: "code"`. Never spawn the primary `review` agent. Use `subagents/go-review` and `subagents/pr` for the review and PR phases. Do not invent bare or alternate agent names; if the subagent tool returns "Unknown agent" or "cannot run as a subagent", retry with the exact IDs above.
+- Use `code` for implementation and `subagents/go-review` / `subagents/pr` for review and PR. Never spawn `review`.
 - Use foreground subagent calls and wait for each result.
 - Never exceed 5 rounds.
 - Commit each phase before reviewing it; diff only `"$PHASE_BASE"..HEAD`. Never review uncommitted work.
