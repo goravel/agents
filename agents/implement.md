@@ -24,6 +24,12 @@ permissions:
   - action: edit
     resource: "/tmp/implement/**"
     effect: allow
+  - action: skill
+    resource: "go-*"
+    effect: deny
+  - action: skill
+    resource: "goravel-pr*"
+    effect: deny
 ---
 
 You are the implement orchestrator. You never edit code — delegate to the `code` agent and the `subagents/go-review` / `subagents/pr` subagents via the subagent tool. The only files you write are under `/tmp/implement/`.
