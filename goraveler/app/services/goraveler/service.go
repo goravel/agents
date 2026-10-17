@@ -145,6 +145,12 @@ func (s *Service) Poll(ctx context.Context) {
 			continue
 		}
 
+		if !ev.dispatchable() {
+			facades.Log().Errorf("goraveler: skip event %d: unresolved identity", ev.ID)
+			toDelete = append(toDelete, ev.ID)
+			continue
+		}
+
 		if err := s.handle(ctx, ev, instruction); err != nil {
 			facades.Log().Errorf("goraveler: handle event %d: %v", ev.ID, err)
 			if !s.retry.RecordFailure(key) {
