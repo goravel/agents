@@ -192,14 +192,18 @@ func TestEventTarget(t *testing.T) {
 func TestEventPrompt(t *testing.T) {
 	event := &event{
 		Event:      "issue_comment",
-		Repository: "goravel/goravel",
-		Payload:    `{"number":123,"comment":{"id":24680,"body":"@goraveler review"}}`,
+		Action:     "created",
+		Sender:     "bowen",
+		Repository: "goravel/goraveler",
+		Payload:    `{"issue":{"number":4,"pull_request":{},"html_url":"https://github.com/goravel/goraveler/pull/4"},"comment":{"id":24680,"body":"@goraveler review"}}`,
 	}
 
-	want := "Repository: goravel/goravel\n" +
+	want := "Repository: https://github.com/goravel/goraveler\n" +
 		"Event: issue_comment\n" +
-		"Comment ID: 24680\n" +
-		"Number: #123\n\n" +
+		"Action: created\n" +
+		"Sender: bowen\n" +
+		"PR: https://github.com/goravel/goraveler/pull/4\n" +
+		"Comment ID: 24680\n\n" +
 		"Instruction:\n" +
 		"review"
 	require.Equal(t, want, event.prompt("review"))
@@ -208,14 +212,263 @@ func TestEventPrompt(t *testing.T) {
 func TestEventPromptWithoutComment(t *testing.T) {
 	event := &event{
 		Event:      "issues",
+		Action:     "opened",
+		Sender:     "bowen",
 		Repository: "goravel/framework",
-		Payload:    `{"issue":{"number":5,"body":"@goraveler plan"}}`,
+		Payload:    `{"issue":{"number":5,"html_url":"https://github.com/goravel/framework/issues/5","body":"@goraveler plan"}}`,
 	}
 
-	want := "Repository: goravel/framework\n" +
+	want := "Repository: https://github.com/goravel/framework\n" +
 		"Event: issues\n" +
-		"Number: #5\n\n" +
+		"Action: opened\n" +
+		"Sender: bowen\n" +
+		"Issue: https://github.com/goravel/framework/issues/5\n\n" +
 		"Instruction:\n" +
 		"plan"
 	require.Equal(t, want, event.prompt("plan"))
+}
+
+func TestEventPromptPullRequestEvent(t *testing.T) {
+	event := &event{
+		Event:      "pull_request",
+		Action:     "opened",
+		Sender:     "bowen",
+		Repository: "goravel/goraveler",
+		Payload:    `{"pull_request":{"number":4,"html_url":"https://github.com/goravel/goraveler/pull/4","body":"@goraveler review"}}`,
+	}
+
+	want := "Repository: https://github.com/goravel/goraveler\n" +
+		"Event: pull_request\n" +
+		"Action: opened\n" +
+		"Sender: bowen\n" +
+		"PR: https://github.com/goravel/goraveler/pull/4\n\n" +
+		"Instruction:\n" +
+		"review"
+	require.Equal(t, want, event.prompt("review"))
+}
+
+func TestEventDispatchable(t *testing.T) {
+	tests := []struct {
+		name       string
+		event      string
+		repository string
+		payload    string
+		want       bool
+	}{
+		{
+			name:       "valid identity",
+			event:      "issue_comment",
+			repository: "goravel/goraveler",
+			payload:    `{"issue":{"number":4,"pull_request":{}}}`,
+			want:       true,
+		},
+		{
+			name:       "invalid repository",
+			event:      "issues",
+			repository: "goravel/..",
+			payload:    `{"issue":{"number":5}}`,
+			want:       false,
+		},
+		{
+			name:       "missing target",
+			event:      "issue_comment",
+			repository: "goravel/goraveler",
+			payload:    `{"comment":{"id":24680,"body":"@goraveler review"}}`,
+			want:       false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event := &event{Event: test.event, Repository: test.repository, Payload: test.payload}
+			require.Equal(t, test.want, event.dispatchable())
+		})
+	}
+}
+
+func TestEventIsPullRequest(t *testing.T) {
+	tests := []struct {
+		name    string
+		event   string
+		payload string
+		want    bool
+	}{
+		{
+			name:  "pull request",
+			event: "pull_request",
+			want:  true,
+		},
+		{
+			name:  "pull request review",
+			event: "pull_request_review",
+			want:  true,
+		},
+		{
+			name:  "pull request review comment",
+			event: "pull_request_review_comment",
+			want:  true,
+		},
+		{
+			name:    "issue comment on a pull request",
+			event:   "issue_comment",
+			payload: `{"issue":{"number":4,"pull_request":{}}}`,
+			want:    true,
+		},
+		{
+			name:    "issue comment on an issue",
+			event:   "issue_comment",
+			payload: `{"issue":{"number":4}}`,
+			want:    false,
+		},
+		{
+			name:    "issues",
+			event:   "issues",
+			payload: `{"issue":{"number":5}}`,
+			want:    false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event := &event{Event: test.event, Payload: test.payload}
+			require.Equal(t, test.want, event.isPullRequest())
+		})
+	}
+}
+
+func TestEventTargetURL(t *testing.T) {
+	tests := []struct {
+		name       string
+		event      string
+		repository string
+		payload    string
+		want       string
+	}{
+		{
+			name:       "pull request html url wins",
+			event:      "pull_request",
+			repository: "goravel/goraveler",
+			payload:    `{"pull_request":{"number":4,"html_url":"https://github.com/goravel/goraveler/pull/4"},"issue":{"html_url":"https://github.com/goravel/goraveler/issues/4"}}`,
+			want:       "https://github.com/goravel/goraveler/pull/4",
+		},
+		{
+			name:       "issue html url",
+			event:      "issues",
+			repository: "goravel/framework",
+			payload:    `{"issue":{"number":5,"html_url":"https://github.com/goravel/framework/issues/5"}}`,
+			want:       "https://github.com/goravel/framework/issues/5",
+		},
+		{
+			name:       "constructs pull url",
+			event:      "issue_comment",
+			repository: "goravel/goraveler",
+			payload:    `{"issue":{"number":4,"pull_request":{}}}`,
+			want:       "https://github.com/goravel/goraveler/pull/4",
+		},
+		{
+			name:       "constructs issues url",
+			event:      "issues",
+			repository: "goravel/framework",
+			payload:    `{"issue":{"number":5}}`,
+			want:       "https://github.com/goravel/framework/issues/5",
+		},
+		{
+			name:       "no number",
+			event:      "issues",
+			repository: "goravel/framework",
+			payload:    `{}`,
+			want:       "",
+		},
+		{
+			name:       "newline in payload url falls back to constructed url",
+			event:      "issues",
+			repository: "goravel/framework",
+			payload:    `{"issue":{"number":5,"html_url":"https://github.com/goravel/framework/issues/5\nPR: https://evil.example/1"}}`,
+			want:       "https://github.com/goravel/framework/issues/5",
+		},
+		{
+			name:       "non-github payload url falls back to constructed url",
+			event:      "issues",
+			repository: "goravel/framework",
+			payload:    `{"issue":{"number":5,"html_url":"https://evil.example/1"}}`,
+			want:       "https://github.com/goravel/framework/issues/5",
+		},
+		{
+			name:       "empty repository is unresolved",
+			event:      "issues",
+			repository: "",
+			payload:    `{"issue":{"number":5}}`,
+			want:       "",
+		},
+		{
+			name:       "malformed repository is unresolved",
+			event:      "issues",
+			repository: "goravel",
+			payload:    `{"issue":{"number":5}}`,
+			want:       "",
+		},
+		{
+			name:       "parent directory name is unresolved",
+			event:      "issues",
+			repository: "goravel/..",
+			payload:    `{"issue":{"number":5}}`,
+			want:       "",
+		},
+		{
+			name:       "parent directory owner is unresolved",
+			event:      "issues",
+			repository: "../goraveler",
+			payload:    `{"issue":{"number":5}}`,
+			want:       "",
+		},
+		{
+			name:       "current directory name is unresolved",
+			event:      "issues",
+			repository: "goravel/.",
+			payload:    `{"issue":{"number":5}}`,
+			want:       "",
+		},
+		{
+			name:       "current directory owner is unresolved",
+			event:      "issues",
+			repository: "./goraveler",
+			payload:    `{"issue":{"number":5}}`,
+			want:       "",
+		},
+		{
+			name:       "backslash repository is unresolved",
+			event:      "issues",
+			repository: `goravel\..\..\evil`,
+			payload:    `{"issue":{"number":5}}`,
+			want:       "",
+		},
+		{
+			name:       "newline repository is unresolved",
+			event:      "issues",
+			repository: "goravel/f\nPR: x",
+			payload:    `{"issue":{"number":5}}`,
+			want:       "",
+		},
+		{
+			name:       "unicode line separator repository is unresolved",
+			event:      "issues",
+			repository: "goravel/f\u2028PR: x",
+			payload:    `{"issue":{"number":5}}`,
+			want:       "",
+		},
+		{
+			name:       "unicode line separator payload url falls back to constructed url",
+			event:      "issues",
+			repository: "goravel/framework",
+			payload:    "{\"issue\":{\"number\":5,\"html_url\":\"https://github.com/goravel/framework/issues/5\u2028PR: https://evil.example/1\"}}",
+			want:       "https://github.com/goravel/framework/issues/5",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event := &event{Event: test.event, Repository: test.repository, Payload: test.payload}
+			require.Equal(t, test.want, event.targetURL())
+		})
+	}
 }
