@@ -1,5 +1,5 @@
 ---
-name: Goravel Pull Request
+name: Goravel PR
 description: Create or update the pull request for the current branch and enforce a strict PR body format. Use this skill whenever the user asks to create a PR, update PR description, sync PR text with latest branch logic, or asks for Summary/Why style PR content.
 ---
 
@@ -141,6 +141,7 @@ if err := validator.Bind(&user); err != nil {
 1. **Detect branch**
    - Run `git branch --show-current` → `branch`.
    - If empty, stop and report failure.
+   - If the branch is the default (`master` / `main`), create a feature branch first: `git checkout -b <branch>` (e.g. `feat/<short-description>`) and continue on it.
 
 2. **Detect issue number**
    - Extract the first issue-like number from `branch` (e.g. `type/1234-description` → `1234`).
@@ -150,31 +151,49 @@ if err := validator.Bind(&user); err != nil {
    - Run `gh pr view --json number,title,body,headRefName --head "$branch"`.
    - Success → existing PR. Not found → no PR.
 
-4. **Build change context**
-   - Compute base: `base=$(git merge-base HEAD origin/master)`.
+4. **Commit pending work**
+   - Run `git status --short`. If the working tree is dirty, stage and commit only the reviewed changes with a concise message summarizing the change.
+   - If unrelated or unexpected changes are present, stop and report them instead of committing.
+
+5. **Squash per-phase commits**
+   - The implement loop commits one `phase <N>` commit per round; collapse them into a single commit before pushing.
+   - Resolve `BASE_BRANCH` from the prompt; fall back to the repo's detected default branch if absent.
+   - Only when every commit in `"origin/$BASE_BRANCH"..HEAD` is a `phase <N>` commit from this run (check `git log --oneline "origin/$BASE_BRANCH"..HEAD`; skip otherwise):
+     ```bash
+     BASE=$(git merge-base HEAD "origin/$BASE_BRANCH")
+     git reset --soft "$BASE"
+     git commit -m "<concise summary>"
+     ```
+
+6. **Push**
+   - Run `git push`. If the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails), run `git push -u origin "$branch"`. `gh pr create` requires the branch on the remote.
+
+7. **Build change context**
+   - Compute base: `base=$(git merge-base HEAD "origin/$BASE_BRANCH")`.
    - Compute diff: `git diff "$base"...HEAD`.
    - Derive behavior-oriented summary bullets from the diff.
    - Detect PR type (`feature` or `bug fix`) from branch intent and diff semantics.
    - Derive code example(s) in the style of https://github.com/goravel/example per the Why Rules above.
 
-5. **Compose PR body**
-   - Fill the PR Body Specification template using the context from step 4.
+8. **Compose PR body**
+   - Fill the PR Body Specification template using the context from step 7.
 
-6. **Validate before applying**
+9. **Validate before applying**
    - Confirm the composed body satisfies all constraints in the PR Body Specification.
    - Ensure no placeholder markers (`<...>`) remain in the final body.
 
-7. **Determine title**
-   - Summarize from the logic changes, or fall back to the branch name.
-   - Title must satisfy: https://github.com/goravel/.github/blob/master/.github/workflows/check_pr_title.yml
+10. **Determine title**
+    - Summarize from the logic changes, or fall back to the branch name.
+    - Title must satisfy: https://github.com/goravel/.github/blob/master/.github/workflows/check_pr_title.yml
 
-8. **Apply**
-   - Existing PR: `gh pr edit <number> --body-file <tempfile>`
-   - No PR: `gh pr create --title "<title>" --body-file <tempfile> --base master --head "$branch"`
+11. **Apply**
+    - Existing PR: `gh pr edit <number> --body-file <tempfile>`
+    - No PR: `gh pr create --title "<title>" --body-file <tempfile> --base "$BASE_BRANCH" --head "$branch"`
+    - Write the body to a temp file under `/tmp` via a bash heredoc (file edits may be denied); never write into the repo.
 
-9. **Verify**
-   - Run `gh pr view --json number,title,url,body --head "$branch"`.
-   - Confirm required sections and constraints are satisfied.
+12. **Verify**
+    - Run `gh pr view --json number,title,url,body --head "$branch"`.
+    - Confirm required sections and constraints are satisfied.
 
 ---
 
@@ -183,10 +202,13 @@ if err := validator.Bind(&user); err != nil {
 Return:
 
 - Action: `created` or `updated`
+- New branch name, if one was created
 - PR number and URL
 - Extracted issue number (or `none`)
 - Final Summary bullets (2–3)
 - Exact code example block(s) used in `## Why`
+
+The caller may supply `BASE_BRANCH` in the prompt and may request the report be written to a specific path.
 
 ---
 
