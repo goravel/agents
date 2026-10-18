@@ -283,7 +283,7 @@ func (e *event) pullRequestLink(payload *githubPayload) string {
 	case payload.Issue.PullRequest != nil && payload.Issue.HTMLURL != "":
 		return payload.Issue.HTMLURL
 	case isPullRequest(payload) && e.target() != 0:
-		return gitRemote + e.Repository + "/pull/" + strconv.Itoa(e.target())
+		return gitWebURL + e.Repository + "/pull/" + strconv.Itoa(e.target())
 	default:
 		return ""
 	}
@@ -298,7 +298,7 @@ func (e *event) issueLink(payload *githubPayload) string {
 		return payload.Issue.HTMLURL
 	}
 	if e.target() != 0 {
-		return gitRemote + e.Repository + "/issues/" + strconv.Itoa(e.target())
+		return gitWebURL + e.Repository + "/issues/" + strconv.Itoa(e.target())
 	}
 
 	return ""
@@ -318,6 +318,6 @@ func (e *event) commentLink(payload *githubPayload) string {
 		path = "pull"
 	}
 
-	return gitRemote + e.Repository + "/" + path + "/" +
+	return gitWebURL + e.Repository + "/" + path + "/" +
 		strconv.Itoa(e.target()) + "#issuecomment-" + strconv.FormatInt(payload.Comment.ID, 10)
 }
