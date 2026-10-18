@@ -97,14 +97,34 @@ const (
 	// cloneTimeout is the git clone timeout the checkouter applies.
 	cloneTimeout = 5 * time.Minute
 
-	// mentionPage is one GitHub issue comment containing the @goravel-agent
-	// mention.
-	mentionPage = `{"data":[
+	// shipIssuePage is one issue_comment on an issue in goravel/goravel whose
+	// instruction names the goravel/framework target repository.
+	shipIssuePage = `{"data":[
 		{"id":1,"delivery_id":"d-1","event":"issue_comment","action":"created",
 		 "repository":"goravel/goravel","sender":"bowen",
-		 "payload":"{\"number\":123,\"pull_request\":{\"number\":123,\"html_url\":\"https://github.com/goravel/goravel/pull/123\"},\"comment\":{\"id\":24680,\"html_url\":\"https://github.com/goravel/goravel/pull/123#issuecomment-24680\",\"body\":\"@goravel-agent review\"}}"}
+		 "payload":"{\"number\":123,\"issue\":{\"number\":123,\"html_url\":\"https://github.com/goravel/goravel/issues/123\",\"body\":\"Tracking issue\"},\"comment\":{\"id\":24680,\"html_url\":\"https://github.com/goravel/goravel/issues/123#issuecomment-24680\",\"body\":\"@goravel-agent ship this issue in goravel/framework\"}}"}
+	],"total":1,"page":1,"limit":50}`
+
+	// reviewPullRequestPage is one issue_comment on a pull request in
+	// goravel/framework.
+	reviewPullRequestPage = `{"data":[
+		{"id":1,"delivery_id":"d-1","event":"issue_comment","action":"created",
+		 "repository":"goravel/framework","sender":"bowen",
+		 "payload":"{\"number\":42,\"issue\":{\"number\":42,\"html_url\":\"https://github.com/goravel/framework/pull/42\",\"pull_request\":{\"html_url\":\"https://github.com/goravel/framework/pull/42\"},\"body\":\"A change\"},\"comment\":{\"id\":98765,\"html_url\":\"https://github.com/goravel/framework/pull/42#issuecomment-98765\",\"body\":\"@goravel-agent review\"}}"}
 	],"total":1,"page":1,"limit":50}`
 )
+
+// pollObservation is what one poll cycle observed at the process boundary: the
+// routed checkout it cloned, the opencode invocation it ran, and the
+// acknowledged event ids.
+type pollObservation struct {
+	cloneRemote  string
+	cloneDir     string
+	agent        string
+	prompt       string
+	acknowledged []string
+	lastError    string
+}
 
 type AgentPollTestSuite struct {
 	suite.Suite
@@ -115,11 +135,9 @@ func TestAgentPollTestSuite(t *testing.T) {
 	suite.Run(t, new(AgentPollTestSuite))
 }
 
-// TestPollDispatchesMention covers the happy path: receiving a `@goravel-agent
-// review` event routes an agent, runs opencode against the checkout and
-// acknowledges the event.
-func (s *AgentPollTestSuite) TestPollDispatchesMention() {
-	// Routing always goes through facades.AI, so require a configured provider.
+// requireAIProvider skips the test when no AI provider is configured, since
+// routing always goes through facades.AI.
+func (s *AgentPollTestSuite) requireAIProvider() {
 	provider := facades.Config().GetString("ai.default")
 	if provider == "" {
 		s.T().Skip("set AI_PROVIDER and DEEPSEEK_API_KEY to run this test")
@@ -127,9 +145,18 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 	if facades.Config().GetString("ai.providers."+provider+".key") == "" {
 		s.T().Skipf("set an API key for the %q AI provider to run this test", provider)
 	}
+}
 
-	// Relay returning the mention event.
-	r := &relay{events: mentionPage}
+// pollOnce runs one poll-events cycle against a single-event relay page. Only
+// the process boundary (the checkouter's git clone and the dispatcher's opencode
+// run) is mocked; the relay, the live AI router and every other layer are real.
+// The routed agent and repository are the live router's choice, so they are
+// captured rather than constrained here and asserted by each test.
+func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
+	s.requireAIProvider()
+
+	// Relay returning the event.
+	r := &relay{events: page}
 	srv := httptest.NewServer(r.handler())
 	s.T().Cleanup(srv.Close)
 
@@ -150,12 +177,18 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 	})
 	s.T().Cleanup(func() { facades.Config().Add("agent", originalConfig) })
 
+	observation := pollObservation{}
+
 	// The checkouter's git clone and the dispatcher's opencode run are the only
 	// external processes: mock both. Ensure claims the per-run directory before
-	// invoking git, so the clone callback only asserts it exists, and the agent
-	// name and target repository are chosen by the live AI, so accept any
-	// supported agent and any checkout under the workspace and only pin the
-	// parts of the prompt the poller controls itself.
+	// invoking git, so the clone callback only asserts it exists. The routed
+	// repository and agent are captured here and asserted per test.
+	//
+	// Captures happen in the Run callbacks, not the argument matchers: testify
+	// probes every same-method expectation by running its matchers against each
+	// call (findExpectedCall -> Arguments.Diff), so a matcher with a side effect
+	// would also fire for the other Run call. The callbacks only run on a real
+	// match, and the matchers stay pure predicates.
 	processMock := mocksprocess.NewProcess(s.T())
 	cloneResultMock := mocksprocess.NewResult(s.T())
 	resultMock := mocksprocess.NewResult(s.T())
@@ -165,11 +198,15 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 	processMock.EXPECT().
 		Run("git", "clone", "--depth", "1",
 			testifymock.MatchedBy(func(remote string) bool {
-				return strings.HasPrefix(remote, "git@github.com:goravel/")
+				return strings.HasPrefix(remote, "git@github.com:")
 			}),
 			testifymock.Anything).
 		Run(func(_ string, args ...string) {
-			s.Require().DirExists(args[len(args)-1])
+			// args = [clone, --depth, 1, <remote>, <dir>].
+			observation.cloneRemote = args[len(args)-2]
+			observation.cloneDir = args[len(args)-1]
+			s.Require().DirExists(observation.cloneDir)
+			s.Require().True(strings.HasPrefix(observation.cloneDir, resolved))
 		}).
 		Return(cloneResultMock).
 		Once()
@@ -191,19 +228,20 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 			"PATH="+os.Getenv("PATH"),
 			"HOME="+os.Getenv("HOME"),
 			"opencode", "run", "--agent",
-			testifymock.MatchedBy(func(agent string) bool {
-				return agent == "review" || agent == "ship" || agent == "implement"
-			}),
+			// The exact agent is asserted per test from the captured value; do
+			// not restate the routable list that agentIntroductions already owns.
+			testifymock.Anything,
 			"--",
 			testifymock.MatchedBy(func(prompt string) bool {
-				// Pin the parts the poller owns (the links from the payload and
-				// the instruction) while leaving the routed repository value to
-				// the live AI. The agent prompt omits the Repository line: the
-				// checkout's working directory implies the repository.
-				return !strings.HasPrefix(prompt, "Repository: ") &&
-					strings.Contains(prompt, "comment: https://github.com/goravel/goravel/pull/123#issuecomment-24680") &&
-					strings.Contains(prompt, "Instruction: review")
+				// The agent prompt omits the Repository line: the checkout's
+				// working directory implies the repository.
+				return !strings.HasPrefix(prompt, "Repository: ")
 			})).
+		Run(func(_ string, args ...string) {
+			// args = [-i, PATH=…, HOME=…, opencode, run, --agent, <agent>, --, <prompt>].
+			observation.agent = args[6]
+			observation.prompt = args[8]
+		}).
 		Return(resultMock).
 		Once()
 	resultMock.EXPECT().Failed().Return(false).Once()
@@ -234,7 +272,52 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 
 	s.Require().NoError(facades.Artisan().Call("poll-events"))
 
-	// The mention was dispatched and the event acknowledged through the relay.
-	s.Require().Equal([]string{"1"}, r.acknowledged(),
-		"poll-events did not acknowledge the event; last error: %s", recorder.lastError())
+	observation.acknowledged = r.acknowledged()
+	observation.lastError = recorder.lastError()
+
+	return observation
+}
+
+// TestPollShipsIssueMention covers a `@goravel-agent ship this issue in
+// goravel/framework` comment on an issue in goravel/goravel. The router is live,
+// so this asserts the poller's observable outcome of the router's decision: the
+// ship agent and a checkout of the routed goravel/framework repository (not the
+// comment's own repository), plus the issue and comment links and the
+// instruction.
+func (s *AgentPollTestSuite) TestPollShipsIssueMention() {
+	got := s.pollOnce(shipIssuePage)
+
+	s.Require().Empty(got.lastError)
+	s.Require().Equal([]string{"1"}, got.acknowledged,
+		"poll-events did not acknowledge the event; last error: %s", got.lastError)
+	s.Require().Equal("ship", got.agent,
+		"live router did not choose the ship agent (context: %s)", got.lastError)
+	s.Require().Equal("git@github.com:goravel/framework.git", got.cloneRemote)
+	s.Require().True(strings.HasPrefix(filepath.Base(got.cloneDir), "goravel-framework-"))
+	s.Require().Contains(got.prompt, "Issue: https://github.com/goravel/goravel/issues/123")
+	s.Require().Contains(got.prompt, "comment: https://github.com/goravel/goravel/issues/123#issuecomment-24680")
+	s.Require().Contains(got.prompt, "Instruction: ship this issue in goravel/framework")
+	s.Require().NotContains(got.prompt, "Repository:")
+	s.Require().NotContains(got.prompt, "PR:")
+}
+
+// TestPollReviewsPullRequest covers a `@goravel-agent review` comment on a pull
+// request in goravel/framework. The router is live, so this asserts the poller's
+// observable outcome: the review agent and a checkout of goravel/framework, plus
+// the PR and comment links and the instruction.
+func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
+	got := s.pollOnce(reviewPullRequestPage)
+
+	s.Require().Empty(got.lastError)
+	s.Require().Equal([]string{"1"}, got.acknowledged,
+		"poll-events did not acknowledge the event; last error: %s", got.lastError)
+	s.Require().Equal("review", got.agent,
+		"live router did not choose the review agent (context: %s)", got.lastError)
+	s.Require().Equal("git@github.com:goravel/framework.git", got.cloneRemote)
+	s.Require().True(strings.HasPrefix(filepath.Base(got.cloneDir), "goravel-framework-"))
+	s.Require().Contains(got.prompt, "PR: https://github.com/goravel/framework/pull/42")
+	s.Require().Contains(got.prompt, "comment: https://github.com/goravel/framework/pull/42#issuecomment-98765")
+	s.Require().Contains(got.prompt, "Instruction: review")
+	s.Require().NotContains(got.prompt, "Repository:")
+	s.Require().NotContains(got.prompt, "Issue:")
 }
