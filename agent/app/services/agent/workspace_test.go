@@ -37,7 +37,7 @@ func TestGitCheckouterEnsureClonesMissingDir(t *testing.T) {
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Timeout(cloneTimeout).Return(processMock).Once()
 	processMock.EXPECT().
-		Run("git", "clone", "--depth", "1", "https://github.com/goravel/goravel.git", testifymock.Anything).
+		Run("git", "clone", "--depth", "1", "git@github.com:goravel/goravel.git", testifymock.Anything).
 		Run(func(_ string, args ...string) {
 			staging = args[len(args)-1]
 			// git clones into the staging directory Ensure created.
@@ -69,7 +69,7 @@ func TestGitCheckouterEnsureCloneFailure(t *testing.T) {
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Timeout(cloneTimeout).Return(processMock).Once()
 	processMock.EXPECT().
-		Run("git", "clone", "--depth", "1", "https://github.com/goravel/goravel.git", testifymock.Anything).
+		Run("git", "clone", "--depth", "1", "git@github.com:goravel/goravel.git", testifymock.Anything).
 		Run(func(_ string, args ...string) {
 			staging = args[len(args)-1]
 			// A failed clone can leave the staging directory behind.
@@ -104,7 +104,7 @@ func TestGitCheckouterEnsureRenameFailure(t *testing.T) {
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Timeout(cloneTimeout).Return(processMock).Once()
 	processMock.EXPECT().
-		Run("git", "clone", "--depth", "1", "https://github.com/goravel/goravel.git", testifymock.Anything).
+		Run("git", "clone", "--depth", "1", "git@github.com:goravel/goravel.git", testifymock.Anything).
 		Run(func(_ string, args ...string) {
 			// git reports success but leaves no staging directory, so the rename
 			// into place fails.

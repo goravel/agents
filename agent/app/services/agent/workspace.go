@@ -13,8 +13,12 @@ import (
 )
 
 const (
-	// gitRemote is the clone URL prefix for GitHub repositories.
-	gitRemote = "https://github.com/"
+	// gitWebURL is the HTTPS base for human-facing GitHub links (pull requests,
+	// issues, comments). It is not used for cloning.
+	gitWebURL = "https://github.com/"
+	// gitCloneURL is the SSH remote prefix for clones; resolved by the runner's
+	// existing SSH configuration.
+	gitCloneURL = "git@github.com:"
 	// cloneDepth keeps only the tip commit; enough for review/plan/implement runs.
 	cloneDepth = "1"
 	// cloneTimeout caps a single clone.
@@ -60,7 +64,7 @@ func (c *gitCheckouter) Ensure(ctx context.Context, dir, repository string) erro
 	result := facades.Process().
 		WithContext(ctx).
 		Timeout(cloneTimeout).
-		Run("git", "clone", "--depth", cloneDepth, gitRemote+repository+".git", tmp)
+		Run("git", "clone", "--depth", cloneDepth, gitCloneURL+repository+".git", tmp)
 	if result.Failed() {
 		_ = os.RemoveAll(tmp)
 		return fmt.Errorf("clone %s (exit %d): %s", repository, result.ExitCode(), strings.TrimSpace(result.ErrorOutput()))

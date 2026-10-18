@@ -165,7 +165,7 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 	processMock.EXPECT().
 		Run("git", "clone", "--depth", "1",
 			testifymock.MatchedBy(func(remote string) bool {
-				return strings.HasPrefix(remote, "https://github.com/goravel/")
+				return strings.HasPrefix(remote, "git@github.com:goravel/")
 			}),
 			testifymock.Anything).
 		Return(cloneResultMock).
