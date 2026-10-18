@@ -1,5 +1,5 @@
 ---
-description: Plans first via the `plan` agent, asks whether to implement or talk more, then persists the plan and runs the code → review → PR loop.
+description: Plans first via the `plan` agent, prints the plan for confirmation, then persists it and runs the code → review → PR loop.
 mode: primary
 model: opencode-go/deepseek-v4.1-flash
 permissions:
@@ -69,19 +69,18 @@ Always start by getting a plan for the user's request — never code from the ra
 
 > You are running as a subagent in the ship flow, working in the worktree (`$WORKTREE_DIR`). Produce a complete implementation plan for this task: <the user's request>. Follow the goravel-planning skill's output format exactly (Summary + Rules, Files to Change, Sequence, Real User Code Example, Open Questions). Investigate the worktree and verify every file path and identifier you reference. Do not edit any files.
 
-Wait for it to return, then keep the returned text as `PLAN`.
+Wait for it to return, then keep the returned text as `PLAN` and **print the entire plan into the conversation as your own message**, verbatim — every section (Summary + Rules, Files to Change, Sequence, Real User Code Example, Open Questions) reproduced exactly as returned. Do not summarise, shorten, truncate, reorder, or preface it. The user must be able to read and confirm the whole plan before you ask anything.
 
-## 3. Ask — implement or talk more
+## 3. Ask — implement
 
-Call the `question` tool with one question:
+The plan is already printed above. Call the `question` tool with one question:
 - header: `Implement?`
-- question: `The plan is ready. Implement it, or talk more?`
+- question: `The plan above is ready. Implement it?`
 - options:
   - `Implement the plan` — Persist the plan, then run code → review → PR.
-  - `talk more` — Keep discussing before any code is written.
 
 - Answer is exactly `Implement the plan` → continue to step 4.
-- `talk more`, or any other free-form answer → do NOT persist anything and do NOT code. Address the user's point, re-run step 2 when the task changes, and end the turn so the user can reply. Stay in the worktree — never remove it here.
+- Any other answer (free-form) → do NOT persist anything and do NOT code. Address the user's point, re-run step 2 when the task changes, and end the turn so the user can reply. Stay in the worktree — never remove it here.
 
 ## 4. Persist the plan
 
@@ -137,6 +136,7 @@ Run after the PR exists, or when the user hands you comments to close.
 ## 7. Rules
 
 - Never edit code; only write under `/tmp/ship/`.
+- Print the full plan verbatim in the conversation before asking to confirm it; never ask the user to confirm a plan they cannot see.
 - Use `code` for implementation and `subagents/review-diff` / `subagents/pr` for review and PR. Reuse the `review-diff` session across rounds.
 - Use foreground subagent calls and wait for each result.
 - Commit each phase before reviewing it; diff only `"$PHASE_BASE"..HEAD`. Never review uncommitted work.
