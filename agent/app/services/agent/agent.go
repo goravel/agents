@@ -126,7 +126,7 @@ func newOpencodeDispatcher() *opencodeDispatcher {
 // Run executes `opencode run --agent <agent> -- <prompt>` in the request's
 // directory with a scrubbed environment. The agent is steered by untrusted
 // comment text, so it only receives PATH and HOME; the poller's secrets
-// (AGENT_API_TOKEN, OPENAI_*, database credentials, ...) are not inherited.
+// (AGENT_API_TOKEN, DEEPSEEK_*, database credentials, ...) are not inherited.
 // Output is not buffered in full: only a bounded prefix of stderr is captured
 // (and later escaped) for the error message, and the live stream is suppressed.
 func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) error {
