@@ -20,11 +20,11 @@ func init() {
 		// A variety of drivers are available, and each provider may also
 		// configure the models available to your application.
 		"providers": map[string]any{
-			"openai": map[string]any{
-				"key": config.Env("OPENAI_API_KEY", ""),
+			"deepseek": map[string]any{
+				"key": config.Env("DEEPSEEK_API_KEY", ""),
 				"models": map[string]any{
 					"text": map[string]any{
-						"default": "",
+						"default": config.Env("DEEPSEEK_MODEL", "deepseek-flash"),
 					},
 					"audio": map[string]any{
 						"default": "",
@@ -37,9 +37,10 @@ func init() {
 					},
 				},
 				"failover": map[string][]string{},
-				"url":      config.Env("OPENAI_BASE_URL", ""),
+				"url":      config.Env("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+				// DeepSeek exposes an OpenAI-compatible API, so it runs on the openai driver.
 				"via": func() (ai.Provider, error) {
-					return openaifacades.OpenAI("openai")
+					return openaifacades.OpenAI("deepseek")
 				},
 			},
 		},

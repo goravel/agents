@@ -127,7 +127,7 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 	// Routing always goes through facades.AI, so require a configured provider.
 	provider := facades.Config().GetString("ai.default")
 	if provider == "" {
-		s.T().Skip("set AI_PROVIDER and OPENAI_API_KEY to run this test")
+		s.T().Skip("set AI_PROVIDER and DEEPSEEK_API_KEY to run this test")
 	}
 	if facades.Config().GetString("ai.providers."+provider+".key") == "" {
 		s.T().Skipf("set an API key for the %q AI provider to run this test", provider)
