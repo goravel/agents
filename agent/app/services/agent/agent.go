@@ -31,8 +31,10 @@ const (
 // AgentRouter chooses which agent should handle an instruction.
 type AgentRouter interface {
 	// Route decides which agent should handle the prompt and which repository
-	// (owner/name) it should run against. An empty repository means "use the
-	// source repository".
+	// (owner/name) it should run against. The prompt is untrusted comment text
+	// and may name the repository to work on; routing runs only for allowlisted
+	// senders, so naming a different repository is intended, not an escalation.
+	// An empty repository means "use the source repository".
 	Route(ctx context.Context, prompt string) (string, string, error)
 }
 
@@ -80,30 +82,46 @@ func (r *aiRouter) Route(ctx context.Context, prompt string) (string, string, er
 		return "", "", fmt.Errorf("route prompt: %w", err)
 	}
 
-	return parseRoute(response.Text())
-}
-
-// parseRoute maps the AI reply to an agent name and an optional repository. The
-// reply is `<agent> <owner/repo>`; the agent is required and normalised, the
-// repository is taken verbatim (minus decoration) so the AI decides the target.
-// An empty repository means "use the source repository".
-func parseRoute(reply string) (string, string, error) {
-	fields := strings.Fields(reply)
-	if len(fields) == 0 {
-		return "", "", errors.New("empty reply")
-	}
-
-	agent, err := parseAgent(fields[0])
+	agent, repository, rejected, err := parseReply(response.Text())
 	if err != nil {
 		return "", "", err
 	}
-
-	var repository string
-	if len(fields) > 1 {
-		repository = strings.Trim(fields[1], replyDecoration)
+	if rejected != "" {
+		facades.Log().Infof("agent: route: ignoring repository %q from the reply: not a bare owner/name; using the source repository", rejected)
 	}
 
 	return agent, repository, nil
+}
+
+// parseReply maps the AI reply to an agent name and an optional repository. The
+// reply is `<agent> <owner/repo>`; the agent is required and normalised, and the
+// repository token is reduced to a bare owner/name (decoration, a GitHub URL
+// prefix and a trailing .git are stripped). A token that is not a bare
+// owner/name is dropped, so an empty repository — meaning "use the source
+// repository" — is returned rather than a bogus clone target. The rejected
+// result carries that dropped token, and is empty only when the reply named no
+// repository, so the caller can log every unusable target.
+func parseReply(reply string) (agent, repository, rejected string, err error) {
+	fields := strings.Fields(reply)
+	if len(fields) == 0 {
+		return "", "", "", errors.New("empty reply")
+	}
+
+	agent, err = parseAgent(fields[0])
+	if err != nil {
+		return "", "", "", err
+	}
+
+	if len(fields) == 1 {
+		return agent, "", "", nil
+	}
+
+	repository, ok := parseRepository(fields[1])
+	if !ok {
+		return agent, "", fields[1], nil
+	}
+
+	return agent, repository, "", nil
 }
 
 // parseAgent maps a single token to a supported agent name, tolerating
@@ -118,17 +136,86 @@ func parseAgent(token string) (string, error) {
 	return "", fmt.Errorf("unrecognised agent reply %q", token)
 }
 
+// repositoryURLPrefixes are the GitHub URL prefixes stripped from a routed
+// repository token so only a bare owner/name reaches the checkout. They reuse
+// the workspace's clone and web bases so the strip list cannot drift from the
+// checkout.
+var repositoryURLPrefixes = []string{
+	gitWebURL,
+	"http://github.com/",
+	gitCloneURL,
+}
+
+// parseRepository reduces a routed repository token to a bare owner/name: it
+// trims surrounding decoration, unwraps a GitHub URL prefix, trims a trailing
+// slash and then a trailing .git, and finally requires exactly `owner/name`. The
+// bool reports whether the token was reduced; false means the reply named
+// something that is not a bare owner/name, so the caller falls back to the
+// source repository (an empty token) rather than cloning a bogus target. A
+// well-formed repository named by the untrusted instruction is returned as-is:
+// cross-repository routing is intended, gated by the allowlisted-sender check
+// that runs before routing.
+func parseRepository(token string) (string, bool) {
+	token = strings.Trim(strings.TrimSpace(token), replyDecoration)
+	for _, prefix := range repositoryURLPrefixes {
+		if rest, ok := strings.CutPrefix(token, prefix); ok {
+			token = rest
+			break
+		}
+	}
+	token = strings.TrimSuffix(strings.TrimSuffix(token, "/"), ".git")
+
+	if !isRepositoryName(token) {
+		return "", false
+	}
+
+	return token, true
+}
+
+// isRepositoryName reports whether token is a bare owner/name: exactly two
+// non-empty slash-separated parts of GitHub name characters.
+func isRepositoryName(token string) bool {
+	owner, name, ok := strings.Cut(token, "/")
+	if !ok || name == "" || strings.Contains(name, "/") {
+		return false
+	}
+
+	return isNamePart(owner) && isNamePart(name)
+}
+
+// isNamePart reports whether part is a plausible GitHub owner or repository
+// name: ASCII letters, digits, underscore, hyphen or dot, carrying at least one
+// letter or digit so a dots-only part cannot reach checkout.
+func isNamePart(part string) bool {
+	if part == "" || !hasLetterOrDigit(part) {
+		return false
+	}
+
+	for i := 0; i < len(part); i++ {
+		b := part[i]
+		if isHandleByte(b) || b == '.' {
+			continue
+		}
+
+		return false
+	}
+
+	return true
+}
+
 // routerAgent is the AI agent used to classify instructions.
 type routerAgent struct{}
 
 // Instructions returns the system prompt that constrains the reply to one of
-// the supported agent names and the repository to work on.
+// the supported agent names and the repository to work on. The prompt gives the
+// repository named by the Instruction precedence over the Repository line, and
+// requires the reply to be a bare owner/name.
 func (routerAgent) Instructions() string {
 	names := slices.Sorted(maps.Keys(agentIntroductions))
 
 	var b strings.Builder
-	b.WriteString("Decide how to handle a GitHub mention. The " + repositoryLabel + " line and links are the source; ")
-	b.WriteString("reply with exactly two space-separated tokens: one agent from: ")
+	b.WriteString("Decide how to handle a GitHub mention. ")
+	b.WriteString("Reply with exactly two space-separated tokens: one agent from: ")
 	for i, name := range names {
 		if i > 0 {
 			b.WriteString(", ")
@@ -138,7 +225,12 @@ func (routerAgent) Instructions() string {
 		b.WriteString(agentIntroductions[name])
 		b.WriteString(")")
 	}
-	b.WriteString("; then the repository to work on as owner/name. Do not add any other text.")
+	b.WriteString("; then the repository to work on. ")
+	b.WriteString("The " + instructionLabel + " may name a repository, and when it does that repository is the one to work on, even when it differs from the " + repositoryLabel + " line. ")
+	b.WriteString("Only when the " + instructionLabel + " names no repository, or names something that is not a bare owner/name, do you use the " + repositoryLabel + " line. ")
+	b.WriteString("For example, with " + repositoryLabel + ": owner/source and " + instructionLabel + ": ship this issue in owner/target, reply: ship owner/target. ")
+	b.WriteString("Reply with only the agent and the repository as a bare owner/name (no scheme, no URL, no trailing .git, no markdown); never repeat the instruction text. ")
+	b.WriteString("Do not add any other text.")
 
 	return b.String()
 }

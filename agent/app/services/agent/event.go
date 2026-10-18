@@ -228,7 +228,11 @@ const (
 
 // prompt builds the context block the router sees: the source repository line,
 // the PR/Issue/comment links, and the untrusted instruction. The fixed lines are
-// emitted before the untrusted instruction so a commenter cannot spoof them.
+// emitted before the untrusted instruction so its text is read as the
+// instruction, not as one of the trusted lines. The instruction may still name
+// the repository to work on, which the router honours (see
+// routerAgent.Instructions): routing runs only for allowlisted senders
+// (AGENT_ALLOWED_SENDERS), which is where the comment text is trusted.
 func (e *event) prompt(instruction, repository string) string {
 	return repositoryLabel + ": " + repository + "\n" + e.contextBlock(instruction)
 }

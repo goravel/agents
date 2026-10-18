@@ -18,13 +18,14 @@ import (
 	"goravel/app/services/agent/dispatch"
 )
 
-func TestParseRoute(t *testing.T) {
+func TestParseReply(t *testing.T) {
 	tests := []struct {
-		name      string
-		reply     string
-		wantAgent string
-		wantRepo  string
-		wantErr   bool
+		name         string
+		reply        string
+		wantAgent    string
+		wantRepo     string
+		wantRejected string
+		wantErr      bool
 	}{
 		{name: "review", reply: "review", wantAgent: agentReview},
 		{name: "ship with spaces", reply: "  SHIP ", wantAgent: agentShip},
@@ -55,18 +56,126 @@ func TestParseRoute(t *testing.T) {
 			wantRepo:  "goravel/framework",
 		},
 		{
-			// There is no pattern gate: an escaping repository is passed
-			// through, with only surrounding decoration trimmed. The path
-			// safety net is checkoutName at checkout time.
-			name:      "escaping repository is not validated",
-			reply:     "ship ../etc",
+			name:      "dotted repository name",
+			reply:     "ship goravel/repo.github.io",
 			wantAgent: agentShip,
-			wantRepo:  "/etc",
+			wantRepo:  "goravel/repo.github.io",
 		},
 		{
-			name:      "empty repository token",
-			reply:     "implement .",
-			wantAgent: agentImplement,
+			name:      "dotted name",
+			reply:     "ship goravel/.github",
+			wantAgent: agentShip,
+			wantRepo:  "goravel/.github",
+		},
+		{
+			name:      "hyphen and underscore in names",
+			reply:     "ship my-org/my_repo",
+			wantAgent: agentShip,
+			wantRepo:  "my-org/my_repo",
+		},
+		{
+			// A token that is not a bare owner/name is dropped so the caller
+			// falls back to the source repository instead of cloning a bogus
+			// target. The dropped token is reported so Route can log it.
+			name:         "non owner/name token falls back to source",
+			reply:        "ship ../etc",
+			wantAgent:    agentShip,
+			wantRejected: "../etc",
+		},
+		{
+			name:         "bare word token falls back to source",
+			reply:        "ship this issue in the goravel repo",
+			wantAgent:    agentShip,
+			wantRejected: "this",
+		},
+		{
+			name:      "repository with trailing .git",
+			reply:     "ship goravel/framework.git",
+			wantAgent: agentShip,
+			wantRepo:  "goravel/framework",
+		},
+		{
+			name:      "repository as https URL",
+			reply:     "ship https://github.com/goravel/framework",
+			wantAgent: agentShip,
+			wantRepo:  "goravel/framework",
+		},
+		{
+			name:      "repository as https URL with .git",
+			reply:     "ship https://github.com/goravel/framework.git",
+			wantAgent: agentShip,
+			wantRepo:  "goravel/framework",
+		},
+		{
+			name:      "repository as ssh URL",
+			reply:     "ship git@github.com:goravel/framework.git",
+			wantAgent: agentShip,
+			wantRepo:  "goravel/framework",
+		},
+		{
+			name:      "https URL with trailing slash after .git",
+			reply:     "ship https://github.com/goravel/framework.git/",
+			wantAgent: agentShip,
+			wantRepo:  "goravel/framework",
+		},
+		{
+			name:      "repository with .git and trailing slash",
+			reply:     "ship goravel/framework.git/",
+			wantAgent: agentShip,
+			wantRepo:  "goravel/framework",
+		},
+		{
+			// Only the spellings above are reduced to a bare owner/name; other
+			// URL shapes are deliberately dropped so the run falls back to the
+			// source repository rather than cloning a bogus target.
+			name:         "uppercase scheme",
+			reply:        "ship HTTPS://github.com/goravel/framework",
+			wantAgent:    agentShip,
+			wantRejected: "HTTPS://github.com/goravel/framework",
+		},
+		{
+			name:         "www host",
+			reply:        "ship www.github.com/goravel/framework",
+			wantAgent:    agentShip,
+			wantRejected: "www.github.com/goravel/framework",
+		},
+		{
+			name:         "ssh scheme URL",
+			reply:        "ship ssh://git@github.com/goravel/framework",
+			wantAgent:    agentShip,
+			wantRejected: "ssh://git@github.com/goravel/framework",
+		},
+		{
+			name:         "scheme-less host",
+			reply:        "ship github.com/goravel/framework",
+			wantAgent:    agentShip,
+			wantRejected: "github.com/goravel/framework",
+		},
+		{
+			name:         "URL with a path",
+			reply:        "ship https://github.com/goravel/framework/tree/main",
+			wantAgent:    agentShip,
+			wantRejected: "https://github.com/goravel/framework/tree/main",
+		},
+		{
+			// A dots-only name is not a plausible repository, so it is dropped
+			// rather than handed to checkout as a bogus clone target.
+			name:         "dots-only name falls back to source",
+			reply:        "ship uwu/../..",
+			wantAgent:    agentShip,
+			wantRejected: "uwu/../..",
+		},
+		{
+			name:         "dots-only token falls back to source",
+			reply:        "ship uwu/..",
+			wantAgent:    agentShip,
+			wantRejected: "uwu/..",
+		},
+		{
+			name:         "empty repository token",
+			reply:        "implement .",
+			wantAgent:    agentImplement,
+			wantRejected: ".",
 		},
 		{name: "empty", reply: "", wantErr: true},
 		{name: "unrecognised", reply: "nonsense", wantErr: true},
@@ -75,7 +184,7 @@ func TestParseRoute(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			agent, repository, err := parseRoute(test.reply)
+			agent, repository, rejected, err := parseReply(test.reply)
 			if test.wantErr {
 				require.Error(t, err)
 				return
@@ -83,6 +192,7 @@ func TestParseRoute(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, test.wantAgent, agent)
 			require.Equal(t, test.wantRepo, repository)
+			require.Equal(t, test.wantRejected, rejected)
 		})
 	}
 }
@@ -91,12 +201,19 @@ func TestRouterAgentInstructions(t *testing.T) {
 	// The prompt is pinned exactly: the reply vocabulary must stay the agent
 	// names parseAgent accepts, followed by the repository to work on.
 	require.Equal(t,
-		"Decide how to handle a GitHub mention. The Repository line and links are the source; "+
-			"reply with exactly two space-separated tokens: one agent from: "+
+		"Decide how to handle a GitHub mention. "+
+			"Reply with exactly two space-separated tokens: one agent from: "+
 			"implement (implements a plan that is already provided, reviews the changes, and opens a pull request), "+
 			"review (reviews an existing GitHub pull request and reports findings), "+
 			"ship (plans the task first, then implements and drives it through review to a pull request); "+
-			"then the repository to work on as owner/name. Do not add any other text.",
+			"then the repository to work on. "+
+			"The Instruction may name a repository, and when it does that repository is the one to work on, "+
+			"even when it differs from the Repository line. "+
+			"Only when the Instruction names no repository, or names something that is not a bare owner/name, do you use the Repository line. "+
+			"For example, with Repository: owner/source and Instruction: ship this issue in owner/target, reply: ship owner/target. "+
+			"Reply with only the agent and the repository as a bare owner/name (no scheme, no URL, no trailing .git, no markdown); "+
+			"never repeat the instruction text. "+
+			"Do not add any other text.",
 		routerAgent{}.Instructions())
 }
 
@@ -116,6 +233,26 @@ func TestAIRouterRoute(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, agentReview, agent)
 	require.Equal(t, "goravel/framework", repository)
+	aiMock.AssertExpectations(t)
+}
+
+func TestAIRouterRouteRejectedRepository(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+	aiMock := factory.AI()
+	conversation := mocksai.NewConversation(t)
+	response := mocksai.NewAgentResponse(t)
+
+	aiMock.EXPECT().WithContext(testifymock.Anything).Return(aiMock).Once()
+	aiMock.EXPECT().Agent(routerAgent{}).Return(conversation, nil).Once()
+	conversation.EXPECT().Prompt("review this change").Return(response, nil).Once()
+	response.EXPECT().Text().Return("review this issue").Once()
+
+	router := newAIRouter()
+	agent, repository, err := router.Route(context.Background(), "review this change")
+	require.NoError(t, err)
+	require.Equal(t, agentReview, agent)
+	require.Empty(t, repository)
 	aiMock.AssertExpectations(t)
 }
 
