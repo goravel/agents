@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -17,9 +19,9 @@ import (
 )
 
 const (
-	agentReview    = "review"
-	agentPlan      = "plan"
+	agentShip      = "ship"
 	agentImplement = "implement"
+	agentReview    = "review"
 
 	// replyDecoration is the surrounding whitespace, punctuation and markdown
 	// stripped from the router's reply tokens before they are matched.
@@ -42,9 +44,15 @@ type Dispatcher interface {
 	Run(ctx context.Context, req dispatch.Request) error
 }
 
-// supportedAgents is the single source of truth for the agent names: the
-// parser's accepted set and the routing prompt are both derived from it.
-var supportedAgents = []string{agentReview, agentPlan, agentImplement}
+// agentIntroductions maps each routable agent to the one-line introduction the
+// AI facade uses to choose it. It is the single source of truth for the routable
+// set: the parser accepts exactly these keys and the routing prompt is built
+// from them, keyed through slices.Sorted so it stays deterministic.
+var agentIntroductions = map[string]string{
+	agentShip:      "plans the task first, then implements and drives it through review to a pull request",
+	agentImplement: "implements a plan that is already provided, reviews the changes, and opens a pull request",
+	agentReview:    "reviews an existing GitHub pull request and reports findings",
+}
 
 // aiRouter routes instructions to an agent using the configured AI provider.
 type aiRouter struct{}
@@ -103,10 +111,8 @@ func parseRoute(reply string) (string, string, error) {
 func parseAgent(token string) (string, error) {
 	normalized := strings.Trim(strings.ToLower(strings.TrimSpace(token)), replyDecoration)
 
-	for _, agent := range supportedAgents {
-		if normalized == agent {
-			return agent, nil
-		}
+	if _, ok := agentIntroductions[normalized]; ok {
+		return normalized, nil
 	}
 
 	return "", fmt.Errorf("unrecognised agent reply %q", token)
@@ -118,10 +124,23 @@ type routerAgent struct{}
 // Instructions returns the system prompt that constrains the reply to one of
 // the supported agent names and the repository to work on.
 func (routerAgent) Instructions() string {
-	return "Decide how to handle a GitHub mention. The " + repositoryLabel + " line and links are the source; " +
-		"reply with exactly two space-separated tokens: one agent from: " +
-		strings.Join(supportedAgents, ", ") +
-		"; then the repository to work on as owner/name. Do not add any other text."
+	names := slices.Sorted(maps.Keys(agentIntroductions))
+
+	var b strings.Builder
+	b.WriteString("Decide how to handle a GitHub mention. The " + repositoryLabel + " line and links are the source; ")
+	b.WriteString("reply with exactly two space-separated tokens: one agent from: ")
+	for i, name := range names {
+		if i > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString(name)
+		b.WriteString(" (")
+		b.WriteString(agentIntroductions[name])
+		b.WriteString(")")
+	}
+	b.WriteString("; then the repository to work on as owner/name. Do not add any other text.")
+
+	return b.String()
 }
 
 // Messages returns the prior conversation, which is empty for stateless routing.

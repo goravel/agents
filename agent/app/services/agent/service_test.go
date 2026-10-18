@@ -49,6 +49,9 @@ var relayQueryParams = map[string]string{
 	"limit":    "50",
 }
 
+// checkoutTime pins the injected clock so the per-run checkout name is stable.
+var checkoutTime = time.Date(2026, time.October, 18, 14, 32, 5, 0, time.UTC)
+
 // testConfig groups the relay-facing settings used to build a test Service.
 type testConfig struct {
 	baseURL        string
@@ -56,6 +59,7 @@ type testConfig struct {
 	workspace      string
 	mention        string
 	allowedSenders map[string]struct{}
+	now            func() time.Time
 }
 
 // newTestService wires a Service from explicit dependencies, mirroring NewService
@@ -72,6 +76,7 @@ func newTestService(router AgentRouter, dispatcher Dispatcher, retry RetryTracke
 		workspaceRoot:  resolveWorkspace(cfg.workspace),
 		eventsURL:      strings.TrimRight(cfg.baseURL, "/"),
 		allowedSenders: cfg.allowedSenders,
+		now:            cfg.now,
 	}
 }
 
@@ -83,6 +88,7 @@ func relayConfig(apiToken, workspace string) testConfig {
 		workspace:      workspace,
 		mention:        DefaultMention,
 		allowedSenders: parseSenders("bowen"),
+		now:            func() time.Time { return checkoutTime },
 	}
 }
 
@@ -150,15 +156,16 @@ func TestServicePollDispatchesMentionsAndDeletes(t *testing.T) {
 	// the routed target.
 	router.EXPECT().Route(testifymock.Anything, testifymock.MatchedBy(func(p string) bool {
 		return strings.Contains(p, "Repository: goravel/goravel") &&
-			strings.Contains(p, "Instruction:\nreview")
+			strings.Contains(p, "Instruction: review")
 	})).Return(agentReview, "goravel/goravel", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
-			return req.Dir == "/tmp/ws/goravel/goravel" &&
+			return req.Dir == runDir("/tmp/ws", "goravel/goravel", checkoutTime) &&
 				req.Agent == agentReview &&
-				strings.Contains(req.Prompt, "Repository: goravel/goravel")
+				!strings.Contains(req.Prompt, "Repository:") &&
+				strings.Contains(req.Prompt, "Instruction: review")
 		})).
 		Return(nil).
 		Once()
@@ -172,7 +179,7 @@ func TestServicePollDispatchesMentionsAndDeletes(t *testing.T) {
 
 	checkouts := mocksagent.NewCheckouter(t)
 	checkouts.EXPECT().
-		Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").
+		Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").
 		Return(nil).
 		Once()
 
@@ -209,7 +216,7 @@ func TestServicePollCloneError(t *testing.T) {
 
 	checkouts := mocksagent.NewCheckouter(t)
 	checkouts.EXPECT().
-		Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").
+		Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").
 		Return(errors.New("clone failed")).
 		Once()
 
@@ -252,7 +259,7 @@ func TestServicePollKeepsFailedEventWhenRetryNotExceeded(t *testing.T) {
 	handles.EXPECT().Has("d-1").Return(false).Once()
 
 	checkouts := mocksagent.NewCheckouter(t)
-	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+	checkouts.EXPECT().Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").Return(nil).Once()
 
 	service := newTestService(router, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
@@ -332,7 +339,7 @@ func TestServicePollDeletesWhenRetryExceeded(t *testing.T) {
 	handles.EXPECT().Mark("d-1").Once()
 
 	checkouts := mocksagent.NewCheckouter(t)
-	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+	checkouts.EXPECT().Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").Return(nil).Once()
 
 	service := newTestService(router, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
@@ -369,7 +376,7 @@ func TestServicePollHandlesDeleteError(t *testing.T) {
 	service, handles, checkouts := testService(t, router, dispatcher, retry)
 	handles.EXPECT().Has("d-1").Return(false).Once()
 	handles.EXPECT().Mark("d-1").Once()
-	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+	checkouts.EXPECT().Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").Return(nil).Once()
 
 	service.Poll(context.Background())
 
@@ -407,7 +414,7 @@ func TestServicePollHandlesDeleteFailureStatus(t *testing.T) {
 	service, handles, checkouts := testService(t, router, dispatcher, retry)
 	handles.EXPECT().Has("d-1").Return(false).Once()
 	handles.EXPECT().Mark("d-1").Once()
-	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+	checkouts.EXPECT().Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").Return(nil).Once()
 
 	service.Poll(context.Background())
 
@@ -624,6 +631,7 @@ func TestNewServiceReadsConfig(t *testing.T) {
 	require.Equal(t, "@bot", service.mention)
 	require.IsType(t, &cacheHandleStore{}, service.handles)
 	require.IsType(t, &gitCheckouter{}, service.checkouts)
+	require.NotNil(t, service.now)
 	require.True(t, service.allowed("bowen"))
 	require.True(t, service.allowed("alice"))
 	require.False(t, service.allowed("mallory"))
@@ -743,7 +751,7 @@ func TestServicePollDispatchesAllowedSender(t *testing.T) {
 	handles.EXPECT().Mark("d-1").Once()
 
 	checkouts := mocksagent.NewCheckouter(t)
-	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+	checkouts.EXPECT().Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").Return(nil).Once()
 
 	service := newTestService(router, dispatcher, retry, handles, checkouts, relayConfigSenders("token", "/tmp/ws", "bowen"))
 	service.Poll(context.Background())
@@ -815,7 +823,7 @@ func TestServicePollMarksHandledOnSuccess(t *testing.T) {
 	handles.EXPECT().Mark("d-1").Once()
 
 	checkouts := mocksagent.NewCheckouter(t)
-	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+	checkouts.EXPECT().Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").Return(nil).Once()
 
 	service := newTestService(router, dispatcher, retry, handles, checkouts, relayConfig("token", "/tmp/ws"))
 	service.Poll(context.Background())
@@ -853,7 +861,7 @@ func TestServicePollHandlesDeleteBodyError(t *testing.T) {
 	service, handles, checkouts := testService(t, router, dispatcher, retry)
 	handles.EXPECT().Has("d-1").Return(false).Once()
 	handles.EXPECT().Mark("d-1").Once()
-	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+	checkouts.EXPECT().Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").Return(nil).Once()
 
 	service.Poll(context.Background())
 
@@ -947,9 +955,9 @@ func TestServicePollUsesRoutedRepository(t *testing.T) {
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
-			return req.Dir == "/tmp/ws/goravel/framework" &&
+			return req.Dir == runDir("/tmp/ws", "goravel/framework", checkoutTime) &&
 				req.Agent == agentImplement &&
-				strings.Contains(req.Prompt, "Repository: goravel/framework")
+				!strings.Contains(req.Prompt, "Repository:")
 		})).
 		Return(nil).
 		Once()
@@ -963,7 +971,7 @@ func TestServicePollUsesRoutedRepository(t *testing.T) {
 
 	checkouts := mocksagent.NewCheckouter(t)
 	checkouts.EXPECT().
-		Ensure(testifymock.Anything, "/tmp/ws/goravel/framework", "goravel/framework").
+		Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/framework", checkoutTime), "goravel/framework").
 		Return(nil).
 		Once()
 
@@ -1000,9 +1008,9 @@ func TestServicePollFallsBackToSourceRepository(t *testing.T) {
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
-			return req.Dir == "/tmp/ws/goravel/goravel" &&
+			return req.Dir == runDir("/tmp/ws", "goravel/goravel", checkoutTime) &&
 				req.Agent == agentReview &&
-				strings.Contains(req.Prompt, "Repository: goravel/goravel")
+				!strings.Contains(req.Prompt, "Repository:")
 		})).
 		Return(nil).
 		Once()
@@ -1016,7 +1024,7 @@ func TestServicePollFallsBackToSourceRepository(t *testing.T) {
 
 	checkouts := mocksagent.NewCheckouter(t)
 	checkouts.EXPECT().
-		Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").
+		Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").
 		Return(nil).
 		Once()
 
@@ -1065,7 +1073,7 @@ func TestServicePollUsesConfiguredMention(t *testing.T) {
 	handles.EXPECT().Mark("d-1").Once()
 
 	checkouts := mocksagent.NewCheckouter(t)
-	checkouts.EXPECT().Ensure(testifymock.Anything, "/tmp/ws/goravel/goravel", "goravel/goravel").Return(nil).Once()
+	checkouts.EXPECT().Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").Return(nil).Once()
 
 	cfg := relayConfig("token", "/tmp/ws")
 	cfg.mention = "@bot"

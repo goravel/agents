@@ -222,9 +222,24 @@ func TestEventPrompt(t *testing.T) {
 	want := "Repository: goravel/goravel\n" +
 		"PR: https://github.com/goravel/goravel/pull/123\n" +
 		"comment: https://github.com/goravel/goravel/pull/123#issuecomment-24680\n" +
-		"Instruction:\n" +
-		"review"
+		"Instruction: review"
 	require.Equal(t, want, event.prompt("review", "goravel/goravel"))
+}
+
+func TestEventAgentPrompt(t *testing.T) {
+	event := &event{
+		Event:      "issue_comment",
+		Repository: "goravel/goravel",
+		Payload: `{"number":123,"pull_request":{"number":123,"html_url":"https://github.com/goravel/goravel/pull/123"},` +
+			`"comment":{"id":24680,"html_url":"https://github.com/goravel/goravel/pull/123#issuecomment-24680","body":"@goravel-agent review"}}`,
+	}
+
+	want := "PR: https://github.com/goravel/goravel/pull/123\n" +
+		"comment: https://github.com/goravel/goravel/pull/123#issuecomment-24680\n" +
+		"Instruction: review"
+	got := event.agentPrompt("review")
+	require.Equal(t, want, got)
+	require.NotContains(t, got, "Repository:")
 }
 
 func TestEventPromptWithoutComment(t *testing.T) {
@@ -237,8 +252,7 @@ func TestEventPromptWithoutComment(t *testing.T) {
 
 	want := "Repository: goravel/framework\n" +
 		"Issue: https://github.com/goravel/framework/issues/5\n" +
-		"Instruction:\n" +
-		"plan"
+		"Instruction: plan"
 	require.Equal(t, want, event.prompt("plan", "goravel/framework"))
 }
 
@@ -255,8 +269,7 @@ func TestEventPromptTargetRepository(t *testing.T) {
 
 	want := "Repository: goravel/framework\n" +
 		"Issue: https://github.com/goravel/goravel/issues/45\n" +
-		"Instruction:\n" +
-		"plan"
+		"Instruction: plan"
 	require.Equal(t, want, event.prompt("plan", "goravel/framework"))
 }
 
@@ -327,8 +340,7 @@ func TestEventPromptPullRequestLinks(t *testing.T) {
 				`"body":"@goravel-agent review"}}`,
 			want: "Repository: goravel/goravel\n" +
 				"PR: https://github.com/goravel/goravel/pull/45\n" +
-				"Instruction:\n" +
-				"review",
+				"Instruction: review",
 		},
 		{
 			name:    "pull request without html_url",
@@ -336,8 +348,7 @@ func TestEventPromptPullRequestLinks(t *testing.T) {
 			want: "Repository: goravel/goravel\n" +
 				"PR: https://github.com/goravel/goravel/pull/123\n" +
 				"comment: https://github.com/goravel/goravel/pull/123#issuecomment-24680\n" +
-				"Instruction:\n" +
-				"review",
+				"Instruction: review",
 		},
 	}
 
@@ -361,7 +372,6 @@ func TestEventPromptFallbackLinks(t *testing.T) {
 	want := "Repository: goravel/goravel\n" +
 		"Issue: https://github.com/goravel/goravel/issues/45\n" +
 		"comment: https://github.com/goravel/goravel/issues/45#issuecomment-24680\n" +
-		"Instruction:\n" +
-		"review"
+		"Instruction: review"
 	require.Equal(t, want, event.prompt("review", "goravel/goravel"))
 }

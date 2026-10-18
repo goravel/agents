@@ -27,13 +27,13 @@ func TestParseRoute(t *testing.T) {
 		wantErr   bool
 	}{
 		{name: "review", reply: "review", wantAgent: agentReview},
-		{name: "plan with spaces", reply: "  PLAN ", wantAgent: agentPlan},
+		{name: "ship with spaces", reply: "  SHIP ", wantAgent: agentShip},
 		{name: "implement with trailing punctuation", reply: "implement.", wantAgent: agentImplement},
 		{name: "review with backticks", reply: "`review`", wantAgent: agentReview},
 		{name: "review in bold markdown", reply: "**review**", wantAgent: agentReview},
-		{name: "plan in parentheses", reply: "(plan)", wantAgent: agentPlan},
+		{name: "ship in parentheses", reply: "(ship)", wantAgent: agentShip},
 		{name: "implement with trailing colon", reply: "implement:", wantAgent: agentImplement},
-		{name: "plan with quotes", reply: `"plan"`, wantAgent: agentPlan},
+		{name: "ship with quotes", reply: `"ship"`, wantAgent: agentShip},
 		{name: "implement with newline", reply: "implement\n", wantAgent: agentImplement},
 		{name: "review with carriage return", reply: "review\r\n", wantAgent: agentReview},
 		{
@@ -57,10 +57,10 @@ func TestParseRoute(t *testing.T) {
 		{
 			// There is no pattern gate: an escaping repository is passed
 			// through, with only surrounding decoration trimmed. The path
-			// safety net is repoDirIn at checkout time.
+			// safety net is checkoutName at checkout time.
 			name:      "escaping repository is not validated",
-			reply:     "plan ../etc",
-			wantAgent: agentPlan,
+			reply:     "ship ../etc",
+			wantAgent: agentShip,
 			wantRepo:  "/etc",
 		},
 		{
@@ -70,6 +70,7 @@ func TestParseRoute(t *testing.T) {
 		},
 		{name: "empty", reply: "", wantErr: true},
 		{name: "unrecognised", reply: "nonsense", wantErr: true},
+		{name: "removed reply token", reply: "plan", wantErr: true},
 	}
 
 	for _, test := range tests {
@@ -91,7 +92,10 @@ func TestRouterAgentInstructions(t *testing.T) {
 	// names parseAgent accepts, followed by the repository to work on.
 	require.Equal(t,
 		"Decide how to handle a GitHub mention. The Repository line and links are the source; "+
-			"reply with exactly two space-separated tokens: one agent from: review, plan, implement; "+
+			"reply with exactly two space-separated tokens: one agent from: "+
+			"implement (implements a plan that is already provided, reviews the changes, and opens a pull request), "+
+			"review (reviews an existing GitHub pull request and reports findings), "+
+			"ship (plans the task first, then implements and drives it through review to a pull request); "+
 			"then the repository to work on as owner/name. Do not add any other text.",
 		routerAgent{}.Instructions())
 }
@@ -204,7 +208,7 @@ func TestOpencodeDispatcherRunFailure(t *testing.T) {
 	processMock := mock.Factory().Process()
 	result := mocksprocess.NewResult(t)
 
-	args := append(scrubbedEnvArgs(), "opencode", "run", "--agent", "plan", "--", "do it")
+	args := append(scrubbedEnvArgs(), "opencode", "run", "--agent", "ship", "--", "do it")
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/framework").Return(processMock).Once()
@@ -226,7 +230,7 @@ func TestOpencodeDispatcherRunFailure(t *testing.T) {
 	dispatcher := newOpencodeDispatcher()
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:    "/tmp/ws/goravel/framework",
-		Agent:  "plan",
+		Agent:  "ship",
 		Prompt: "do it",
 	})
 	require.Error(t, err)

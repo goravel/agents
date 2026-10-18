@@ -94,6 +94,9 @@ const (
 	// The opencode run timeout the dispatcher applies.
 	opencodeTimeout = 30 * time.Minute
 
+	// cloneTimeout is the git clone timeout the checkouter applies.
+	cloneTimeout = 5 * time.Minute
+
 	// mentionPage is one GitHub issue comment containing the @goravel-agent
 	// mention.
 	mentionPage = `{"data":[
@@ -130,16 +133,13 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 	srv := httptest.NewServer(r.handler())
 	s.T().Cleanup(srv.Close)
 
-	// Fresh workspace with both candidate checkouts pre-created so the real git
-	// checkouter short-circuits on Stat whichever repository the router picks,
-	// plus the relay configuration.
+	// Fresh, empty workspace plus the relay configuration. Each run checks out
+	// into its own timestamped directory, so the checkout never pre-exists and
+	// the real git checkouter clones before the opencode run.
 	s.Require().True(facades.Cache().Flush())
 
 	resolved, err := filepath.EvalSymlinks(s.T().TempDir())
 	s.Require().NoError(err)
-	for _, repo := range []string{"goravel/goravel", "goravel/framework"} {
-		s.Require().NoError(os.MkdirAll(filepath.Join(resolved, filepath.FromSlash(repo)), 0o755))
-	}
 
 	originalConfig := facades.Config().Get("agent")
 	facades.Config().Add("agent", map[string]any{
@@ -150,12 +150,27 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 	})
 	s.T().Cleanup(func() { facades.Config().Add("agent", originalConfig) })
 
-	// The dispatcher's opencode run is the only external process: mock it. Both
-	// the agent name and the target repository are chosen by the live AI, so
-	// accept any supported agent and any checkout under the workspace, and only
-	// pin the parts of the prompt the poller controls itself.
+	// The checkouter's git clone and the dispatcher's opencode run are the only
+	// external processes: mock both. The clone callback needs no work (Ensure
+	// creates and renames its own staging directory), and the agent name and
+	// target repository are chosen by the live AI, so accept any supported agent
+	// and any checkout under the workspace and only pin the parts of the prompt
+	// the poller controls itself.
 	processMock := mocksprocess.NewProcess(s.T())
+	cloneResultMock := mocksprocess.NewResult(s.T())
 	resultMock := mocksprocess.NewResult(s.T())
+
+	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
+	processMock.EXPECT().Timeout(cloneTimeout).Return(processMock).Once()
+	processMock.EXPECT().
+		Run("git", "clone", "--depth", "1",
+			testifymock.MatchedBy(func(remote string) bool {
+				return strings.HasPrefix(remote, "https://github.com/goravel/")
+			}),
+			testifymock.Anything).
+		Return(cloneResultMock).
+		Once()
+	cloneResultMock.EXPECT().Failed().Return(false).Once()
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().
@@ -174,16 +189,17 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 			"HOME="+os.Getenv("HOME"),
 			"opencode", "run", "--agent",
 			testifymock.MatchedBy(func(agent string) bool {
-				return agent == "review" || agent == "plan" || agent == "implement"
+				return agent == "review" || agent == "ship" || agent == "implement"
 			}),
 			"--",
 			testifymock.MatchedBy(func(prompt string) bool {
-				// Pin the parts the poller owns (the Repository line prefix and
-				// the links from the payload) while leaving the routed
-				// repository value to the live AI.
-				return strings.HasPrefix(prompt, "Repository: ") &&
+				// Pin the parts the poller owns (the links from the payload and
+				// the instruction) while leaving the routed repository value to
+				// the live AI. The agent prompt omits the Repository line: the
+				// checkout's working directory implies the repository.
+				return !strings.HasPrefix(prompt, "Repository: ") &&
 					strings.Contains(prompt, "comment: https://github.com/goravel/goravel/pull/123#issuecomment-24680") &&
-					strings.Contains(prompt, "Instruction:\nreview")
+					strings.Contains(prompt, "Instruction: review")
 			})).
 		Return(resultMock).
 		Once()
