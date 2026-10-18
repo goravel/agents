@@ -1,6 +1,6 @@
 ---
 description: Make plan before coding
-mode: primary
+mode: all
 model: opencode-go/deepseek-v4.1-flash#high
 permissions:
   - action: edit
