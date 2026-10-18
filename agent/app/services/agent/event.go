@@ -226,21 +226,25 @@ const (
 	instructionLabel = "Instruction"
 )
 
-// prompt builds the context block shared by the router and the agent. The
-// Repository line is the source repository when routing and the target
-// repository (chosen by the router) when dispatching; the PR/Issue/comment
-// links always preserve where the mention came from. The fixed lines are
+// prompt builds the context block the router sees: the source repository line,
+// the PR/Issue/comment links, and the untrusted instruction. The fixed lines are
 // emitted before the untrusted instruction so a commenter cannot spoof them.
-// This is the event-to-agent contract: the poller decides when to use it and
-// the dispatcher decides how to run it.
 func (e *event) prompt(instruction, repository string) string {
+	return repositoryLabel + ": " + repository + "\n" + e.contextBlock(instruction)
+}
+
+// agentPrompt builds the context block handed to the agent. It carries the same
+// links and instruction as prompt but omits the Repository line: the agent runs
+// inside the checkout, so the repository is implied by its working directory.
+func (e *event) agentPrompt(instruction string) string {
+	return e.contextBlock(instruction)
+}
+
+// contextBlock emits the PR/Issue/comment links followed by the instruction.
+func (e *event) contextBlock(instruction string) string {
 	payload, _ := e.payload()
 
 	var builder strings.Builder
-	builder.WriteString(repositoryLabel + ": ")
-	builder.WriteString(repository)
-	builder.WriteString("\n")
-
 	if link := e.pullRequestLink(payload); link != "" {
 		builder.WriteString(prLabel + ": ")
 		builder.WriteString(link)

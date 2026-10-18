@@ -80,32 +80,32 @@ func resolveWorkspace(workspace string) string {
 	return resolveSymlinks(filepath.Clean(expandHome(workspace)))
 }
 
-// repoDirIn resolves the checkout directory for a repository under the workspace
-// root. The root is symlink-resolved internally, since it may still be in its
-// unresolved form: a root captured before the first clone stays unresolved while
-// its cloned child resolves, which would otherwise look like an escape. A
-// repository path that resolves outside the root is rejected and the root is
-// returned instead.
-func repoDirIn(root, repository string) string {
-	// Resolve the root on the same basis as the child below.
-	root = resolveSymlinks(root)
+// checkoutTimeLayout timestamps each run's checkout directory.
+const checkoutTimeLayout = "20060102-150405"
 
-	dir := filepath.Join(root, filepath.FromSlash(repository))
-	if dir == root {
-		return dir
-	}
-
-	rel, err := filepath.Rel(root, resolveSymlinks(dir))
-	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
-		return root
-	}
-
-	return dir
+// runDir resolves the per-run checkout directory for a repository under the
+// workspace root. Each run gets its own uniquely named directory
+// (<workspace>/<owner>-<repo>-<timestamp>) so a checkout left by a previous run
+// is never reused or collided with.
+func runDir(workspace, repository string, now time.Time) string {
+	return filepath.Join(resolveWorkspace(workspace), checkoutName(repository, now))
 }
 
-// repoDir resolves the workspace root and the repository in one call.
-func repoDir(workspace, repository string) string {
-	return repoDirIn(resolveWorkspace(workspace), repository)
+// checkoutName flattens owner/name into a filesystem-safe basename and appends
+// the run timestamp. Flattening also removes any path separators, so a hostile
+// repository value cannot escape the workspace.
+func checkoutName(repository string, now time.Time) string {
+	var b strings.Builder
+	for _, r := range repository {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
+			r == '.' || r == '_' || r == '-' {
+			b.WriteRune(r)
+		} else {
+			b.WriteByte('-')
+		}
+	}
+
+	return strings.Trim(b.String(), "-") + "-" + now.UTC().Format(checkoutTimeLayout)
 }
 
 // resolveSymlinks returns the fully resolved path, or the input when it cannot

@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"time"
 
 	"goravel/app/facades"
 	"goravel/app/services/agent/dispatch"
@@ -47,6 +48,10 @@ type Service struct {
 	// allowedSenders restricts which GitHub senders may trigger an agent run
 	// (AGENT_ALLOWED_SENDERS). It is validated non-empty in NewService.
 	allowedSenders map[string]struct{}
+
+	// now returns the current time; injected so the per-run checkout name is
+	// deterministic in tests.
+	now func() time.Time
 }
 
 // NewService wires a Service from application configuration. It fails when
@@ -71,6 +76,7 @@ func NewService() (*Service, error) {
 		workspaceRoot:  resolveWorkspace(config.GetString("agent.workspace")),
 		eventsURL:      strings.TrimRight(config.GetString("agent.base_url"), "/"),
 		allowedSenders: senders,
+		now:            time.Now,
 	}, nil
 }
 
@@ -181,7 +187,7 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 		repository = ev.Repository
 	}
 
-	dir := repoDirIn(s.workspaceRoot, repository)
+	dir := runDir(s.workspaceRoot, repository, s.now())
 	if err := s.checkouts.Ensure(ctx, dir, repository); err != nil {
 		return err
 	}
@@ -189,7 +195,7 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 	return s.dispatcher.Run(ctx, dispatch.Request{
 		Dir:    dir,
 		Agent:  agent,
-		Prompt: ev.prompt(instruction, repository),
+		Prompt: ev.agentPrompt(instruction),
 	})
 }
 
