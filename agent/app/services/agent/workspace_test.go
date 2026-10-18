@@ -4,7 +4,6 @@ import (
 	"context"
 	"os"
 	"path/filepath"
-	"strings"
 	"testing"
 	"time"
 
@@ -32,16 +31,17 @@ func TestGitCheckouterEnsureClonesMissingDir(t *testing.T) {
 	result := mocksprocess.NewResult(t)
 
 	dir := filepath.Join(t.TempDir(), "goravel")
-	var staging string
+	var target string
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Timeout(cloneTimeout).Return(processMock).Once()
 	processMock.EXPECT().
 		Run("git", "clone", "--depth", "1", "git@github.com:goravel/goravel.git", testifymock.Anything).
 		Run(func(_ string, args ...string) {
-			staging = args[len(args)-1]
-			// git clones into the staging directory Ensure created.
-			require.NoError(t, os.WriteFile(filepath.Join(staging, "HEAD"), nil, 0o600))
+			target = args[len(args)-1]
+			// The claim created the run directory before git ran.
+			require.DirExists(t, target)
+			require.NoError(t, os.WriteFile(filepath.Join(target, "HEAD"), nil, 0o600))
 		}).
 		Return(result).
 		Once()
@@ -49,11 +49,9 @@ func TestGitCheckouterEnsureClonesMissingDir(t *testing.T) {
 
 	require.NoError(t, newGitCheckouter().Ensure(context.Background(), dir, "goravel/goravel"))
 
-	// A uniquely named staging dir is renamed into place on success.
-	require.True(t, strings.HasPrefix(filepath.Base(staging), "goravel.partial-"))
+	// git clones straight into the per-run directory; there is no staging dir.
+	require.Equal(t, dir, target)
 	require.FileExists(t, filepath.Join(dir, "HEAD"))
-	_, err := os.Stat(staging)
-	require.ErrorIs(t, err, os.ErrNotExist)
 
 	processMock.AssertExpectations(t)
 	result.AssertExpectations(t)
@@ -64,16 +62,16 @@ func TestGitCheckouterEnsureCloneFailure(t *testing.T) {
 	result := mocksprocess.NewResult(t)
 
 	dir := filepath.Join(t.TempDir(), "goravel")
-	var staging string
+	var target string
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Timeout(cloneTimeout).Return(processMock).Once()
 	processMock.EXPECT().
 		Run("git", "clone", "--depth", "1", "git@github.com:goravel/goravel.git", testifymock.Anything).
 		Run(func(_ string, args ...string) {
-			staging = args[len(args)-1]
-			// A failed clone can leave the staging directory behind.
-			require.NoError(t, os.MkdirAll(staging, 0o700))
+			target = args[len(args)-1]
+			// The claim created the target, which a failed clone may leave behind.
+			require.DirExists(t, target)
 		}).
 		Return(result).
 		Once()
@@ -83,39 +81,14 @@ func TestGitCheckouterEnsureCloneFailure(t *testing.T) {
 
 	err := newGitCheckouter().Ensure(context.Background(), dir, "goravel/goravel")
 	require.Error(t, err)
+	require.Equal(t, dir, target)
 	require.Contains(t, err.Error(), "goravel/goravel")
 	require.Contains(t, err.Error(), "exit 128")
 	require.Contains(t, err.Error(), "boom")
 
-	// The staging directory is cleaned up on failure.
-	_, statErr := os.Stat(staging)
+	// The failed clone target is cleaned up on failure.
+	_, statErr := os.Stat(target)
 	require.ErrorIs(t, statErr, os.ErrNotExist)
-
-	processMock.AssertExpectations(t)
-	result.AssertExpectations(t)
-}
-
-func TestGitCheckouterEnsureRenameFailure(t *testing.T) {
-	processMock := mock.Factory().Process()
-	result := mocksprocess.NewResult(t)
-
-	dir := filepath.Join(t.TempDir(), "goravel")
-
-	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
-	processMock.EXPECT().Timeout(cloneTimeout).Return(processMock).Once()
-	processMock.EXPECT().
-		Run("git", "clone", "--depth", "1", "git@github.com:goravel/goravel.git", testifymock.Anything).
-		Run(func(_ string, args ...string) {
-			// git reports success but leaves no staging directory, so the rename
-			// into place fails.
-			require.NoError(t, os.RemoveAll(args[len(args)-1]))
-		}).
-		Return(result).
-		Once()
-	result.EXPECT().Failed().Return(false).Once()
-
-	err := newGitCheckouter().Ensure(context.Background(), dir, "goravel/goravel")
-	require.ErrorContains(t, err, "move clone into")
 
 	processMock.AssertExpectations(t)
 	result.AssertExpectations(t)
@@ -134,6 +107,30 @@ func TestGitCheckouterEnsureStatError(t *testing.T) {
 
 	// The stat short-circuit must not shell out to git.
 	factory.App().AssertNotCalled(t, "MakeProcess")
+}
+
+func TestGitCheckouterEnsureClaimFailure(t *testing.T) {
+	factory := mock.Factory()
+
+	// A dangling symlink makes os.Stat report os.ErrNotExist while the path is
+	// still occupied, so the os.Mkdir claim fails with EEXIST.
+	dir := filepath.Join(t.TempDir(), "goravel")
+	require.NoError(t, os.Symlink(filepath.Join(t.TempDir(), "missing"), dir))
+
+	err := newGitCheckouter().Ensure(context.Background(), dir, "goravel/goravel")
+	require.ErrorContains(t, err, "claim checkout")
+
+	// The claim must fail before shelling out to git.
+	factory.App().AssertNotCalled(t, "MakeProcess")
+}
+
+func TestClaimCheckoutRejectsExistingDir(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "goravel")
+	require.NoError(t, os.MkdirAll(dir, 0o700))
+
+	// os.MkdirAll would return nil for an existing directory; the ownership
+	// claim must not adopt a path this call did not create.
+	require.ErrorIs(t, claimCheckout(dir), os.ErrExist)
 }
 
 func TestRunDir(t *testing.T) {

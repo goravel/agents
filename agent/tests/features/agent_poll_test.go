@@ -151,11 +151,11 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 	s.T().Cleanup(func() { facades.Config().Add("agent", originalConfig) })
 
 	// The checkouter's git clone and the dispatcher's opencode run are the only
-	// external processes: mock both. The clone callback needs no work (Ensure
-	// creates and renames its own staging directory), and the agent name and
-	// target repository are chosen by the live AI, so accept any supported agent
-	// and any checkout under the workspace and only pin the parts of the prompt
-	// the poller controls itself.
+	// external processes: mock both. Ensure claims the per-run directory before
+	// invoking git, so the clone callback only asserts it exists, and the agent
+	// name and target repository are chosen by the live AI, so accept any
+	// supported agent and any checkout under the workspace and only pin the
+	// parts of the prompt the poller controls itself.
 	processMock := mocksprocess.NewProcess(s.T())
 	cloneResultMock := mocksprocess.NewResult(s.T())
 	resultMock := mocksprocess.NewResult(s.T())
@@ -168,6 +168,9 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 				return strings.HasPrefix(remote, "git@github.com:goravel/")
 			}),
 			testifymock.Anything).
+		Run(func(_ string, args ...string) {
+			s.Require().DirExists(args[len(args)-1])
+		}).
 		Return(cloneResultMock).
 		Once()
 	cloneResultMock.EXPECT().Failed().Return(false).Once()

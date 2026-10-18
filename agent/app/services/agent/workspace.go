@@ -39,7 +39,9 @@ func newGitCheckouter() *gitCheckouter {
 	return &gitCheckouter{}
 }
 
-// Ensure clones repository into dir when dir does not exist yet.
+// Ensure clones repository into dir when dir does not exist yet, claiming dir
+// so a competing call for the same path fails instead of removing a live
+// checkout.
 func (c *gitCheckouter) Ensure(ctx context.Context, dir, repository string) error {
 	if _, err := os.Stat(dir); err == nil {
 		return nil
@@ -51,31 +53,26 @@ func (c *gitCheckouter) Ensure(ctx context.Context, dir, repository string) erro
 		return fmt.Errorf("create workspace %s: %w", filepath.Dir(dir), err)
 	}
 
-	// Clone into a uniquely named staging directory and rename it into place only
-	// once git succeeds, so a clone killed partway through (for example by the
-	// timeout) never leaves a directory that later polls would mistake for a
-	// complete checkout. The random suffix keeps the staging path from colliding
-	// with another repository's checkout.
-	tmp, err := os.MkdirTemp(filepath.Dir(dir), filepath.Base(dir)+".partial-*")
-	if err != nil {
-		return fmt.Errorf("create clone staging dir for %s: %w", dir, err)
+	if err := claimCheckout(dir); err != nil {
+		return fmt.Errorf("claim checkout %s: %w", dir, err)
 	}
 
 	result := facades.Process().
 		WithContext(ctx).
 		Timeout(cloneTimeout).
-		Run("git", "clone", "--depth", cloneDepth, gitCloneURL+repository+".git", tmp)
+		Run("git", "clone", "--depth", cloneDepth, gitCloneURL+repository+".git", dir)
 	if result.Failed() {
-		_ = os.RemoveAll(tmp)
+		_ = os.RemoveAll(dir)
 		return fmt.Errorf("clone %s (exit %d): %s", repository, result.ExitCode(), strings.TrimSpace(result.ErrorOutput()))
 	}
 
-	if err := os.Rename(tmp, dir); err != nil {
-		_ = os.RemoveAll(tmp)
-		return fmt.Errorf("move clone into %s: %w", dir, err)
-	}
-
 	return nil
+}
+
+// claimCheckout takes ownership of dir, failing when the path is already
+// occupied so a competing call cannot adopt an existing checkout.
+func claimCheckout(dir string) error {
+	return os.Mkdir(dir, 0o700)
 }
 
 // resolveWorkspace resolves the workspace root once: expands a leading `~`,
