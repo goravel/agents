@@ -169,22 +169,27 @@ func (s *Service) Poll(ctx context.Context) {
 	s.deleteEvents(ctx, toDelete)
 }
 
-// handle routes the instruction to an agent and runs it against the target repo.
+// handle routes the instruction to an agent, resolves the target repository,
+// and runs the agent against its checkout.
 func (s *Service) handle(ctx context.Context, ev *event, instruction string) error {
-	agent, err := s.router.AgentFor(ctx, instruction)
+	// The router sees the source repository; the agent sees the target.
+	agent, repository, err := s.router.Route(ctx, ev.prompt(instruction, ev.Repository))
 	if err != nil {
 		return err
 	}
+	if repository == "" {
+		repository = ev.Repository
+	}
 
-	dir := repoDirIn(s.workspaceRoot, ev.Repository)
-	if err := s.checkouts.Ensure(ctx, dir, ev.Repository); err != nil {
+	dir := repoDirIn(s.workspaceRoot, repository)
+	if err := s.checkouts.Ensure(ctx, dir, repository); err != nil {
 		return err
 	}
 
 	return s.dispatcher.Run(ctx, dispatch.Request{
 		Dir:    dir,
 		Agent:  agent,
-		Prompt: ev.prompt(instruction),
+		Prompt: ev.prompt(instruction, repository),
 	})
 }
 

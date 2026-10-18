@@ -20,11 +20,18 @@ const (
 	agentReview    = "review"
 	agentPlan      = "plan"
 	agentImplement = "implement"
+
+	// replyDecoration is the surrounding whitespace, punctuation and markdown
+	// stripped from the router's reply tokens before they are matched.
+	replyDecoration = " \t\r\n.!?\"'`*():[],;"
 )
 
 // AgentRouter chooses which agent should handle an instruction.
 type AgentRouter interface {
-	AgentFor(ctx context.Context, instruction string) (string, error)
+	// Route decides which agent should handle the prompt and which repository
+	// (owner/name) it should run against. An empty repository means "use the
+	// source repository".
+	Route(ctx context.Context, prompt string) (string, string, error)
 }
 
 // Dispatcher runs an agent for a dispatch request. The request struct lives in
@@ -47,30 +54,54 @@ func newAIRouter() *aiRouter {
 	return &aiRouter{}
 }
 
-// AgentFor asks the AI provider which agent should handle the instruction.
-func (r *aiRouter) AgentFor(ctx context.Context, instruction string) (string, error) {
-	instruction = strings.TrimSpace(instruction)
-	if instruction == "" {
-		return "", errors.New("empty instruction")
+// Route asks the AI provider which agent should handle the prompt and which
+// repository it should run against.
+func (r *aiRouter) Route(ctx context.Context, prompt string) (string, string, error) {
+	prompt = strings.TrimSpace(prompt)
+	if prompt == "" {
+		return "", "", errors.New("empty prompt")
 	}
 
 	conversation, err := facades.AI().WithContext(ctx).Agent(routerAgent{})
 	if err != nil {
-		return "", fmt.Errorf("create routing conversation: %w", err)
+		return "", "", fmt.Errorf("create routing conversation: %w", err)
 	}
 
-	response, err := conversation.Prompt(instruction)
+	response, err := conversation.Prompt(prompt)
 	if err != nil {
-		return "", fmt.Errorf("route instruction: %w", err)
+		return "", "", fmt.Errorf("route prompt: %w", err)
 	}
 
-	return parseAgent(response.Text())
+	return parseRoute(response.Text())
 }
 
-// parseAgent maps the AI reply to one of the supported agent names, tolerating
+// parseRoute maps the AI reply to an agent name and an optional repository. The
+// reply is `<agent> <owner/repo>`; the agent is required and normalised, the
+// repository is taken verbatim (minus decoration) so the AI decides the target.
+// An empty repository means "use the source repository".
+func parseRoute(reply string) (string, string, error) {
+	fields := strings.Fields(reply)
+	if len(fields) == 0 {
+		return "", "", errors.New("empty reply")
+	}
+
+	agent, err := parseAgent(fields[0])
+	if err != nil {
+		return "", "", err
+	}
+
+	var repository string
+	if len(fields) > 1 {
+		repository = strings.Trim(fields[1], replyDecoration)
+	}
+
+	return agent, repository, nil
+}
+
+// parseAgent maps a single token to a supported agent name, tolerating
 // surrounding whitespace, punctuation and markdown decoration.
-func parseAgent(reply string) (string, error) {
-	normalized := strings.Trim(strings.ToLower(strings.TrimSpace(reply)), " \t\r\n.!?\"'`*():[],;")
+func parseAgent(token string) (string, error) {
+	normalized := strings.Trim(strings.ToLower(strings.TrimSpace(token)), replyDecoration)
 
 	for _, agent := range supportedAgents {
 		if normalized == agent {
@@ -78,16 +109,19 @@ func parseAgent(reply string) (string, error) {
 		}
 	}
 
-	return "", fmt.Errorf("unrecognised agent reply %q", reply)
+	return "", fmt.Errorf("unrecognised agent reply %q", token)
 }
 
 // routerAgent is the AI agent used to classify instructions.
 type routerAgent struct{}
 
 // Instructions returns the system prompt that constrains the reply to one of
-// the supported agent names.
+// the supported agent names and the repository to work on.
 func (routerAgent) Instructions() string {
-	return "Reply with exactly one word from: " + strings.Join(supportedAgents, ", ") + ". Do not add any other text."
+	return "Decide how to handle a GitHub mention. The " + repositoryLabel + " line and links are the source; " +
+		"reply with exactly two space-separated tokens: one agent from: " +
+		strings.Join(supportedAgents, ", ") +
+		"; then the repository to work on as owner/name. Do not add any other text."
 }
 
 // Messages returns the prior conversation, which is empty for stateless routing.

@@ -213,29 +213,155 @@ func TestEventPrompt(t *testing.T) {
 	event := &event{
 		Event:      "issue_comment",
 		Repository: "goravel/goravel",
-		Payload:    `{"number":123,"comment":{"id":24680,"body":"@goravel-agent review"}}`,
+		Payload: `{"number":123,` +
+			`"pull_request":{"number":123,"html_url":"https://github.com/goravel/goravel/pull/123"},` +
+			`"comment":{"id":24680,"html_url":"https://github.com/goravel/goravel/pull/123#issuecomment-24680",` +
+			`"body":"@goravel-agent review"}}`,
 	}
 
 	want := "Repository: goravel/goravel\n" +
-		"Event: issue_comment\n" +
-		"Comment ID: 24680\n" +
-		"Number: #123\n\n" +
+		"PR: https://github.com/goravel/goravel/pull/123\n" +
+		"comment: https://github.com/goravel/goravel/pull/123#issuecomment-24680\n" +
 		"Instruction:\n" +
 		"review"
-	require.Equal(t, want, event.prompt("review"))
+	require.Equal(t, want, event.prompt("review", "goravel/goravel"))
 }
 
 func TestEventPromptWithoutComment(t *testing.T) {
 	event := &event{
 		Event:      "issues",
 		Repository: "goravel/framework",
-		Payload:    `{"issue":{"number":5,"body":"@goravel-agent plan"}}`,
+		Payload: `{"issue":{"number":5,"html_url":"https://github.com/goravel/framework/issues/5",` +
+			`"body":"@goravel-agent plan"}}`,
 	}
 
 	want := "Repository: goravel/framework\n" +
-		"Event: issues\n" +
-		"Number: #5\n\n" +
+		"Issue: https://github.com/goravel/framework/issues/5\n" +
 		"Instruction:\n" +
 		"plan"
-	require.Equal(t, want, event.prompt("plan"))
+	require.Equal(t, want, event.prompt("plan", "goravel/framework"))
+}
+
+// TestEventPromptTargetRepository pins that the Repository line shows the
+// router-chosen target while the links keep pointing at the source repository
+// where the mention was posted.
+func TestEventPromptTargetRepository(t *testing.T) {
+	event := &event{
+		Event:      "issues",
+		Repository: "goravel/goravel",
+		Payload: `{"issue":{"number":45,"html_url":"https://github.com/goravel/goravel/issues/45",` +
+			`"body":"@goravel-agent plan"}}`,
+	}
+
+	want := "Repository: goravel/framework\n" +
+		"Issue: https://github.com/goravel/goravel/issues/45\n" +
+		"Instruction:\n" +
+		"plan"
+	require.Equal(t, want, event.prompt("plan", "goravel/framework"))
+}
+
+// TestEventPromptMutuallyExclusiveLinks pins that a pull request shows only the
+// PR link and an issue shows only the Issue link.
+func TestEventPromptMutuallyExclusiveLinks(t *testing.T) {
+	tests := []struct {
+		name        string
+		payload     string
+		wantLink    string
+		wantComment string
+		omitIssues  bool
+		omitPR      bool
+	}{
+		{
+			name: "pull request",
+			payload: `{"pull_request":{"number":123,"html_url":"https://github.com/goravel/goravel/pull/123"},` +
+				`"comment":{"id":1,"body":"@goravel-agent review"}}`,
+			wantLink:    "PR: https://github.com/goravel/goravel/pull/123\n",
+			wantComment: "comment: https://github.com/goravel/goravel/pull/123#issuecomment-1\n",
+			omitIssues:  true,
+		},
+		{
+			name: "issue",
+			payload: `{"issue":{"number":45,"html_url":"https://github.com/goravel/goravel/issues/45",` +
+				`"body":"@goravel-agent review"}}`,
+			wantLink: "Issue: https://github.com/goravel/goravel/issues/45\n",
+			omitPR:   true,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event := &event{
+				Repository: "goravel/goravel",
+				Payload:    test.payload,
+			}
+
+			got := event.prompt("review", "goravel/goravel")
+			require.Contains(t, got, test.wantLink)
+			if test.wantComment != "" {
+				require.Contains(t, got, test.wantComment)
+			}
+			if test.omitIssues {
+				require.NotContains(t, got, "Issue:")
+			}
+			if test.omitPR {
+				require.NotContains(t, got, "PR:")
+			}
+		})
+	}
+}
+
+// TestEventPromptPullRequestLinks covers the two PR shapes that carry no
+// top-level pull_request.html_url: an issue_comment on a pull request (nested
+// issue.pull_request) and a pull request with no html_url at all (constructed
+// fallback).
+func TestEventPromptPullRequestLinks(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+		want    string
+	}{
+		{
+			name: "issue comment on a pull request",
+			payload: `{"issue":{"number":45,"html_url":"https://github.com/goravel/goravel/pull/45",` +
+				`"pull_request":{"html_url":"https://github.com/goravel/goravel/pull/45"},` +
+				`"body":"@goravel-agent review"}}`,
+			want: "Repository: goravel/goravel\n" +
+				"PR: https://github.com/goravel/goravel/pull/45\n" +
+				"Instruction:\n" +
+				"review",
+		},
+		{
+			name:    "pull request without html_url",
+			payload: `{"pull_request":{"number":123},"comment":{"id":24680,"body":"@goravel-agent review"}}`,
+			want: "Repository: goravel/goravel\n" +
+				"PR: https://github.com/goravel/goravel/pull/123\n" +
+				"comment: https://github.com/goravel/goravel/pull/123#issuecomment-24680\n" +
+				"Instruction:\n" +
+				"review",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event := &event{Repository: "goravel/goravel", Payload: test.payload}
+			require.Equal(t, test.want, event.prompt("review", "goravel/goravel"))
+		})
+	}
+}
+
+// TestEventPromptFallbackLinks pins the constructed links used when the payload
+// carries no html_url fields.
+func TestEventPromptFallbackLinks(t *testing.T) {
+	event := &event{
+		Event:      "issue_comment",
+		Repository: "goravel/goravel",
+		Payload:    `{"number":45,"comment":{"id":24680,"body":"@goravel-agent review"}}`,
+	}
+
+	want := "Repository: goravel/goravel\n" +
+		"Issue: https://github.com/goravel/goravel/issues/45\n" +
+		"comment: https://github.com/goravel/goravel/issues/45#issuecomment-24680\n" +
+		"Instruction:\n" +
+		"review"
+	require.Equal(t, want, event.prompt("review", "goravel/goravel"))
 }

@@ -18,49 +18,85 @@ import (
 	"goravel/app/services/agent/dispatch"
 )
 
-func TestParseAgent(t *testing.T) {
+func TestParseRoute(t *testing.T) {
 	tests := []struct {
-		name    string
-		reply   string
-		want    string
-		wantErr bool
+		name      string
+		reply     string
+		wantAgent string
+		wantRepo  string
+		wantErr   bool
 	}{
-		{name: "review", reply: "review", want: agentReview},
-		{name: "plan with spaces", reply: "  PLAN ", want: agentPlan},
-		{name: "implement with trailing punctuation", reply: "implement.", want: agentImplement},
-		{name: "review with backticks", reply: "`review`", want: agentReview},
-		{name: "review in bold markdown", reply: "**review**", want: agentReview},
-		{name: "plan in parentheses", reply: "(plan)", want: agentPlan},
-		{name: "implement with trailing colon", reply: "implement:", want: agentImplement},
-		{name: "plan with quotes", reply: `"plan"`, want: agentPlan},
-		{name: "implement with newline", reply: "implement\n", want: agentImplement},
-		{name: "review with carriage return", reply: "review\r\n", want: agentReview},
+		{name: "review", reply: "review", wantAgent: agentReview},
+		{name: "plan with spaces", reply: "  PLAN ", wantAgent: agentPlan},
+		{name: "implement with trailing punctuation", reply: "implement.", wantAgent: agentImplement},
+		{name: "review with backticks", reply: "`review`", wantAgent: agentReview},
+		{name: "review in bold markdown", reply: "**review**", wantAgent: agentReview},
+		{name: "plan in parentheses", reply: "(plan)", wantAgent: agentPlan},
+		{name: "implement with trailing colon", reply: "implement:", wantAgent: agentImplement},
+		{name: "plan with quotes", reply: `"plan"`, wantAgent: agentPlan},
+		{name: "implement with newline", reply: "implement\n", wantAgent: agentImplement},
+		{name: "review with carriage return", reply: "review\r\n", wantAgent: agentReview},
+		{
+			name:      "agent and repository",
+			reply:     "implement goravel/framework",
+			wantAgent: agentImplement,
+			wantRepo:  "goravel/framework",
+		},
+		{
+			name:      "multiple spaces between tokens",
+			reply:     "review   goravel/framework",
+			wantAgent: agentReview,
+			wantRepo:  "goravel/framework",
+		},
+		{
+			name:      "decorated repository",
+			reply:     "review 'goravel/framework'",
+			wantAgent: agentReview,
+			wantRepo:  "goravel/framework",
+		},
+		{
+			// There is no pattern gate: an escaping repository is passed
+			// through, with only surrounding decoration trimmed. The path
+			// safety net is repoDirIn at checkout time.
+			name:      "escaping repository is not validated",
+			reply:     "plan ../etc",
+			wantAgent: agentPlan,
+			wantRepo:  "/etc",
+		},
+		{
+			name:      "empty repository token",
+			reply:     "implement .",
+			wantAgent: agentImplement,
+		},
 		{name: "empty", reply: "", wantErr: true},
 		{name: "unrecognised", reply: "nonsense", wantErr: true},
 	}
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			got, err := parseAgent(test.reply)
+			agent, repository, err := parseRoute(test.reply)
 			if test.wantErr {
 				require.Error(t, err)
 				return
 			}
 			require.NoError(t, err)
-			require.Equal(t, test.want, got)
+			require.Equal(t, test.wantAgent, agent)
+			require.Equal(t, test.wantRepo, repository)
 		})
 	}
 }
 
 func TestRouterAgentInstructions(t *testing.T) {
 	// The prompt is pinned exactly: the reply vocabulary must stay the agent
-	// names parseAgent accepts, on a single line and without any other framing.
+	// names parseAgent accepts, followed by the repository to work on.
 	require.Equal(t,
-		"Reply with exactly one word from: review, plan, implement. Do not add any other text.",
+		"Decide how to handle a GitHub mention. The Repository line and links are the source; "+
+			"reply with exactly two space-separated tokens: one agent from: review, plan, implement; "+
+			"then the repository to work on as owner/name. Do not add any other text.",
 		routerAgent{}.Instructions())
 }
 
-func TestAIRouterAgentFor(t *testing.T) {
+func TestAIRouterRoute(t *testing.T) {
 	factory := mock.Factory()
 	aiMock := factory.AI()
 	conversation := mocksai.NewConversation(t)
@@ -69,23 +105,24 @@ func TestAIRouterAgentFor(t *testing.T) {
 	aiMock.EXPECT().WithContext(testifymock.Anything).Return(aiMock).Once()
 	aiMock.EXPECT().Agent(routerAgent{}).Return(conversation, nil).Once()
 	conversation.EXPECT().Prompt("review this change").Return(response, nil).Once()
-	response.EXPECT().Text().Return("review").Once()
+	response.EXPECT().Text().Return("review goravel/framework").Once()
 
 	router := newAIRouter()
-	agent, err := router.AgentFor(context.Background(), "review this change")
+	agent, repository, err := router.Route(context.Background(), "review this change")
 	require.NoError(t, err)
 	require.Equal(t, agentReview, agent)
+	require.Equal(t, "goravel/framework", repository)
 	aiMock.AssertExpectations(t)
 }
 
-func TestAIRouterAgentForEmptyInstruction(t *testing.T) {
+func TestAIRouterRouteEmptyPrompt(t *testing.T) {
 	router := newAIRouter()
 
-	_, err := router.AgentFor(context.Background(), "   ")
+	_, _, err := router.Route(context.Background(), "   ")
 	require.Error(t, err)
 }
 
-func TestAIRouterAgentForAIError(t *testing.T) {
+func TestAIRouterRouteAIError(t *testing.T) {
 	factory := mock.Factory()
 	aiMock := factory.AI()
 
@@ -93,12 +130,12 @@ func TestAIRouterAgentForAIError(t *testing.T) {
 	aiMock.EXPECT().Agent(routerAgent{}).Return(nil, errors.New("boom")).Once()
 
 	router := newAIRouter()
-	_, err := router.AgentFor(context.Background(), "do something")
+	_, _, err := router.Route(context.Background(), "do something")
 	require.Error(t, err)
 	aiMock.AssertExpectations(t)
 }
 
-func TestAIRouterAgentForPromptError(t *testing.T) {
+func TestAIRouterRoutePromptError(t *testing.T) {
 	factory := mock.Factory()
 	aiMock := factory.AI()
 	conversation := mocksai.NewConversation(t)
@@ -108,13 +145,13 @@ func TestAIRouterAgentForPromptError(t *testing.T) {
 	conversation.EXPECT().Prompt("do something").Return(nil, errors.New("provider down")).Once()
 
 	router := newAIRouter()
-	_, err := router.AgentFor(context.Background(), "do something")
+	_, _, err := router.Route(context.Background(), "do something")
 	require.Error(t, err)
-	require.Contains(t, err.Error(), "route instruction")
+	require.Contains(t, err.Error(), "route prompt")
 	aiMock.AssertExpectations(t)
 }
 
-func TestAIRouterAgentForUnrecognisedReply(t *testing.T) {
+func TestAIRouterRouteUnrecognisedReply(t *testing.T) {
 	factory := mock.Factory()
 	aiMock := factory.AI()
 	conversation := mocksai.NewConversation(t)
@@ -126,7 +163,7 @@ func TestAIRouterAgentForUnrecognisedReply(t *testing.T) {
 	response.EXPECT().Text().Return("nonsense").Once()
 
 	router := newAIRouter()
-	_, err := router.AgentFor(context.Background(), "do something")
+	_, _, err := router.Route(context.Background(), "do something")
 	require.Error(t, err)
 	aiMock.AssertExpectations(t)
 }
