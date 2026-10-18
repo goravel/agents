@@ -21,59 +21,66 @@ func (_m *AgentRouter) EXPECT() *AgentRouter_Expecter {
 	return &AgentRouter_Expecter{mock: &_m.Mock}
 }
 
-// AgentFor provides a mock function with given fields: ctx, instruction
-func (_m *AgentRouter) AgentFor(ctx context.Context, instruction string) (string, error) {
-	ret := _m.Called(ctx, instruction)
+// Route provides a mock function with given fields: ctx, prompt
+func (_m *AgentRouter) Route(ctx context.Context, prompt string) (string, string, error) {
+	ret := _m.Called(ctx, prompt)
 
 	if len(ret) == 0 {
-		panic("no return value specified for AgentFor")
+		panic("no return value specified for Route")
 	}
 
 	var r0 string
-	var r1 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (string, error)); ok {
-		return rf(ctx, instruction)
+	var r1 string
+	var r2 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (string, string, error)); ok {
+		return rf(ctx, prompt)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
-		r0 = rf(ctx, instruction)
+		r0 = rf(ctx, prompt)
 	} else {
 		r0 = ret.Get(0).(string)
 	}
 
-	if rf, ok := ret.Get(1).(func(context.Context, string) error); ok {
-		r1 = rf(ctx, instruction)
+	if rf, ok := ret.Get(1).(func(context.Context, string) string); ok {
+		r1 = rf(ctx, prompt)
 	} else {
-		r1 = ret.Error(1)
+		r1 = ret.Get(1).(string)
 	}
 
-	return r0, r1
+	if rf, ok := ret.Get(2).(func(context.Context, string) error); ok {
+		r2 = rf(ctx, prompt)
+	} else {
+		r2 = ret.Error(2)
+	}
+
+	return r0, r1, r2
 }
 
-// AgentRouter_AgentFor_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'AgentFor'
-type AgentRouter_AgentFor_Call struct {
+// AgentRouter_Route_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Route'
+type AgentRouter_Route_Call struct {
 	*mock.Call
 }
 
-// AgentFor is a helper method to define mock.On call
+// Route is a helper method to define mock.On call
 //   - ctx context.Context
-//   - instruction string
-func (_e *AgentRouter_Expecter) AgentFor(ctx interface{}, instruction interface{}) *AgentRouter_AgentFor_Call {
-	return &AgentRouter_AgentFor_Call{Call: _e.mock.On("AgentFor", ctx, instruction)}
+//   - prompt string
+func (_e *AgentRouter_Expecter) Route(ctx interface{}, prompt interface{}) *AgentRouter_Route_Call {
+	return &AgentRouter_Route_Call{Call: _e.mock.On("Route", ctx, prompt)}
 }
 
-func (_c *AgentRouter_AgentFor_Call) Run(run func(ctx context.Context, instruction string)) *AgentRouter_AgentFor_Call {
+func (_c *AgentRouter_Route_Call) Run(run func(ctx context.Context, prompt string)) *AgentRouter_Route_Call {
 	_c.Call.Run(func(args mock.Arguments) {
 		run(args[0].(context.Context), args[1].(string))
 	})
 	return _c
 }
 
-func (_c *AgentRouter_AgentFor_Call) Return(_a0 string, _a1 error) *AgentRouter_AgentFor_Call {
-	_c.Call.Return(_a0, _a1)
+func (_c *AgentRouter_Route_Call) Return(_a0 string, _a1 string, _a2 error) *AgentRouter_Route_Call {
+	_c.Call.Return(_a0, _a1, _a2)
 	return _c
 }
 
-func (_c *AgentRouter_AgentFor_Call) RunAndReturn(run func(context.Context, string) (string, error)) *AgentRouter_AgentFor_Call {
+func (_c *AgentRouter_Route_Call) RunAndReturn(run func(context.Context, string) (string, string, error)) *AgentRouter_Route_Call {
 	_c.Call.Return(run)
 	return _c
 }

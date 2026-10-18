@@ -108,16 +108,22 @@ func (e *event) payload() (*githubPayload, error) {
 type githubPayload struct {
 	Number  int `json:"number"`
 	Comment struct {
-		ID   int64  `json:"id"`
-		Body string `json:"body"`
+		ID      int64  `json:"id"`
+		Body    string `json:"body"`
+		HTMLURL string `json:"html_url"`
 	} `json:"comment"`
 	Issue struct {
-		Number int    `json:"number"`
-		Body   string `json:"body"`
+		Number      int    `json:"number"`
+		Body        string `json:"body"`
+		HTMLURL     string `json:"html_url"`
+		PullRequest *struct {
+			HTMLURL string `json:"html_url"`
+		} `json:"pull_request"`
 	} `json:"issue"`
 	PullRequest struct {
-		Number int    `json:"number"`
-		Body   string `json:"body"`
+		Number  int    `json:"number"`
+		Body    string `json:"body"`
+		HTMLURL string `json:"html_url"`
 	} `json:"pull_request"`
 }
 
@@ -209,30 +215,105 @@ func isWordByte(b byte) bool {
 		(b >= 'A' && b <= 'Z')
 }
 
-// prompt builds the instruction passed to the agent, including the trusted
-// context the agent needs to act on the event. The fixed context lines are
+// Prompt line labels. They are the fixed context lines shared by the event
+// prompt and the router's system prompt, so the router's vocabulary cannot
+// drift from the prompt it steers.
+const (
+	repositoryLabel  = "Repository"
+	prLabel          = "PR"
+	issueLabel       = "Issue"
+	commentLabel     = "comment"
+	instructionLabel = "Instruction"
+)
+
+// prompt builds the context block shared by the router and the agent. The
+// Repository line is the source repository when routing and the target
+// repository (chosen by the router) when dispatching; the PR/Issue/comment
+// links always preserve where the mention came from. The fixed lines are
 // emitted before the untrusted instruction so a commenter cannot spoof them.
 // This is the event-to-agent contract: the poller decides when to use it and
 // the dispatcher decides how to run it.
-func (e *event) prompt(instruction string) string {
+func (e *event) prompt(instruction, repository string) string {
 	payload, _ := e.payload()
 
 	var builder strings.Builder
-	builder.WriteString("Repository: ")
-	builder.WriteString(e.Repository)
+	builder.WriteString(repositoryLabel + ": ")
+	builder.WriteString(repository)
 	builder.WriteString("\n")
-	builder.WriteString("Event: ")
-	builder.WriteString(e.Event)
-	builder.WriteString("\n")
-	if payload.Comment.ID != 0 {
-		builder.WriteString("Comment ID: ")
-		builder.WriteString(strconv.FormatInt(payload.Comment.ID, 10))
+
+	if link := e.pullRequestLink(payload); link != "" {
+		builder.WriteString(prLabel + ": ")
+		builder.WriteString(link)
 		builder.WriteString("\n")
 	}
-	builder.WriteString("Number: #")
-	builder.WriteString(strconv.Itoa(e.target()))
-	builder.WriteString("\n\nInstruction:\n")
+	if link := e.issueLink(payload); link != "" {
+		builder.WriteString(issueLabel + ": ")
+		builder.WriteString(link)
+		builder.WriteString("\n")
+	}
+	if link := e.commentLink(payload); link != "" {
+		builder.WriteString(commentLabel + ": ")
+		builder.WriteString(link)
+		builder.WriteString("\n")
+	}
+
+	builder.WriteString(instructionLabel + ":\n")
 	builder.WriteString(instruction)
 
 	return builder.String()
+}
+
+// isPullRequest reports whether the event targets a pull request.
+func isPullRequest(payload *githubPayload) bool {
+	return payload.PullRequest.HTMLURL != "" ||
+		payload.PullRequest.Number != 0 ||
+		payload.Issue.PullRequest != nil
+}
+
+// pullRequestLink returns the pull request URL, or "" when the event does not
+// target a pull request.
+func (e *event) pullRequestLink(payload *githubPayload) string {
+	switch {
+	case payload.PullRequest.HTMLURL != "":
+		return payload.PullRequest.HTMLURL
+	case payload.Issue.PullRequest != nil && payload.Issue.HTMLURL != "":
+		return payload.Issue.HTMLURL
+	case isPullRequest(payload) && e.target() != 0:
+		return gitRemote + e.Repository + "/pull/" + strconv.Itoa(e.target())
+	default:
+		return ""
+	}
+}
+
+// issueLink returns the issue URL, or "" when the event targets a pull request.
+func (e *event) issueLink(payload *githubPayload) string {
+	if isPullRequest(payload) {
+		return ""
+	}
+	if payload.Issue.HTMLURL != "" {
+		return payload.Issue.HTMLURL
+	}
+	if e.target() != 0 {
+		return gitRemote + e.Repository + "/issues/" + strconv.Itoa(e.target())
+	}
+
+	return ""
+}
+
+// commentLink returns the triggering comment URL, or "" when there is none.
+func (e *event) commentLink(payload *githubPayload) string {
+	if payload.Comment.HTMLURL != "" {
+		return payload.Comment.HTMLURL
+	}
+	if payload.Comment.ID == 0 {
+		return ""
+	}
+
+	path := "issues"
+	if isPullRequest(payload) {
+		path = "pull"
+	}
+
+	return gitRemote + e.Repository + "/" + path + "/" +
+		strconv.Itoa(e.target()) + "#issuecomment-" + strconv.FormatInt(payload.Comment.ID, 10)
 }

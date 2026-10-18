@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -98,17 +99,8 @@ const (
 	mentionPage = `{"data":[
 		{"id":1,"delivery_id":"d-1","event":"issue_comment","action":"created",
 		 "repository":"goravel/goravel","sender":"bowen",
-		 "payload":"{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"}
+		 "payload":"{\"number\":123,\"pull_request\":{\"number\":123,\"html_url\":\"https://github.com/goravel/goravel/pull/123\"},\"comment\":{\"id\":24680,\"html_url\":\"https://github.com/goravel/goravel/pull/123#issuecomment-24680\",\"body\":\"@goravel-agent review\"}}"}
 	],"total":1,"page":1,"limit":50}`
-
-	// expectedPrompt is the exact instruction the poller builds for mentionPage;
-	// it does not depend on which agent the router picks.
-	expectedPrompt = "Repository: goravel/goravel\n" +
-		"Event: issue_comment\n" +
-		"Comment ID: 24680\n" +
-		"Number: #123\n\n" +
-		"Instruction:\n" +
-		"review"
 )
 
 type AgentPollTestSuite struct {
@@ -138,14 +130,16 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 	srv := httptest.NewServer(r.handler())
 	s.T().Cleanup(srv.Close)
 
-	// Fresh workspace with a pre-created checkout so the real git checkouter
-	// short-circuits on Stat, plus the relay configuration.
+	// Fresh workspace with both candidate checkouts pre-created so the real git
+	// checkouter short-circuits on Stat whichever repository the router picks,
+	// plus the relay configuration.
 	s.Require().True(facades.Cache().Flush())
 
 	resolved, err := filepath.EvalSymlinks(s.T().TempDir())
 	s.Require().NoError(err)
-	repoDir := filepath.Join(resolved, "goravel", "goravel")
-	s.Require().NoError(os.MkdirAll(repoDir, 0o755))
+	for _, repo := range []string{"goravel/goravel", "goravel/framework"} {
+		s.Require().NoError(os.MkdirAll(filepath.Join(resolved, filepath.FromSlash(repo)), 0o755))
+	}
 
 	originalConfig := facades.Config().Get("agent")
 	facades.Config().Add("agent", map[string]any{
@@ -156,13 +150,20 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 	})
 	s.T().Cleanup(func() { facades.Config().Add("agent", originalConfig) })
 
-	// The dispatcher's opencode run is the only external process: mock it. The
-	// agent name is chosen by the live AI, so accept any supported agent.
+	// The dispatcher's opencode run is the only external process: mock it. Both
+	// the agent name and the target repository are chosen by the live AI, so
+	// accept any supported agent and any checkout under the workspace, and only
+	// pin the parts of the prompt the poller controls itself.
 	processMock := mocksprocess.NewProcess(s.T())
 	resultMock := mocksprocess.NewResult(s.T())
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
-	processMock.EXPECT().Path(repoDir).Return(processMock).Once()
+	processMock.EXPECT().
+		Path(testifymock.MatchedBy(func(p string) bool {
+			return strings.HasPrefix(p, resolved)
+		})).
+		Return(processMock).
+		Once()
 	processMock.EXPECT().Timeout(opencodeTimeout).Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
@@ -175,7 +176,15 @@ func (s *AgentPollTestSuite) TestPollDispatchesMention() {
 			testifymock.MatchedBy(func(agent string) bool {
 				return agent == "review" || agent == "plan" || agent == "implement"
 			}),
-			"--", expectedPrompt).
+			"--",
+			testifymock.MatchedBy(func(prompt string) bool {
+				// Pin the parts the poller owns (the Repository line prefix and
+				// the links from the payload) while leaving the routed
+				// repository value to the live AI.
+				return strings.HasPrefix(prompt, "Repository: ") &&
+					strings.Contains(prompt, "comment: https://github.com/goravel/goravel/pull/123#issuecomment-24680") &&
+					strings.Contains(prompt, "Instruction:\nreview")
+			})).
 		Return(resultMock).
 		Once()
 	resultMock.EXPECT().Failed().Return(false).Once()
