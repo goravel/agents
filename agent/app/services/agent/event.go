@@ -257,7 +257,7 @@ func (e *event) prompt(instruction, repository string) string {
 		builder.WriteString("\n")
 	}
 
-	builder.WriteString(instructionLabel + ":\n")
+	builder.WriteString(instructionLabel + ": ")
 	builder.WriteString(instruction)
 
 	return builder.String()
