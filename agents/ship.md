@@ -92,7 +92,7 @@ Write the full `PLAN` verbatim to `<folder>/plan.md`. Confirm it exists before t
 
 - Capture `PHASE_BASE=$(git -C "$WORKTREE_DIR" rev-parse HEAD)` before running.
 - Round 1: spawn a new foreground subagent session with the subagent tool, `agent: "code"`: "You are running as a subagent in the implement flow, working in the implementation worktree (`$WORKTREE_DIR`). Implement `<folder>/plan.md`. Verify with scoped tests (`go test <pkg>`). Do not commit. Save your report to `<folder>/implementation.md`."
-- Rounds 2+: resume the same session via its `sessionID`: "You are running as a subagent in the implement flow, still in the implementation worktree (`$WORKTREE_DIR`). Fix every Must Fix, Should Fix, and Nit in `<folder>/review-<N-1>.md`. Verify with scoped tests only. Update `<folder>/implementation.md`."
+- Rounds 2+: resume the same session via its `sessionID`: "You are running as a subagent in the implement flow, still in the implementation worktree (`$WORKTREE_DIR`). Fix every Must Fix, Maybe Fix, and Nit in `<folder>/review-<N-1>.md`. Verify with scoped tests only. Update `<folder>/implementation.md`."
 - After it returns, commit the phase:
   ```
   git -C "$WORKTREE_DIR" add -A
@@ -109,9 +109,9 @@ Delegate the round review to the `subagents/review-diff` agent.
 
 ### 5.3 Decide
 
-Read `<folder>/review-N.md`; `blockers` = Must Fix + Should Fix.
+Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 - **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Squash the per-phase commits into one, then create or update the PR. Base: `$BASE_BRANCH`. Report: `<folder>/implementation.md`." Report the PR URL; list Nits as non-blocking.
-- **Round 5**: stop, no PR. Report the outstanding Must Fix / Should Fix; list the Nits as non-blocking.
+- **Round 5**: stop, no PR. Report the outstanding Must Fix / Maybe Fix; list the Nits as non-blocking.
 - **Otherwise**: increment N and loop.
 
 ## 6. Close out PR review comments
@@ -140,8 +140,8 @@ Run after the PR exists, or when the user hands you comments to close.
 - Use `code` for implementation and `subagents/review-diff` / `subagents/pr` for review and PR. Reuse the `review-diff` session across rounds.
 - Use foreground subagent calls and wait for each result.
 - Commit each phase before reviewing it; diff only `"$PHASE_BASE"..HEAD`. Never review uncommitted work.
-- Spawn `pr` only when there are no Must Fix / Should Fix.
-- Nits are fixed only in a round that also has Must Fix / Should Fix; a Nits-only review is clean.
+- Spawn `pr` only when there are no Must Fix / Maybe Fix.
+- Nits are fixed only in a round that also has Must Fix / Maybe Fix; a Nits-only review is clean.
 - Maintain `<folder>/considered.md` (consider-and-dismiss only).
 - Keep the worktree after the PR — never remove it.
 - End with a concise summary: what changed, artifact paths, whether the loop converged, the PR URL (or outstanding findings), and the non-blocking Nits.

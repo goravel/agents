@@ -75,7 +75,7 @@ Do all code work in a worktree of the target repo, not in the target checkout it
 
 - Capture `PHASE_BASE=$(git -C "$WORKTREE_DIR" rev-parse HEAD)` before running.
 - Round 1: spawn a new foreground subagent session with the subagent tool, `agent: "code"`: "You are running as a subagent in the implement flow, working in the implementation worktree (`$WORKTREE_DIR`). Implement `<folder>/plan.md`. Verify with `go build ./...` and scoped tests (`go test <pkg>`). Do not commit. Save your report to `<folder>/implementation.md`."
-- Rounds 2+: resume the same session via its `sessionID`: "You are running as a subagent in the implement flow, still in the implementation worktree (`$WORKTREE_DIR`). Fix every Must Fix, Should Fix, and Nit in `<folder>/review-<N-1>.md`. Verify with scoped tests only. Update `<folder>/implementation.md`."
+- Rounds 2+: resume the same session via its `sessionID`: "You are running as a subagent in the implement flow, still in the implementation worktree (`$WORKTREE_DIR`). Fix every Must Fix, Maybe Fix, and Nit in `<folder>/review-<N-1>.md`. Verify with scoped tests only. Update `<folder>/implementation.md`."
 - After it returns, commit the phase:
   ```
   git -C "$WORKTREE_DIR" add -A
@@ -95,7 +95,7 @@ One commit per round; reuse workers; carry findings forward.
 - **No Go diff.** Skip the workers; review `scope` inline over the six dimensions, and still
   re-verify every prior finding in `<folder>/findings-by-side.json`, carrying unresolved ones into `<folder>/review-N.md`.
 - **Suppression.** Pass `<folder>/considered.md`.
-- **Merge.** Dedupe by `file:line` + Title; rank Must Fix → Should Fix → Nits.
+- **Merge.** Dedupe by `file:line` + Title; rank Must Fix → Maybe Fix → Nits.
 - **Scope filter.** Keep delta anchors within the added ranges; keep carried `PRIOR` anchors regardless.
   ```
   git -C "$WORKTREE_DIR" diff "$PHASE_BASE"..HEAD -U0 | rg '^diff --git |^@@'
@@ -106,9 +106,9 @@ One commit per round; reuse workers; carry findings forward.
 
 ### 4.3 Decide
 
-Read `<folder>/review-N.md`; `blockers` = Must Fix + Should Fix.
+Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 - **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Squash the per-phase commits into one, then create or update the PR. Base: `$BASE_BRANCH`. Report: `<folder>/implementation.md`." Report the PR URL; list Nits as non-blocking.
-- **Round 5**: stop, no PR. Report the outstanding Must Fix / Should Fix; list the Nits as non-blocking.
+- **Round 5**: stop, no PR. Report the outstanding Must Fix / Maybe Fix; list the Nits as non-blocking.
 - **Otherwise**: increment N and loop.
 
 ## 6. Close out PR review comments
@@ -139,8 +139,8 @@ Run after the PR exists, or when the user hands you comments to close.
 - Commit each phase before reviewing it; diff only `"$PHASE_BASE"..HEAD`. Never review uncommitted work.
 - Reuse reviewer sessions; never respawn.
 - Re-verify prior findings each round; route each one only to the SIDE that raised it.
-- Spawn `pr` only when there are no Must Fix / Should Fix.
-- Nits are fixed only in a round that also has Must Fix / Should Fix; a Nits-only review is clean.
+- Spawn `pr` only when there are no Must Fix / Maybe Fix.
+- Nits are fixed only in a round that also has Must Fix / Maybe Fix; a Nits-only review is clean.
 - Maintain `<folder>/considered.md` (consider-and-dismiss only).
 - On success after the PR: `session_move` back to `$REPO_ROOT`, then remove the worktree. On failure or a 5-round exit, keep it.
 - End with a concise summary: what changed, artifact paths, whether the loop converged, the PR URL (or outstanding findings), and the non-blocking Nits.

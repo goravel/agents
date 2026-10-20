@@ -9,6 +9,9 @@ permissions:
   - action: edit
     resource: "/tmp/**"
     effect: allow
+  - action: edit
+    resource: "/private/tmp/**"
+    effect: allow
   - action: subagent
     resource: "*"
     effect: deny
@@ -54,7 +57,7 @@ Detect the languages in the diff scope by extension. The six-way fan-out is opti
 
 ## 3. Merge
 
-- Dedupe by `file:line` + Title; rank Must Fix → Should Fix → Nits.
+- Dedupe by `file:line` + Title; rank Must Fix → Maybe Fix → Nits.
 - Scope filter — keep only findings within ±1 line of an added line; keep carried `PRIOR` anchors regardless:
 
 ```
