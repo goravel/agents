@@ -9,6 +9,9 @@ permissions:
   - action: edit
     resource: "/tmp/**"
     effect: allow
+  - action: edit
+    resource: "/private/tmp/**"
+    effect: allow
   - action: subagent
     resource: "*"
     effect: allow
@@ -76,11 +79,14 @@ git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD -U0 | rg '^diff --git
 
 ### 4. Emit
 - Count per severity per status and give the `goravel-review-template` skill the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → it emits `✅ Review clean — no findings.` (this string keys the implement orchestrator's convergence check).
-- Tick resolved findings in prior comments whose endpoint is editable (`issues/comments/{id}` or `pulls/comments/{id}`): `[ ]` → `[x]` on the anchor line of each resolved finding, matched by file path + Title, rewriting only the anchor line (`^\s*\d+\.\s*\[ \]\s*` + backticked `path:LINE`). PATCH in place:
+- Tick resolved findings in prior comments whose endpoint is editable (`issues/comments/{id}` or `pulls/comments/{id}`, recorded as `$COMMENT_ENDPOINT` per comment in the tick set): `[ ]` → `[x]` on the anchor line of each resolved finding, matched by file path + Title, rewriting only the anchor line (`^\s*\d+\.\s*\[ \]\s*` + backticked `path:LINE`). Fetch that comment's current body, rewrite the anchor line there, then PATCH it back to the same endpoint:
 
 ```bash
-jq -Rs '{body: .}' "$UPDATED_BODY_FILE" \
-  | gh api -X PATCH "repos/{owner}/{repo}/issues/comments/${COMMENT_ID}" --input -
+BODY_FILE="/tmp/pr-reviews/pr-${PR_NUM}-body.md"
+gh api "repos/{owner}/{repo}/${COMMENT_ENDPOINT}" --jq .body > "$BODY_FILE"
+# rewrite only the matched anchor line in "$BODY_FILE": `[ ]` → `[x]` on the backticked `path:LINE` + Title
+jq -Rs '{body: .}' "$BODY_FILE" \
+  | gh api -X PATCH "repos/{owner}/{repo}/${COMMENT_ENDPOINT}" --input -
 ```
 
   Never un-tick a resolved finding; never tick a still-open one.

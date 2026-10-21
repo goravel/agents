@@ -126,7 +126,7 @@ never re-verify or re-raise another SIDE's findings.
    `git show origin/${BASE_BRANCH}:<file>` in worktree/PR mode (HEAD is the PR tip, not the baseline).
    Then apply the Scope rule and drop the rest silently.
 
-4. **Report findings only** grouped by severity — Must Fix, then Should Fix, then Nits. Each finding MUST
+4. **Report findings only** grouped by severity — Must Fix, then Maybe Fix, then Nits. Each finding MUST
    start with exactly ONE anchor line (`file:line` + **Title**), followed by three indented plain-language
    lines — Problem / Impact / Fix — and, when the finding concerns code behavior, one indented before/after
    example-code block, all formatted exactly per the finding grammar in the

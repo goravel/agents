@@ -2,7 +2,7 @@
 name: Goravel Review Template
 description: >
   Canonical output format and finding grammar for code reviews. Use when emitting, writing, or
-  formatting a code review — defines the Summary/Verdict/Findings structure, Must Fix / Should
+  formatting a code review — defines the Summary/Verdict/Findings structure, Must Fix / Maybe
   Fix / Nits headings, the one-line anchor plus Problem/Impact/Fix shape, and the two data shapes
   (NEW and NEW + ROUND). Load via the skill tool before producing any review output.
 ---
@@ -22,8 +22,8 @@ This is an AI-generated code review. Please double-check each finding before act
 <1–2 plain-language sentences: what changed and the overall verdict.>
 
 ## Verdict
-- [NEW] Must Fix: <N> · Should Fix: <N> · Nits: <N>
-- [ROUND k](<url>) Must Fix: <N> · Should Fix: <N> · Nits: <N> · Resolved: <N>
+- [NEW] Must Fix: <N> · Maybe Fix: <N> · Nits: <N>
+- [ROUND k](<url>) Must Fix: <N> · Maybe Fix: <N> · Nits: <N> · Resolved: <N>
 
 ## Findings
 
@@ -39,7 +39,8 @@ This is an AI-generated code review. Please double-check each finding before act
    <corrected code>
    ```
 
-### Should Fix
+### Maybe Fix
+<!-- Maybe Fix still blocks: it must be fixed or carried forward, never shipped open. -->
 1. [ ] ...
 
 <details>
