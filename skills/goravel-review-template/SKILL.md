@@ -16,6 +16,7 @@ severity order, and finding grammar below exactly — consumers key on these exa
 
 # 🤖 Automated review
 This is an AI-generated code review. Please double-check each finding before acting. You don't need to address every issue if they are inaccurate, but please point them out if any exist.
+Please tick the checkboxes once you have completed the items.
 <!-- round: N -->
 
 ## Summary
