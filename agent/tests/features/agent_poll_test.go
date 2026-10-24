@@ -20,6 +20,7 @@ import (
 	mocksprocess "github.com/goravel/framework/mocks/process"
 	"github.com/goravel/framework/process"
 
+	"goravel/app/constants"
 	"goravel/app/facades"
 	"goravel/tests"
 )
@@ -120,6 +121,7 @@ type pollObservation struct {
 	mode         string
 	model        string
 	thinking     string
+	title        string
 	prompt       string
 	acknowledged []string
 	lastError    string
@@ -174,9 +176,9 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 		"workspace":       resolved,
 		"allowed_senders": "bowen",
 		"models": map[string]string{
-			"ship":      "opencode-go/deepseek-v4.1-flash#high",
-			"implement": "opencode-go/deepseek-v4.1-flash#high",
-			"review":    "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
 		},
 	})
 	s.T().Cleanup(func() { facades.Config().Add("agent", originalConfig) })
@@ -225,7 +227,6 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 		Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
-	processMock.EXPECT().OnOutput(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().
 		Run("env", "-i",
 			"PATH="+os.Getenv("PATH"),
@@ -235,6 +236,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 			"--mode", testifymock.Anything,
 			"--model", testifymock.Anything,
 			"--thinking", testifymock.Anything,
+			"--title", testifymock.MatchedBy(func(title string) bool { return title != "" }),
 			"--no-wait", "--",
 			testifymock.MatchedBy(func(prompt string) bool {
 				// The prompt omits the Repository line: the checkout directory
@@ -244,11 +246,12 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 		Run(func(_ string, args ...string) {
 			// args = [-i, PATH…, HOME…, paseo, run, --provider, opencode,
 			//         --mode, <mode>, --model, <model>, --thinking, <thinking>,
-			//         --no-wait, --, <prompt>].
+			//         --title, <title>, --no-wait, --, <prompt>].
 			observation.mode = args[8]
 			observation.model = args[10]
 			observation.thinking = args[12]
-			observation.prompt = args[15]
+			observation.title = args[14]
+			observation.prompt = args[17]
 		}).
 		Return(resultMock).
 		Once()
@@ -302,6 +305,9 @@ func (s *AgentPollTestSuite) TestPollShipsIssueMention() {
 		"live router did not choose the ship agent (context: %s)", got.lastError)
 	s.Require().Equal("opencode-go/deepseek-v4.1-flash", got.model)
 	s.Require().Equal("high", got.thinking)
+	s.Require().NotEmpty(got.title)
+	s.Require().NotContains(got.title, "\n")
+	s.Require().LessOrEqual(len([]rune(got.title)), 60)
 	s.Require().Equal("git@github.com:goravel/framework.git", got.cloneRemote)
 	s.Require().True(strings.HasPrefix(filepath.Base(got.cloneDir), "goravel-framework-"))
 	s.Require().Contains(got.prompt, "Issue: https://github.com/goravel/goravel/issues/123")
@@ -326,6 +332,9 @@ func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
 		"live router did not choose the review agent (context: %s)", got.lastError)
 	s.Require().Equal("opencode-go/deepseek-v4.1-flash", got.model)
 	s.Require().Equal("high", got.thinking)
+	s.Require().NotEmpty(got.title)
+	s.Require().NotContains(got.title, "\n")
+	s.Require().LessOrEqual(len([]rune(got.title)), 60)
 	s.Require().Equal("git@github.com:goravel/framework.git", got.cloneRemote)
 	s.Require().True(strings.HasPrefix(filepath.Base(got.cloneDir), "goravel-framework-"))
 	s.Require().Contains(got.prompt, "PR: https://github.com/goravel/framework/pull/42")
@@ -340,7 +349,7 @@ func (s *AgentPollTestSuite) TestAgentModelsConfigCoversRoutableAgents() {
 	models, ok := facades.Config().Get("agent.models").(map[string]string)
 	s.Require().True(ok, "config/agent.go must register agent.models as map[string]string")
 
-	for _, mode := range []string{"ship", "implement", "review"} {
+	for _, mode := range []string{constants.AgentShip, constants.AgentImplement, constants.AgentReview} {
 		entry := strings.TrimSpace(models[mode])
 		s.Require().NotEmpty(entry, "agent.models has no entry for %q", mode)
 		model, _, _ := strings.Cut(entry, "#")

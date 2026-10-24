@@ -5,6 +5,8 @@ import (
 	"strconv"
 	"strings"
 	"unicode"
+
+	"goravel/app/constants"
 )
 
 const (
@@ -89,6 +91,25 @@ func (e *event) target() int {
 	}
 
 	return payload.PullRequest.Number
+}
+
+// defaultTitle names the run after the issue or pull request the mention came
+// from, used when the router returns no title. A pull request yields `PR #42`,
+// an issue `Issue #123`. It returns "" when the payload carries no number, so
+// the dispatcher omits --title and paseo names the run; a payload that fails to
+// decode also degrades to "".
+func (e *event) defaultTitle() string {
+	number := e.target()
+	if number == 0 {
+		return ""
+	}
+
+	label := issueLabel
+	if payload, _ := e.payload(); isPullRequest(payload) {
+		label = prLabel
+	}
+
+	return label + " #" + strconv.Itoa(number)
 }
 
 // payload decodes the event's JSON payload, caching both the result and the
@@ -255,7 +276,7 @@ func (e *event) agentPrompt(agentName, instruction string) string {
 	payload, _ := e.payload()
 
 	prompt := e.contextBlock(instruction)
-	if agentName == agentReview && isPullRequest(payload) {
+	if agentName == constants.AgentReview && isPullRequest(payload) {
 		prompt += "\n" + reviewInstructionSuffix
 	}
 

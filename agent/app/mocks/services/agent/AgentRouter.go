@@ -22,7 +22,7 @@ func (_m *AgentRouter) EXPECT() *AgentRouter_Expecter {
 }
 
 // Route provides a mock function with given fields: ctx, prompt
-func (_m *AgentRouter) Route(ctx context.Context, prompt string) (string, string, error) {
+func (_m *AgentRouter) Route(ctx context.Context, prompt string) (string, string, string, error) {
 	ret := _m.Called(ctx, prompt)
 
 	if len(ret) == 0 {
@@ -31,8 +31,9 @@ func (_m *AgentRouter) Route(ctx context.Context, prompt string) (string, string
 
 	var r0 string
 	var r1 string
-	var r2 error
-	if rf, ok := ret.Get(0).(func(context.Context, string) (string, string, error)); ok {
+	var r2 string
+	var r3 error
+	if rf, ok := ret.Get(0).(func(context.Context, string) (string, string, string, error)); ok {
 		return rf(ctx, prompt)
 	}
 	if rf, ok := ret.Get(0).(func(context.Context, string) string); ok {
@@ -47,13 +48,19 @@ func (_m *AgentRouter) Route(ctx context.Context, prompt string) (string, string
 		r1 = ret.Get(1).(string)
 	}
 
-	if rf, ok := ret.Get(2).(func(context.Context, string) error); ok {
+	if rf, ok := ret.Get(2).(func(context.Context, string) string); ok {
 		r2 = rf(ctx, prompt)
 	} else {
-		r2 = ret.Error(2)
+		r2 = ret.Get(2).(string)
 	}
 
-	return r0, r1, r2
+	if rf, ok := ret.Get(3).(func(context.Context, string) error); ok {
+		r3 = rf(ctx, prompt)
+	} else {
+		r3 = ret.Error(3)
+	}
+
+	return r0, r1, r2, r3
 }
 
 // AgentRouter_Route_Call is a *mock.Call that shadows Run/Return methods with type explicit version for method 'Route'
@@ -75,12 +82,12 @@ func (_c *AgentRouter_Route_Call) Run(run func(ctx context.Context, prompt strin
 	return _c
 }
 
-func (_c *AgentRouter_Route_Call) Return(_a0 string, _a1 string, _a2 error) *AgentRouter_Route_Call {
-	_c.Call.Return(_a0, _a1, _a2)
+func (_c *AgentRouter_Route_Call) Return(_a0 string, repository string, title string, err error) *AgentRouter_Route_Call {
+	_c.Call.Return(_a0, repository, title, err)
 	return _c
 }
 
-func (_c *AgentRouter_Route_Call) RunAndReturn(run func(context.Context, string) (string, string, error)) *AgentRouter_Route_Call {
+func (_c *AgentRouter_Route_Call) RunAndReturn(run func(context.Context, string) (string, string, string, error)) *AgentRouter_Route_Call {
 	_c.Call.Return(run)
 	return _c
 }

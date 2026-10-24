@@ -19,6 +19,7 @@ import (
 	mockshttp "github.com/goravel/framework/mocks/http/client"
 	"github.com/goravel/framework/testing/mock"
 
+	"goravel/app/constants"
 	mocksagent "goravel/app/mocks/services/agent"
 	"goravel/app/services/agent/dispatch"
 )
@@ -42,6 +43,10 @@ const (
 	"page": 1,
 	"limit": 50
 }`
+
+	// zeroNumberEnvelope is a mention whose payload carries no issue or pull
+	// request number, so the run has no fallback title.
+	zeroNumberEnvelope = `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":50}`
 )
 
 var relayQueryParams = map[string]string{
@@ -187,13 +192,14 @@ func TestServicePollDispatchesMentionsAndDeletes(t *testing.T) {
 	router.EXPECT().Route(testifymock.Anything, testifymock.MatchedBy(func(p string) bool {
 		return strings.Contains(p, "Repository: goravel/goravel") &&
 			strings.Contains(p, "Instruction: review")
-	})).Return(agentReview, "goravel/goravel", nil).Once()
+	})).Return(constants.AgentReview, "goravel/goravel", "Review issue 123", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
 			return req.Dir == runDir("/tmp/ws", "goravel/goravel", checkoutTime) &&
-				req.Agent == agentReview &&
+				req.Agent == constants.AgentReview &&
+				req.Title == "Review issue 123" &&
 				!strings.Contains(req.Prompt, "Repository:") &&
 				strings.Contains(req.Prompt, "Instruction: review")
 		})).
@@ -236,7 +242,7 @@ func TestServicePollCloneError(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/goravel", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 
@@ -279,7 +285,7 @@ func TestServicePollKeepsFailedEventWhenRetryNotExceeded(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/goravel", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).
@@ -321,7 +327,7 @@ func TestServicePollKeepsEventWhenRoutingFails(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return("", "", errors.New("router exploded")).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return("", "", "", errors.New("router exploded")).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	retry := mocksagent.NewRetryTracker(t)
@@ -361,7 +367,7 @@ func TestServicePollDeletesWhenRetryExceeded(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/goravel", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).
@@ -405,7 +411,7 @@ func TestServicePollHandlesDeleteError(t *testing.T) {
 		Return(nil, errors.New("connection reset")).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/goravel", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
@@ -447,7 +453,7 @@ func TestServicePollHandlesDeleteFailureStatus(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/goravel", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
@@ -669,9 +675,9 @@ func TestNewServiceReadsConfig(t *testing.T) {
 	configMock.EXPECT().GetString("agent.workspace").Return("/srv/code").Once()
 	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen, alice").Once()
 	models := map[string]string{
-		agentShip:      "opencode-go/deepseek-v4.1-flash#high",
-		agentImplement: "opencode-go/deepseek-v4.1-flash#high",
-		agentReview:    "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
 	}
 	configMock.EXPECT().Get("agent.models").Return(models).Once()
 	configMock.EXPECT().GetString("agent.mention").Return("@bot").Once()
@@ -734,8 +740,8 @@ func TestNewServiceRejectsAgentWithoutModel(t *testing.T) {
 
 	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen").Once()
 	configMock.EXPECT().Get("agent.models").Return(map[string]string{
-		agentShip:      "opencode-go/deepseek-v4.1-flash#high",
-		agentImplement: "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
 	}).Once()
 
 	service, err := NewService()
@@ -833,7 +839,7 @@ func TestServicePollDispatchesAllowedSender(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/goravel", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
@@ -907,7 +913,7 @@ func TestServicePollMarksHandledOnSuccess(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/goravel", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
@@ -949,7 +955,7 @@ func TestServicePollHandlesDeleteBodyError(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/goravel", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
@@ -1052,14 +1058,15 @@ func TestServicePollUsesRoutedRepository(t *testing.T) {
 	// The router sends the event's goravel/goravel mention to goravel/framework.
 	router := mocksagent.NewAgentRouter(t)
 	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).
-		Return(agentImplement, "goravel/framework", nil).
+		Return(constants.AgentImplement, "goravel/framework", "", nil).
 		Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
 			return req.Dir == runDir("/tmp/ws", "goravel/framework", checkoutTime) &&
-				req.Agent == agentImplement &&
+				req.Agent == constants.AgentImplement &&
+				req.Title == "Issue #123" &&
 				!strings.Contains(req.Prompt, "Repository:")
 		})).
 		Return(nil).
@@ -1075,6 +1082,63 @@ func TestServicePollUsesRoutedRepository(t *testing.T) {
 	checkouts := mocksagent.NewCheckouter(t)
 	checkouts.EXPECT().
 		Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/framework", checkoutTime), "goravel/framework").
+		Return(nil).
+		Once()
+
+	reactor := expectReaction(t, "goravel/goravel", reactionCollectionIssue, 24680)
+
+	service := newTestService(router, dispatcher, retry, handles, checkouts, reactor, relayConfig("token", "/tmp/ws"))
+	service.Poll(context.Background())
+
+	httpMock.AssertExpectations(t)
+}
+
+// TestServicePollLeavesTitleEmptyWithoutTarget pins that an event whose payload
+// carries no issue or pull request number has no fallback title: the empty title
+// reaches the dispatcher, which then omits --title so paseo names the run.
+func TestServicePollLeavesTitleEmptyWithoutTarget(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+	httpMock := factory.Http()
+	getResp := mockshttp.NewResponse(t)
+	deleteResp := mockshttp.NewResponse(t)
+
+	getResp.EXPECT().Failed().Return(false).Once()
+	getResp.EXPECT().Body().Return(zeroNumberEnvelope, nil).Once()
+	deleteResp.EXPECT().Body().Return("", nil).Once()
+	deleteResp.EXPECT().Failed().Return(false).Once()
+
+	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Times(2)
+	httpMock.EXPECT().WithQueryParameters(relayQueryParams).Return(httpMock).Once()
+	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Times(2)
+	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
+	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
+
+	// The router returns no title and the payload has no number to fall back to.
+	router := mocksagent.NewAgentRouter(t)
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).
+		Return(constants.AgentReview, "goravel/goravel", "", nil).
+		Once()
+
+	dispatcher := mocksagent.NewDispatcher(t)
+	dispatcher.EXPECT().
+		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
+			return req.Dir == runDir("/tmp/ws", "goravel/goravel", checkoutTime) &&
+				req.Title == ""
+		})).
+		Return(nil).
+		Once()
+
+	retry := mocksagent.NewRetryTracker(t)
+	retry.EXPECT().Reset("d-1").Once()
+
+	handles := mocksagent.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	handles.EXPECT().Mark("d-1").Once()
+
+	checkouts := mocksagent.NewCheckouter(t)
+	checkouts.EXPECT().
+		Ensure(testifymock.Anything, runDir("/tmp/ws", "goravel/goravel", checkoutTime), "goravel/goravel").
 		Return(nil).
 		Once()
 
@@ -1107,14 +1171,14 @@ func TestServicePollFallsBackToSourceRepository(t *testing.T) {
 	// An empty routed repository means "use the source repository".
 	router := mocksagent.NewAgentRouter(t)
 	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).
-		Return(agentReview, "", nil).
+		Return(constants.AgentReview, "", "", nil).
 		Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
 			return req.Dir == runDir("/tmp/ws", "goravel/goravel", checkoutTime) &&
-				req.Agent == agentReview &&
+				req.Agent == constants.AgentReview &&
 				!strings.Contains(req.Prompt, "Repository:")
 		})).
 		Return(nil).
@@ -1167,7 +1231,7 @@ func TestServicePollUsesConfiguredMention(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/2", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/goravel", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
@@ -1217,7 +1281,7 @@ func TestServicePollReactsToMentionedComment(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/goravel", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
@@ -1265,10 +1329,17 @@ func TestServicePollReactsToReviewComment(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/framework", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/framework", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
-	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
+	dispatcher.EXPECT().
+		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
+			return req.Dir == runDir("/tmp/ws", "goravel/framework", checkoutTime) &&
+				req.Agent == constants.AgentReview &&
+				req.Title == "PR #123"
+		})).
+		Return(nil).
+		Once()
 
 	retry := mocksagent.NewRetryTracker(t)
 	retry.EXPECT().Reset("d-1").Once()
@@ -1311,7 +1382,7 @@ func TestServicePollContinuesWhenReactionFails(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/goravel", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
@@ -1361,7 +1432,7 @@ func TestServicePollDoesNotReactToBodyMention(t *testing.T) {
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(agentReview, "goravel/framework", nil).Once()
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/framework", "", nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
