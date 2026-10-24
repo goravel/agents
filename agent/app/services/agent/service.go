@@ -206,13 +206,19 @@ func (s *Service) Poll(ctx context.Context) {
 	s.deleteEvents(ctx, toDelete)
 }
 
-// handle routes the instruction to an agent, resolves the target repository,
-// and runs the agent against its checkout.
+// handle routes the instruction to an agent, resolves the target repository and
+// the run title, and runs the agent against its checkout. A routed title wins;
+// when the router returns none, the run is named after the issue or pull request
+// the mention came from.
 func (s *Service) handle(ctx context.Context, ev *event, instruction string) error {
 	// The router sees the source repository; the agent sees the target.
-	agent, repository, err := s.router.Route(ctx, ev.prompt(instruction, ev.Repository))
+	agent, repository, title, err := s.router.Route(ctx, ev.prompt(instruction, ev.Repository))
 	if err != nil {
 		return err
+	}
+	// A missing AI title still names the run: PR #42 / Issue #123.
+	if title == "" {
+		title = ev.defaultTitle()
 	}
 	if repository == "" {
 		repository = ev.Repository
@@ -227,6 +233,7 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 		Dir:    dir,
 		Agent:  agent,
 		Prompt: ev.agentPrompt(agent, instruction),
+		Title:  title,
 	})
 }
 

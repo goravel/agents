@@ -7,32 +7,41 @@ import (
 	"maps"
 	"os"
 	"slices"
+	"strconv"
 	"strings"
 
 	"github.com/goravel/framework/contracts/ai"
 
+	"goravel/app/constants"
 	"goravel/app/facades"
 	"goravel/app/services/agent/dispatch"
 )
 
 const (
-	agentShip      = "ship"
-	agentImplement = "implement"
-	agentReview    = "review"
-
 	// replyDecoration is the surrounding whitespace, punctuation and markdown
 	// stripped from the router's reply tokens before they are matched.
 	replyDecoration = " \t\r\n.!?\"'`*():[],;"
+
+	// titleLimit caps the title in characters. `paseo ls` truncates the NAME
+	// column at 60 characters, so a longer title is cut in the list.
+	titleLimit = 60
+	// noRepository is the sentinel the router puts on the repository line when
+	// the mention names no usable repository.
+	noRepository = "-"
 )
 
-// AgentRouter chooses which agent should handle an instruction.
+// AgentRouter chooses which agent should handle an instruction, which
+// repository to run against, and the title paseo shows for the run. An empty
+// title means the router inferred none; the service then names the run from the
+// issue or pull request number.
 type AgentRouter interface {
-	// Route decides which agent should handle the prompt and which repository
-	// (owner/name) it should run against. The prompt is untrusted comment text
-	// and may name the repository to work on; routing runs only for allowlisted
-	// senders, so naming a different repository is intended, not an escalation.
-	// An empty repository means "use the source repository".
-	Route(ctx context.Context, prompt string) (string, string, error)
+	// Route decides which agent should handle the prompt, which repository
+	// (owner/name) it should run against, and the title paseo shows for the run.
+	// The prompt is untrusted comment text and may name the repository to work
+	// on; routing runs only for allowlisted senders, so naming a different
+	// repository is intended, not an escalation. An empty repository means "use
+	// the source repository"; an empty title means the router inferred none.
+	Route(ctx context.Context, prompt string) (agent, repository, title string, err error)
 }
 
 // Dispatcher runs an agent for a dispatch request. The request struct lives in
@@ -46,9 +55,9 @@ type Dispatcher interface {
 // agentIntroductions maps each routable agent to the introduction the router
 // prompt shows. Every key needs an agent.models entry.
 var agentIntroductions = map[string]string{
-	agentShip:      "plans the task first, then implements and drives it through review to a pull request",
-	agentImplement: "implements a plan that is already provided, reviews the changes, and opens a pull request",
-	agentReview:    "reviews an existing GitHub pull request and reports findings",
+	constants.AgentShip:      "plans the task first, then implements and drives it through review to a pull request",
+	constants.AgentImplement: "implements a plan that is already provided, reviews the changes, and opens a pull request",
+	constants.AgentReview:    "reviews an existing GitHub pull request and reports findings",
 }
 
 // aiRouter routes instructions to an agent using the configured AI provider.
@@ -59,17 +68,17 @@ func newAIRouter() *aiRouter {
 	return &aiRouter{}
 }
 
-// Route asks the AI provider which agent should handle the prompt and which
-// repository it should run against.
-func (r *aiRouter) Route(ctx context.Context, prompt string) (string, string, error) {
+// Route asks the AI provider which agent should handle the prompt, which
+// repository it should run against, and the title paseo shows for the run.
+func (r *aiRouter) Route(ctx context.Context, prompt string) (string, string, string, error) {
 	prompt = strings.TrimSpace(prompt)
 	if prompt == "" {
-		return "", "", errors.New("empty prompt")
+		return "", "", "", errors.New("empty prompt")
 	}
 
 	conversation, err := facades.AI().WithContext(ctx).Agent(routerAgent{})
 	if err != nil {
-		return "", "", fmt.Errorf("create routing conversation: %w", err)
+		return "", "", "", fmt.Errorf("create routing conversation: %w", err)
 	}
 
 	response, err := conversation.Prompt(prompt)
@@ -77,49 +86,61 @@ func (r *aiRouter) Route(ctx context.Context, prompt string) (string, string, er
 	facades.Log().Debugf("Routing prompt: \n%s\nresponse: %s", prompt, response.Text())
 
 	if err != nil {
-		return "", "", fmt.Errorf("route prompt: %w", err)
+		return "", "", "", fmt.Errorf("route prompt: %w", err)
 	}
 
-	agent, repository, rejected, err := parseReply(response.Text())
+	agent, repository, title, rejected, err := parseReply(response.Text())
 	if err != nil {
-		return "", "", err
+		return "", "", "", err
 	}
 	if rejected != "" {
 		facades.Log().Infof("agent: route: ignoring repository %q from the reply: not a bare owner/name; using the source repository", rejected)
 	}
 
-	return agent, repository, nil
+	return agent, repository, title, nil
 }
 
-// parseReply maps the AI reply to an agent name and an optional repository. The
-// reply is `<agent> <owner/repo>`; the agent is required and normalised, and the
-// repository token is reduced to a bare owner/name (decoration, a GitHub URL
-// prefix and a trailing .git are stripped). A token that is not a bare
-// owner/name is dropped, so an empty repository — meaning "use the source
-// repository" — is returned rather than a bogus clone target. The rejected
-// result carries that dropped token, and is empty only when the reply named no
-// repository, so the caller can log every unusable target.
-func parseReply(reply string) (agent, repository, rejected string, err error) {
-	fields := strings.Fields(reply)
+// parseReply maps the three-line reply to the agent, an optional repository and
+// the run title: `<agent>`, `<owner/repo>` (or `-`) and the title, one value per
+// line because the title is free text. A blank or `-` repository line means "use
+// the source repository"; a token that is not a bare owner/name is dropped and
+// returned as rejected. The reply is trimmed first so a leading blank line
+// cannot swallow the agent line; the title is the third line capped at titleLimit
+// runes, and a reply with fewer than three lines yields an empty title, which the
+// service then names from the event. Only the first token of the agent line is
+// read; extra lines past the title are ignored.
+func parseReply(reply string) (agent, repository, title, rejected string, err error) {
+	lines := strings.Split(strings.TrimSpace(reply), "\n")
+
+	fields := strings.Fields(lines[0])
 	if len(fields) == 0 {
-		return "", "", "", errors.New("empty reply")
+		return "", "", "", "", errors.New("empty reply")
 	}
 
 	agent, err = parseAgent(fields[0])
 	if err != nil {
-		return "", "", "", err
+		return "", "", "", "", err
 	}
 
-	if len(fields) == 1 {
-		return agent, "", "", nil
+	if len(lines) > 1 {
+		if token := strings.TrimSpace(lines[1]); token != "" && token != noRepository {
+			if parsed, ok := parseRepository(token); ok {
+				repository = parsed
+			} else {
+				rejected = token
+			}
+		}
 	}
 
-	repository, ok := parseRepository(fields[1])
-	if !ok {
-		return agent, "", fields[1], nil
+	if len(lines) > 2 {
+		runes := []rune(strings.TrimSpace(lines[2]))
+		if len(runes) > titleLimit {
+			runes = runes[:titleLimit]
+		}
+		title = string(runes)
 	}
 
-	return agent, repository, "", nil
+	return agent, repository, title, rejected, nil
 }
 
 // parseAgent maps a single token to a supported agent name, tolerating
@@ -204,16 +225,18 @@ func isNamePart(part string) bool {
 // routerAgent is the AI agent used to classify instructions.
 type routerAgent struct{}
 
-// Instructions returns the system prompt that constrains the reply to one of
-// the supported agent names and the repository to work on. The prompt gives the
-// repository named by the Instruction precedence over the Repository line, and
-// requires the reply to be a bare owner/name.
+// Instructions returns the system prompt that constrains the reply to one of the
+// supported agent names on line 1, the repository to work on on line 2, and a
+// clear title for the run on line 3. The prompt gives the repository named by the
+// Instruction precedence over the Repository line, requires the repository line
+// to be a bare owner/name (or the `-` sentinel), and asks for the title third.
 func (routerAgent) Instructions() string {
 	names := slices.Sorted(maps.Keys(agentIntroductions))
 
 	var b strings.Builder
 	b.WriteString("Decide how to handle a GitHub mention. ")
-	b.WriteString("Reply with exactly two space-separated tokens: one agent from: ")
+	b.WriteString("Reply with exactly three lines. ")
+	b.WriteString("Line 1 holds one agent from: ")
 	for i, name := range names {
 		if i > 0 {
 			b.WriteString(", ")
@@ -223,11 +246,13 @@ func (routerAgent) Instructions() string {
 		b.WriteString(agentIntroductions[name])
 		b.WriteString(")")
 	}
-	b.WriteString("; then the repository to work on. ")
+	b.WriteString(". ")
+	b.WriteString("Line 2 holds the repository to work on as a bare owner/name, or " + noRepository + " when there is no usable repository. ")
+	b.WriteString("Line 3 holds a clear and simple title for the run: one line, at most " + strconv.Itoa(titleLimit) + " characters, no quotes and no markdown. ")
 	b.WriteString("The " + instructionLabel + " may name a repository, and when it does that repository is the one to work on, even when it differs from the " + repositoryLabel + " line. ")
 	b.WriteString("Only when the " + instructionLabel + " names no repository, or names something that is not a bare owner/name, do you use the " + repositoryLabel + " line. ")
-	b.WriteString("For example, with " + repositoryLabel + ": owner/source and " + instructionLabel + ": ship this issue in owner/target, reply: ship owner/target. ")
-	b.WriteString("Reply with only the agent and the repository as a bare owner/name (no scheme, no URL, no trailing .git, no markdown); never repeat the instruction text. ")
+	b.WriteString("For example, with " + repositoryLabel + ": owner/source and " + instructionLabel + ": ship this issue in owner/target, reply: ship\nowner/target\nShip issue 123 in owner/target. ")
+	b.WriteString("Reply with only those three lines: on line 1 the agent, on line 2 the repository as a bare owner/name (no scheme, no URL, no trailing .git, no markdown) or " + noRepository + ", on line 3 the title; never repeat the instruction text. ")
 	b.WriteString("Do not add any other text.")
 
 	return b.String()
@@ -305,7 +330,8 @@ func agentModels(value any) (map[string]string, error) {
 }
 
 // Run executes `paseo run --mode <mode> --model <model> [--thinking <level>]
-// --no-wait -- <prompt>` in the request's directory with a scrubbed environment.
+// [--title <title>] --no-wait -- <prompt>` in the request's directory with a
+// scrubbed environment.
 func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) error {
 	model, thinking, err := d.modelFor(req.Agent)
 	if err != nil {
@@ -323,6 +349,9 @@ func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) erro
 	}
 	if thinking != "" {
 		args = append(args, "--thinking", thinking)
+	}
+	if req.Title != "" {
+		args = append(args, "--title", req.Title)
 	}
 	// `--` keeps the prompt from being read as a flag.
 	args = append(args, "--no-wait", "--", req.Prompt)

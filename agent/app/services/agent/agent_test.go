@@ -4,16 +4,17 @@ import (
 	"context"
 	"errors"
 	"os"
+	"strings"
 	"testing"
 
 	testifymock "github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
 
-	"github.com/goravel/framework/contracts/process"
 	mocksai "github.com/goravel/framework/mocks/ai"
 	mocksprocess "github.com/goravel/framework/mocks/process"
 	"github.com/goravel/framework/testing/mock"
 
+	"goravel/app/constants"
 	"goravel/app/services/agent/dispatch"
 )
 
@@ -23,53 +24,54 @@ func TestParseReply(t *testing.T) {
 		reply        string
 		wantAgent    string
 		wantRepo     string
+		wantTitle    string
 		wantRejected string
 		wantErr      bool
 	}{
-		{name: "review", reply: "review", wantAgent: agentReview},
-		{name: "ship with spaces", reply: "  SHIP ", wantAgent: agentShip},
-		{name: "implement with trailing punctuation", reply: "implement.", wantAgent: agentImplement},
-		{name: "review with backticks", reply: "`review`", wantAgent: agentReview},
-		{name: "review in bold markdown", reply: "**review**", wantAgent: agentReview},
-		{name: "ship in parentheses", reply: "(ship)", wantAgent: agentShip},
-		{name: "implement with trailing colon", reply: "implement:", wantAgent: agentImplement},
-		{name: "ship with quotes", reply: `"ship"`, wantAgent: agentShip},
-		{name: "implement with newline", reply: "implement\n", wantAgent: agentImplement},
-		{name: "review with carriage return", reply: "review\r\n", wantAgent: agentReview},
+		{name: "review", reply: "review", wantAgent: constants.AgentReview},
+		{name: "ship with spaces", reply: "  SHIP ", wantAgent: constants.AgentShip},
+		{name: "implement with trailing punctuation", reply: "implement.", wantAgent: constants.AgentImplement},
+		{name: "review with backticks", reply: "`review`", wantAgent: constants.AgentReview},
+		{name: "review in bold markdown", reply: "**review**", wantAgent: constants.AgentReview},
+		{name: "ship in parentheses", reply: "(ship)", wantAgent: constants.AgentShip},
+		{name: "implement with trailing colon", reply: "implement:", wantAgent: constants.AgentImplement},
+		{name: "ship with quotes", reply: `"ship"`, wantAgent: constants.AgentShip},
+		{name: "implement with newline", reply: "implement\n", wantAgent: constants.AgentImplement},
+		{name: "review with carriage return", reply: "review\r\n", wantAgent: constants.AgentReview},
 		{
 			name:      "agent and repository",
-			reply:     "implement goravel/framework",
-			wantAgent: agentImplement,
+			reply:     "implement\ngoravel/framework",
+			wantAgent: constants.AgentImplement,
 			wantRepo:  "goravel/framework",
 		},
 		{
-			name:      "multiple spaces between tokens",
-			reply:     "review   goravel/framework",
-			wantAgent: agentReview,
+			name:      "surrounding spaces on the repository line",
+			reply:     "review\n   goravel/framework  ",
+			wantAgent: constants.AgentReview,
 			wantRepo:  "goravel/framework",
 		},
 		{
 			name:      "decorated repository",
-			reply:     "review 'goravel/framework'",
-			wantAgent: agentReview,
+			reply:     "review\n'goravel/framework'",
+			wantAgent: constants.AgentReview,
 			wantRepo:  "goravel/framework",
 		},
 		{
 			name:      "dotted repository name",
-			reply:     "ship goravel/repo.github.io",
-			wantAgent: agentShip,
+			reply:     "ship\ngoravel/repo.github.io",
+			wantAgent: constants.AgentShip,
 			wantRepo:  "goravel/repo.github.io",
 		},
 		{
 			name:      "dotted name",
-			reply:     "ship goravel/.github",
-			wantAgent: agentShip,
+			reply:     "ship\ngoravel/.github",
+			wantAgent: constants.AgentShip,
 			wantRepo:  "goravel/.github",
 		},
 		{
 			name:      "hyphen and underscore in names",
-			reply:     "ship my-org/my_repo",
-			wantAgent: agentShip,
+			reply:     "ship\nmy-org/my_repo",
+			wantAgent: constants.AgentShip,
 			wantRepo:  "my-org/my_repo",
 		},
 		{
@@ -77,50 +79,50 @@ func TestParseReply(t *testing.T) {
 			// falls back to the source repository instead of cloning a bogus
 			// target. The dropped token is reported so Route can log it.
 			name:         "non owner/name token falls back to source",
-			reply:        "ship ../etc",
-			wantAgent:    agentShip,
+			reply:        "ship\n../etc",
+			wantAgent:    constants.AgentShip,
 			wantRejected: "../etc",
 		},
 		{
 			name:         "bare word token falls back to source",
-			reply:        "ship this issue in the goravel repo",
-			wantAgent:    agentShip,
+			reply:        "ship\nthis",
+			wantAgent:    constants.AgentShip,
 			wantRejected: "this",
 		},
 		{
 			name:      "repository with trailing .git",
-			reply:     "ship goravel/framework.git",
-			wantAgent: agentShip,
+			reply:     "ship\ngoravel/framework.git",
+			wantAgent: constants.AgentShip,
 			wantRepo:  "goravel/framework",
 		},
 		{
 			name:      "repository as https URL",
-			reply:     "ship https://github.com/goravel/framework",
-			wantAgent: agentShip,
+			reply:     "ship\nhttps://github.com/goravel/framework",
+			wantAgent: constants.AgentShip,
 			wantRepo:  "goravel/framework",
 		},
 		{
 			name:      "repository as https URL with .git",
-			reply:     "ship https://github.com/goravel/framework.git",
-			wantAgent: agentShip,
+			reply:     "ship\nhttps://github.com/goravel/framework.git",
+			wantAgent: constants.AgentShip,
 			wantRepo:  "goravel/framework",
 		},
 		{
 			name:      "repository as ssh URL",
-			reply:     "ship git@github.com:goravel/framework.git",
-			wantAgent: agentShip,
+			reply:     "ship\ngit@github.com:goravel/framework.git",
+			wantAgent: constants.AgentShip,
 			wantRepo:  "goravel/framework",
 		},
 		{
 			name:      "https URL with trailing slash after .git",
-			reply:     "ship https://github.com/goravel/framework.git/",
-			wantAgent: agentShip,
+			reply:     "ship\nhttps://github.com/goravel/framework.git/",
+			wantAgent: constants.AgentShip,
 			wantRepo:  "goravel/framework",
 		},
 		{
 			name:      "repository with .git and trailing slash",
-			reply:     "ship goravel/framework.git/",
-			wantAgent: agentShip,
+			reply:     "ship\ngoravel/framework.git/",
+			wantAgent: constants.AgentShip,
 			wantRepo:  "goravel/framework",
 		},
 		{
@@ -128,53 +130,140 @@ func TestParseReply(t *testing.T) {
 			// URL shapes are deliberately dropped so the run falls back to the
 			// source repository rather than cloning a bogus target.
 			name:         "uppercase scheme",
-			reply:        "ship HTTPS://github.com/goravel/framework",
-			wantAgent:    agentShip,
+			reply:        "ship\nHTTPS://github.com/goravel/framework",
+			wantAgent:    constants.AgentShip,
 			wantRejected: "HTTPS://github.com/goravel/framework",
 		},
 		{
 			name:         "www host",
-			reply:        "ship www.github.com/goravel/framework",
-			wantAgent:    agentShip,
+			reply:        "ship\nwww.github.com/goravel/framework",
+			wantAgent:    constants.AgentShip,
 			wantRejected: "www.github.com/goravel/framework",
 		},
 		{
 			name:         "ssh scheme URL",
-			reply:        "ship ssh://git@github.com/goravel/framework",
-			wantAgent:    agentShip,
+			reply:        "ship\nssh://git@github.com/goravel/framework",
+			wantAgent:    constants.AgentShip,
 			wantRejected: "ssh://git@github.com/goravel/framework",
 		},
 		{
 			name:         "scheme-less host",
-			reply:        "ship github.com/goravel/framework",
-			wantAgent:    agentShip,
+			reply:        "ship\ngithub.com/goravel/framework",
+			wantAgent:    constants.AgentShip,
 			wantRejected: "github.com/goravel/framework",
 		},
 		{
 			name:         "URL with a path",
-			reply:        "ship https://github.com/goravel/framework/tree/main",
-			wantAgent:    agentShip,
+			reply:        "ship\nhttps://github.com/goravel/framework/tree/main",
+			wantAgent:    constants.AgentShip,
 			wantRejected: "https://github.com/goravel/framework/tree/main",
 		},
 		{
 			// A dots-only name is not a plausible repository, so it is dropped
 			// rather than handed to checkout as a bogus clone target.
 			name:         "dots-only name falls back to source",
-			reply:        "ship uwu/../..",
-			wantAgent:    agentShip,
+			reply:        "ship\nuwu/../..",
+			wantAgent:    constants.AgentShip,
 			wantRejected: "uwu/../..",
 		},
 		{
 			name:         "dots-only token falls back to source",
-			reply:        "ship uwu/..",
-			wantAgent:    agentShip,
+			reply:        "ship\nuwu/..",
+			wantAgent:    constants.AgentShip,
 			wantRejected: "uwu/..",
 		},
 		{
 			name:         "empty repository token",
-			reply:        "implement .",
-			wantAgent:    agentImplement,
+			reply:        "implement\n.",
+			wantAgent:    constants.AgentImplement,
 			wantRejected: ".",
+		},
+		{
+			name:      "agent and title",
+			reply:     "ship\n-\nShip the login fix",
+			wantAgent: constants.AgentShip,
+			wantTitle: "Ship the login fix",
+		},
+		{
+			name:      "agent, repository and title",
+			reply:     "ship\ngoravel/framework\nShip issue 123 in goravel/framework",
+			wantAgent: constants.AgentShip,
+			wantRepo:  "goravel/framework",
+			wantTitle: "Ship issue 123 in goravel/framework",
+		},
+		{
+			// The title is returned trimmed but otherwise verbatim: no label,
+			// quote or markdown cleanup.
+			name:      "title is returned verbatim",
+			reply:     "ship\n-\n\"Ship issue 123\"",
+			wantAgent: constants.AgentShip,
+			wantTitle: "\"Ship issue 123\"",
+		},
+		{
+			// Only the third line is the title: anything after it is ignored.
+			name:      "only the third line is the title",
+			reply:     "ship\n-\nShip issue 123\nand more detail",
+			wantAgent: constants.AgentShip,
+			wantTitle: "Ship issue 123",
+		},
+		{
+			// An empty repository line means "use the source repository".
+			name:      "empty repository line",
+			reply:     "ship\n\nShip the login fix",
+			wantAgent: constants.AgentShip,
+			wantTitle: "Ship the login fix",
+		},
+		{
+			// `-` is the router's sentinel for "no usable repository".
+			name:      "dash repository sentinel",
+			reply:     "ship\n-\nShip the login fix",
+			wantAgent: constants.AgentShip,
+			wantTitle: "Ship the login fix",
+		},
+		{
+			// A two-line reply routes but names no title.
+			name:      "two-line reply has no title",
+			reply:     "ship\ngoravel/framework",
+			wantAgent: constants.AgentShip,
+			wantRepo:  "goravel/framework",
+			wantTitle: "",
+		},
+		{
+			name:      "empty title line",
+			reply:     "ship\ngoravel/framework\n",
+			wantAgent: constants.AgentShip,
+			wantRepo:  "goravel/framework",
+			wantTitle: "",
+		},
+		{
+			name:      "long title is capped",
+			reply:     "ship\n-\n" + strings.Repeat("a", 70),
+			wantAgent: constants.AgentShip,
+			wantTitle: strings.Repeat("a", 60),
+		},
+		{
+			name:      "long unicode title is capped by rune",
+			reply:     "ship\n-\n" + strings.Repeat("é", 70),
+			wantAgent: constants.AgentShip,
+			wantTitle: strings.Repeat("é", 60),
+		},
+		{
+			// Only line 2 carries the repository: a token beside the agent on
+			// line 1 is not parsed, so nothing is routed or reported.
+			name:      "repository on the agent line is ignored",
+			reply:     "ship goravel/framework",
+			wantAgent: constants.AgentShip,
+			wantRepo:  "",
+			wantTitle: "",
+		},
+		{
+			// A model reply that opens with a blank line must still route: the
+			// reply is trimmed before it is split on the first newline.
+			name:      "leading newline",
+			reply:     "\nship\ngoravel/framework\nShip issue 123 in goravel/framework",
+			wantAgent: constants.AgentShip,
+			wantRepo:  "goravel/framework",
+			wantTitle: "Ship issue 123 in goravel/framework",
 		},
 		{name: "empty", reply: "", wantErr: true},
 		{name: "unrecognised", reply: "nonsense", wantErr: true},
@@ -183,7 +272,7 @@ func TestParseReply(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			agent, repository, rejected, err := parseReply(test.reply)
+			agent, repository, title, rejected, err := parseReply(test.reply)
 			if test.wantErr {
 				require.Error(t, err)
 				return
@@ -191,6 +280,7 @@ func TestParseReply(t *testing.T) {
 			require.NoError(t, err)
 			require.Equal(t, test.wantAgent, agent)
 			require.Equal(t, test.wantRepo, repository)
+			require.Equal(t, test.wantTitle, title)
 			require.Equal(t, test.wantRejected, rejected)
 		})
 	}
@@ -198,19 +288,24 @@ func TestParseReply(t *testing.T) {
 
 func TestRouterAgentInstructions(t *testing.T) {
 	// The prompt is pinned exactly: the reply vocabulary must stay the agent
-	// names parseAgent accepts, followed by the repository to work on.
+	// names parseAgent accepts on line 1, the repository on line 2 and the run
+	// title on line 3. The character budget here mirrors titleLimit (60, the
+	// `paseo ls` NAME width): the prompt is built from that constant, so changing
+	// the cap must be a deliberate change to this pin too.
 	require.Equal(t,
 		"Decide how to handle a GitHub mention. "+
-			"Reply with exactly two space-separated tokens: one agent from: "+
+			"Reply with exactly three lines. "+
+			"Line 1 holds one agent from: "+
 			"implement (implements a plan that is already provided, reviews the changes, and opens a pull request), "+
 			"review (reviews an existing GitHub pull request and reports findings), "+
-			"ship (plans the task first, then implements and drives it through review to a pull request); "+
-			"then the repository to work on. "+
+			"ship (plans the task first, then implements and drives it through review to a pull request). "+
+			"Line 2 holds the repository to work on as a bare owner/name, or - when there is no usable repository. "+
+			"Line 3 holds a clear and simple title for the run: one line, at most 60 characters, no quotes and no markdown. "+
 			"The Instruction may name a repository, and when it does that repository is the one to work on, "+
 			"even when it differs from the Repository line. "+
 			"Only when the Instruction names no repository, or names something that is not a bare owner/name, do you use the Repository line. "+
-			"For example, with Repository: owner/source and Instruction: ship this issue in owner/target, reply: ship owner/target. "+
-			"Reply with only the agent and the repository as a bare owner/name (no scheme, no URL, no trailing .git, no markdown); "+
+			"For example, with Repository: owner/source and Instruction: ship this issue in owner/target, reply: ship\nowner/target\nShip issue 123 in owner/target. "+
+			"Reply with only those three lines: on line 1 the agent, on line 2 the repository as a bare owner/name (no scheme, no URL, no trailing .git, no markdown) or -, on line 3 the title; "+
 			"never repeat the instruction text. "+
 			"Do not add any other text.",
 		routerAgent{}.Instructions())
@@ -218,6 +313,7 @@ func TestRouterAgentInstructions(t *testing.T) {
 
 func TestAIRouterRoute(t *testing.T) {
 	factory := mock.Factory()
+	factory.Log()
 	aiMock := factory.AI()
 	conversation := mocksai.NewConversation(t)
 	response := mocksai.NewAgentResponse(t)
@@ -225,13 +321,15 @@ func TestAIRouterRoute(t *testing.T) {
 	aiMock.EXPECT().WithContext(testifymock.Anything).Return(aiMock).Once()
 	aiMock.EXPECT().Agent(routerAgent{}).Return(conversation, nil).Once()
 	conversation.EXPECT().Prompt("review this change").Return(response, nil).Once()
-	response.EXPECT().Text().Return("review goravel/framework").Once()
+	// Text is read twice: once by the route debug log, once by parseReply.
+	response.EXPECT().Text().Return("review\ngoravel/framework\nReview PR 42").Twice()
 
 	router := newAIRouter()
-	agent, repository, err := router.Route(context.Background(), "review this change")
+	agent, repository, title, err := router.Route(context.Background(), "review this change")
 	require.NoError(t, err)
-	require.Equal(t, agentReview, agent)
+	require.Equal(t, constants.AgentReview, agent)
 	require.Equal(t, "goravel/framework", repository)
+	require.Equal(t, "Review PR 42", title)
 	aiMock.AssertExpectations(t)
 }
 
@@ -245,20 +343,22 @@ func TestAIRouterRouteRejectedRepository(t *testing.T) {
 	aiMock.EXPECT().WithContext(testifymock.Anything).Return(aiMock).Once()
 	aiMock.EXPECT().Agent(routerAgent{}).Return(conversation, nil).Once()
 	conversation.EXPECT().Prompt("review this change").Return(response, nil).Once()
-	response.EXPECT().Text().Return("review this issue").Once()
+	// Text is read twice: once by the route debug log, once by parseReply.
+	response.EXPECT().Text().Return("review\nthis issue").Twice()
 
 	router := newAIRouter()
-	agent, repository, err := router.Route(context.Background(), "review this change")
+	agent, repository, title, err := router.Route(context.Background(), "review this change")
 	require.NoError(t, err)
-	require.Equal(t, agentReview, agent)
+	require.Equal(t, constants.AgentReview, agent)
 	require.Empty(t, repository)
+	require.Empty(t, title)
 	aiMock.AssertExpectations(t)
 }
 
 func TestAIRouterRouteEmptyPrompt(t *testing.T) {
 	router := newAIRouter()
 
-	_, _, err := router.Route(context.Background(), "   ")
+	_, _, _, err := router.Route(context.Background(), "   ")
 	require.Error(t, err)
 }
 
@@ -270,22 +370,27 @@ func TestAIRouterRouteAIError(t *testing.T) {
 	aiMock.EXPECT().Agent(routerAgent{}).Return(nil, errors.New("boom")).Once()
 
 	router := newAIRouter()
-	_, _, err := router.Route(context.Background(), "do something")
+	_, _, _, err := router.Route(context.Background(), "do something")
 	require.Error(t, err)
 	aiMock.AssertExpectations(t)
 }
 
 func TestAIRouterRoutePromptError(t *testing.T) {
 	factory := mock.Factory()
+	factory.Log()
 	aiMock := factory.AI()
 	conversation := mocksai.NewConversation(t)
+	response := mocksai.NewAgentResponse(t)
 
 	aiMock.EXPECT().WithContext(testifymock.Anything).Return(aiMock).Once()
 	aiMock.EXPECT().Agent(routerAgent{}).Return(conversation, nil).Once()
-	conversation.EXPECT().Prompt("do something").Return(nil, errors.New("provider down")).Once()
+	conversation.EXPECT().Prompt("do something").Return(response, errors.New("provider down")).Once()
+	// The route debug log reads Text before the error is inspected, so the
+	// response is non-nil here; only the wrapped error is asserted below.
+	response.EXPECT().Text().Return("").Once()
 
 	router := newAIRouter()
-	_, _, err := router.Route(context.Background(), "do something")
+	_, _, _, err := router.Route(context.Background(), "do something")
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "route prompt")
 	aiMock.AssertExpectations(t)
@@ -293,6 +398,7 @@ func TestAIRouterRoutePromptError(t *testing.T) {
 
 func TestAIRouterRouteUnrecognisedReply(t *testing.T) {
 	factory := mock.Factory()
+	factory.Log()
 	aiMock := factory.AI()
 	conversation := mocksai.NewConversation(t)
 	response := mocksai.NewAgentResponse(t)
@@ -300,10 +406,11 @@ func TestAIRouterRouteUnrecognisedReply(t *testing.T) {
 	aiMock.EXPECT().WithContext(testifymock.Anything).Return(aiMock).Once()
 	aiMock.EXPECT().Agent(routerAgent{}).Return(conversation, nil).Once()
 	conversation.EXPECT().Prompt("do something").Return(response, nil).Once()
-	response.EXPECT().Text().Return("nonsense").Once()
+	// Text is read twice: once by the route debug log, once by parseReply.
+	response.EXPECT().Text().Return("nonsense").Twice()
 
 	router := newAIRouter()
-	_, _, err := router.Route(context.Background(), "do something")
+	_, _, _, err := router.Route(context.Background(), "do something")
 	require.Error(t, err)
 	aiMock.AssertExpectations(t)
 }
@@ -317,14 +424,14 @@ func scrubbedEnvArgs() []any {
 // testModels is the mode → model map the dispatcher tests run with.
 func testModels() map[string]string {
 	return map[string]string{
-		agentShip:      "opencode-go/deepseek-v4.1-flash#high",
-		agentImplement: "opencode-go/deepseek-v4.1-flash#high",
-		agentReview:    "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
 	}
 }
 
 // dispatcherArgs returns the argv the dispatcher builds, with `do it` as prompt.
-func dispatcherArgs(mode, model, thinking string) []any {
+func dispatcherArgs(mode, model, thinking, title string) []any {
 	args := append(scrubbedEnvArgs(), "paseo", "run",
 		"--provider", "opencode",
 		"--mode", mode,
@@ -333,21 +440,25 @@ func dispatcherArgs(mode, model, thinking string) []any {
 	if thinking != "" {
 		args = append(args, "--thinking", thinking)
 	}
+	if title != "" {
+		args = append(args, "--title", title)
+	}
 
 	return append(args, "--no-wait", "--", "do it")
 }
 
 func TestOpencodeDispatcherRun(t *testing.T) {
-	processMock := mock.Factory().Process()
+	factory := mock.Factory()
+	factory.Log()
+	processMock := factory.Process()
 	result := mocksprocess.NewResult(t)
 
-	args := dispatcherArgs(agentReview, "opencode-go/deepseek-v4.1-flash", "high")
+	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "high", "Review PR 42")
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
-	processMock.EXPECT().OnOutput(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 	result.EXPECT().Failed().Return(false).Once()
 
@@ -356,6 +467,7 @@ func TestOpencodeDispatcherRun(t *testing.T) {
 		Dir:    "/tmp/ws/goravel/goravel",
 		Agent:  "review",
 		Prompt: "do it",
+		Title:  "Review PR 42",
 	}))
 
 	processMock.AssertExpectations(t)
@@ -363,52 +475,48 @@ func TestOpencodeDispatcherRun(t *testing.T) {
 }
 
 func TestOpencodeDispatcherRunFailure(t *testing.T) {
-	processMock := mock.Factory().Process()
+	factory := mock.Factory()
+	factory.Log()
+	processMock := factory.Process()
 	result := mocksprocess.NewResult(t)
 
-	args := dispatcherArgs(agentShip, "opencode-go/deepseek-v4.1-flash", "high")
+	args := dispatcherArgs(constants.AgentShip, "opencode-go/deepseek-v4.1-flash", "high", "Ship issue 123")
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/framework").Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
-	// The dispatcher captures stderr via OnOutput; simulate a line arriving.
-	processMock.EXPECT().OnOutput(testifymock.Anything).
-		Run(func(handler process.OnOutputFunc) {
-			handler(process.OutputTypeStdout, []byte("ignored"))
-			handler(process.OutputTypeStderr, []byte("boom"))
-		}).
-		Return(processMock).
-		Once()
 	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 	result.EXPECT().Failed().Return(true).Once()
 	result.EXPECT().ExitCode().Return(2).Once()
+	result.EXPECT().Error().Return(errors.New("boom")).Once()
 
 	dispatcher := newOpencodeDispatcher(testModels())
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:    "/tmp/ws/goravel/framework",
 		Agent:  "ship",
 		Prompt: "do it",
+		Title:  "Ship issue 123",
 	})
 	require.Error(t, err)
-	require.Contains(t, err.Error(), `"boom"`)
+	require.Contains(t, err.Error(), "boom")
 
 	processMock.AssertExpectations(t)
 	result.AssertExpectations(t)
 }
 
 func TestOpencodeDispatcherRunStartError(t *testing.T) {
-	processMock := mock.Factory().Process()
+	factory := mock.Factory()
+	factory.Log()
+	processMock := factory.Process()
 	result := mocksprocess.NewResult(t)
 
-	args := dispatcherArgs(agentReview, "opencode-go/deepseek-v4.1-flash", "high")
+	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "high", "Review PR 42")
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
-	// No stderr captured, so the start error is reported instead.
-	processMock.EXPECT().OnOutput(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 	result.EXPECT().Failed().Return(true).Once()
 	result.EXPECT().ExitCode().Return(-1).Once()
@@ -419,6 +527,7 @@ func TestOpencodeDispatcherRunStartError(t *testing.T) {
 		Dir:    "/tmp/ws/goravel/goravel",
 		Agent:  "review",
 		Prompt: "do it",
+		Title:  "Review PR 42",
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "start failed")
@@ -440,11 +549,11 @@ func TestOpencodeDispatcherRunUnknownMode(t *testing.T) {
 	mock.Factory().Process()
 
 	dispatcher := newOpencodeDispatcher(map[string]string{
-		agentShip: "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high",
 	})
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:    "/tmp/ws/goravel/goravel",
-		Agent:  agentReview,
+		Agent:  constants.AgentReview,
 		Prompt: "do it",
 	})
 	require.EqualError(t, err, `no model configured for mode "review"`)
@@ -456,7 +565,7 @@ func TestOpencodeDispatcherRunEmptyModels(t *testing.T) {
 	dispatcher := newOpencodeDispatcher(nil)
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:    "/tmp/ws/goravel/goravel",
-		Agent:  agentShip,
+		Agent:  constants.AgentShip,
 		Prompt: "do it",
 	})
 	require.EqualError(t, err, `no model configured for mode "ship"`)
@@ -464,25 +573,26 @@ func TestOpencodeDispatcherRunEmptyModels(t *testing.T) {
 
 func TestOpencodeDispatcherRunWithoutThinking(t *testing.T) {
 	// A value with no `#` produces no `--thinking` flag.
-	processMock := mock.Factory().Process()
+	factory := mock.Factory()
+	factory.Log()
+	processMock := factory.Process()
 	result := mocksprocess.NewResult(t)
 
-	args := dispatcherArgs(agentReview, "opencode-go/deepseek-v4.1-flash", "")
+	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "", "")
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
-	processMock.EXPECT().OnOutput(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 	result.EXPECT().Failed().Return(false).Once()
 
 	dispatcher := newOpencodeDispatcher(map[string]string{
-		agentReview: "opencode-go/deepseek-v4.1-flash",
+		constants.AgentReview: "opencode-go/deepseek-v4.1-flash",
 	})
 	require.NoError(t, dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:    "/tmp/ws/goravel/goravel",
-		Agent:  agentReview,
+		Agent:  constants.AgentReview,
 		Prompt: "do it",
 	}))
 
@@ -508,8 +618,8 @@ func TestModelFor(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			dispatcher := newOpencodeDispatcher(map[string]string{agentReview: test.entry})
-			model, thinking, err := dispatcher.modelFor(agentReview)
+			dispatcher := newOpencodeDispatcher(map[string]string{constants.AgentReview: test.entry})
+			model, thinking, err := dispatcher.modelFor(constants.AgentReview)
 			if test.wantErr != "" {
 				require.EqualError(t, err, test.wantErr)
 				return
@@ -535,22 +645,22 @@ func TestAgentModels(t *testing.T) {
 		{name: "not a map[string]string", value: "opencode-go/deepseek-v4.1-flash#high", wantErr: "agent: agent.models must map every agent to a <model>[#<thinking>] entry"},
 		{
 			name:    "map of any",
-			value:   map[string]any{agentShip: "opencode-go/deepseek-v4.1-flash#high", agentImplement: "opencode-go/deepseek-v4.1-flash#high", agentReview: "opencode-go/deepseek-v4.1-flash#high"},
+			value:   map[string]any{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "opencode-go/deepseek-v4.1-flash#high"},
 			wantErr: "agent: agent.models must map every agent to a <model>[#<thinking>] entry",
 		},
 		{
 			name:    "agent without model",
-			value:   map[string]string{agentShip: "opencode-go/deepseek-v4.1-flash#high", agentImplement: "opencode-go/deepseek-v4.1-flash#high"},
+			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high"},
 			wantErr: `agent: agent.models has no model for the "review" agent`,
 		},
 		{
 			name:    "blank agent model",
-			value:   map[string]string{agentShip: "opencode-go/deepseek-v4.1-flash#high", agentImplement: "opencode-go/deepseek-v4.1-flash#high", agentReview: "  "},
+			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "  "},
 			wantErr: `agent: agent.models has no model for the "review" agent`,
 		},
 		{
 			name:    "entry without model",
-			value:   map[string]string{agentShip: "opencode-go/deepseek-v4.1-flash#high", agentImplement: "opencode-go/deepseek-v4.1-flash#high", agentReview: "#max"},
+			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "#max"},
 			wantErr: `agent: agent.models has no model for the "review" agent`,
 		},
 	}

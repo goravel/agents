@@ -4,6 +4,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"goravel/app/constants"
 )
 
 const sampleRelayResponse = `{
@@ -209,6 +211,28 @@ func TestEventTarget(t *testing.T) {
 	}
 }
 
+// TestEventDefaultTitle pins the fallback run title built from the event: a pull
+// request yields `PR #<n>`, an issue `Issue #<n>`, and a payload without a
+// number yields no title at all.
+func TestEventDefaultTitle(t *testing.T) {
+	tests := []struct {
+		name  string
+		event event
+		want  string
+	}{
+		{name: "pull request number", event: event{Repository: "goravel/framework", Payload: `{"number":42,"pull_request":{"number":42}}`}, want: "PR #42"},
+		{name: "issue number", event: event{Repository: "goravel/goravel", Payload: `{"number":123,"comment":{"body":"@goravel-agent review"}}`}, want: "Issue #123"},
+		{name: "issue number only", event: event{Repository: "goravel/goravel", Payload: `{"issue":{"number":7,"body":"@goravel-agent review"}}`}, want: "Issue #7"},
+		{name: "no number", event: event{Repository: "goravel/goravel", Payload: `{"comment":{"body":"@goravel-agent review"}}`}, want: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, test.event.defaultTitle())
+		})
+	}
+}
+
 // TestEventReaction pins which comment the eyes reaction targets: conversation
 // comments go through the issues collection, inline review comments through the
 // pull request collection, and a body-only mention has no comment at all.
@@ -292,13 +316,13 @@ func TestEventAgentPrompt(t *testing.T) {
 	want := body + "\n" +
 		"comment the review result to the pr"
 
-	got := event.agentPrompt(agentReview, "review")
+	got := event.agentPrompt(constants.AgentReview, "review")
 	require.Equal(t, want, got)
 	require.NotContains(t, got, "Repository:")
 
 	// A non-review agent on the same pull request keeps the bare context block,
 	// so the review-only gate cannot silently widen to every agent on a PR.
-	require.Equal(t, body, event.agentPrompt(agentShip, "review"))
+	require.Equal(t, body, event.agentPrompt(constants.AgentShip, "review"))
 }
 
 // TestEventAgentPromptReviewOnIssue pins that a review mention on a plain issue
@@ -313,7 +337,7 @@ func TestEventAgentPromptReviewOnIssue(t *testing.T) {
 	want := "Issue: https://github.com/goravel/goravel/issues/45\n" +
 		"comment: https://github.com/goravel/goravel/issues/45#issuecomment-24680\n" +
 		"Instruction: review"
-	require.Equal(t, want, event.agentPrompt(agentReview, "review"))
+	require.Equal(t, want, event.agentPrompt(constants.AgentReview, "review"))
 }
 
 func TestEventPromptWithoutComment(t *testing.T) {

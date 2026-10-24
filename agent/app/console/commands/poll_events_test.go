@@ -9,6 +9,8 @@ import (
 
 	mockshttp "github.com/goravel/framework/mocks/http/client"
 	"github.com/goravel/framework/testing/mock"
+
+	"goravel/app/constants"
 )
 
 func TestPollEventsHandle(t *testing.T) {
@@ -21,9 +23,9 @@ func TestPollEventsHandle(t *testing.T) {
 	configMock.EXPECT().GetString("agent.workspace").Return("/tmp/ws").Once()
 	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen").Once()
 	configMock.EXPECT().Get("agent.models").Return(map[string]string{
-		"ship":      "opencode-go/deepseek-v4.1-flash#high",
-		"implement": "opencode-go/deepseek-v4.1-flash#high",
-		"review":    "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
 	}).Once()
 	configMock.EXPECT().GetString("agent.mention").Return("@goravel-agent").Once()
 	configMock.EXPECT().GetString("agent.github_token").Return("").Once()
