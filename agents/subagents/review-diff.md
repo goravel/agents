@@ -53,6 +53,7 @@ Detect the languages in the diff scope by extension. The six-way fan-out is opti
 
 - **Go present** → spawn `subagents/go-review` six times in parallel, one per SIDE: safe, logic, performance, standard, testing, architecture. Give each `SIDE`, `WORKTREE_DIR`, `DIFF_BASE`, the languages, its own `PRIOR` anchors (from `<folder>/findings-by-side.json`), and `<folder>/considered.md`. Findings only.
 - **No Go** → skip the workers and review the diff inline over those same six dimensions: safe, logic, performance, standard, testing, architecture.
+- **Comments (both paths).** A comment earns its place only by explaining why, a non-obvious constraint, or a gotcha the code cannot show. Flag comments the delta adds or rewrites that restate the code, narrate a step, banner a section, leave commented-out code, or are unclear, too long, or not plain. When the fan-out runs, the `standard` SIDE raises them; when you review inline (Go or not), raise them yourself and tag them `standard` in `findings-by-side.json`. Report them as Maybe Fix.
 - When you do use the workers, reuse their sessions across rounds: round 1 saves the six `sessionID`s to `<folder>/reviewers.json`; later rounds resume them — never respawn.
 
 ## 3. Merge

@@ -62,6 +62,7 @@ Fan out, merge, and filter to the diff.
 - Detect the languages from the diff scope by extension (`.go`; `.ts/.tsx/.js/.jsx/.mjs/.cjs`; `.dart`; `.py`; mixed → each language separately).
 - **Go present** → spawn `subagents/go-review` six times in parallel, one per SIDE: safe, logic, performance, standard, testing, architecture. Prompt each with `SIDE=<name>`, the diff scope, the languages, and the step-1 context (`WORKTREE_DIR` + `BASE_BRANCH`). Findings only (no headers/intro/summary); scoped per the go-review Scope rule — anchor on an added or modified line (±1), and anchor a change's consequence in unchanged code back to the changed line; drop the rest silently.
 - **No Go** → do not spawn it; review the diff inline over the same six dimensions using general best practices for the languages, same scope rule.
+- **Comments (both paths).** A comment earns its place only by explaining why, a non-obvious constraint, or a gotcha the code cannot show. Flag comments the diff adds or rewrites that restate the code, narrate a step, banner a section, leave commented-out code, or are unclear, too long, or not plain. When the fan-out runs the `standard` SIDE raises them; whatever you review inline, raise them yourself. Report them as Maybe Fix.
 - Merge: dedupe by `file:line` + Title (anchor line only) → the **unfiltered set**.
 - Scope filter — keep a finding only within ±1 line of an added line:
 
