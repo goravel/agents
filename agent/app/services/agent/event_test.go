@@ -234,12 +234,34 @@ func TestEventAgentPrompt(t *testing.T) {
 			`"comment":{"id":24680,"html_url":"https://github.com/goravel/goravel/pull/123#issuecomment-24680","body":"@goravel-agent review"}}`,
 	}
 
-	want := "PR: https://github.com/goravel/goravel/pull/123\n" +
+	body := "PR: https://github.com/goravel/goravel/pull/123\n" +
 		"comment: https://github.com/goravel/goravel/pull/123#issuecomment-24680\n" +
 		"Instruction: review"
-	got := event.agentPrompt("review")
+	want := body + "\n" +
+		"the user asked you to comment the result to the pr"
+
+	got := event.agentPrompt(agentReview, "review")
 	require.Equal(t, want, got)
 	require.NotContains(t, got, "Repository:")
+
+	// A non-review agent on the same pull request keeps the bare context block,
+	// so the review-only gate cannot silently widen to every agent on a PR.
+	require.Equal(t, body, event.agentPrompt(agentShip, "review"))
+}
+
+// TestEventAgentPromptReviewOnIssue pins that a review mention on a plain issue
+// is not steered: only a pull request gets the post-to-PR line.
+func TestEventAgentPromptReviewOnIssue(t *testing.T) {
+	event := &event{
+		Event:      "issue_comment",
+		Repository: "goravel/goravel",
+		Payload:    `{"number":45,"comment":{"id":24680,"body":"@goravel-agent review"}}`,
+	}
+
+	want := "Issue: https://github.com/goravel/goravel/issues/45\n" +
+		"comment: https://github.com/goravel/goravel/issues/45#issuecomment-24680\n" +
+		"Instruction: review"
+	require.Equal(t, want, event.agentPrompt(agentReview, "review"))
 }
 
 func TestEventPromptWithoutComment(t *testing.T) {
