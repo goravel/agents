@@ -209,6 +209,58 @@ func TestEventTarget(t *testing.T) {
 	}
 }
 
+// TestEventReaction pins which comment the eyes reaction targets: conversation
+// comments go through the issues collection, inline review comments through the
+// pull request collection, and a body-only mention has no comment at all.
+func TestEventReaction(t *testing.T) {
+	tests := []struct {
+		name           string
+		event          string
+		payload        string
+		wantCollection string
+		wantID         int64
+		wantOK         bool
+	}{
+		{
+			name:           "conversation comment",
+			event:          "issue_comment",
+			payload:        `{"number":123,"comment":{"id":24680,"body":"@goravel-agent review"}}`,
+			wantCollection: reactionCollectionIssue,
+			wantID:         24680,
+			wantOK:         true,
+		},
+		{
+			name:           "inline review comment",
+			event:          "pull_request_review_comment",
+			payload:        `{"pull_request":{"number":123},"comment":{"id":98765,"body":"@goravel-agent review"}}`,
+			wantCollection: reactionCollectionReview,
+			wantID:         98765,
+			wantOK:         true,
+		},
+		{
+			name:    "issue body only",
+			event:   "issues",
+			payload: `{"number":5,"issue":{"number":5,"body":"@goravel-agent review"}}`,
+		},
+		{
+			name:    "invalid payload",
+			event:   "issue_comment",
+			payload: `not json`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event := &event{Event: test.event, Payload: test.payload}
+
+			collection, commentID, ok := event.reaction()
+			require.Equal(t, test.wantOK, ok)
+			require.Equal(t, test.wantCollection, collection)
+			require.Equal(t, test.wantID, commentID)
+		})
+	}
+}
+
 func TestEventPrompt(t *testing.T) {
 	event := &event{
 		Event:      "issue_comment",

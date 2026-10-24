@@ -21,21 +21,28 @@ const (
 	apiTokenHeader = "X-Api-Token"
 	// deleteConcurrency bounds the number of concurrent acknowledgement requests.
 	deleteConcurrency = 5
+	// reactTimeout bounds the best-effort eyes reaction so an unresponsive GitHub
+	// cannot stall the poll loop before the dispatch and the acknowledgement.
+	reactTimeout = 10 * time.Second
 )
 
 // Service polls the relay for @goravel-agent mentions and dispatches agents.
 //
-// The router, dispatcher, checkouter, retry tracker and handle store are
-// injected because their policies (agent choice, CLI invocation, checkout,
-// retry cap, dedupe) are the interesting parts to substitute in tests. The HTTP
-// client and logger are resolved from the global facades on purpose: they are
-// framework singletons and the app facades are the supported way to reach them.
+// The router, dispatcher, checkouter, retry tracker, handle store and reactor
+// are injected because their policies (agent choice, CLI invocation, checkout,
+// retry cap, dedupe, acknowledgement) are the interesting parts to substitute in
+// tests. The HTTP client and logger are resolved from the global facades on
+// purpose: they are framework singletons and the app facades are the supported
+// way to reach them.
 type Service struct {
 	router     AgentRouter
 	dispatcher Dispatcher
 	checkouts  Checkouter
 	retry      RetryTracker
 	handles    HandleStore
+
+	// reactor acknowledges a mention comment with an eyes reaction.
+	reactor Reactor
 
 	// mention is the handle that triggers an agent run (AGENT_MENTION).
 	mention string
@@ -65,12 +72,23 @@ func NewService() (*Service, error) {
 		return nil, errors.New("agent: AGENT_ALLOWED_SENDERS must not be empty")
 	}
 
+	// The empty base URL keeps go-github's default (https://api.github.com/).
+	reactor, err := newGitHubReactor(
+		config.GetString("agent.github_token"),
+		facades.Http().HttpClient(),
+		"",
+	)
+	if err != nil {
+		return nil, err
+	}
+
 	return &Service{
 		router:         newAIRouter(),
 		dispatcher:     newOpencodeDispatcher(),
 		checkouts:      newGitCheckouter(),
 		retry:          newCacheRetryTracker(),
 		handles:        newCacheHandleStore(),
+		reactor:        reactor,
 		mention:        normalizeMention(config.GetString("agent.mention")),
 		apiToken:       config.GetString("agent.api_token"),
 		workspaceRoot:  resolveWorkspace(config.GetString("agent.workspace")),
@@ -155,6 +173,12 @@ func (s *Service) Poll(ctx context.Context) {
 			continue
 		}
 
+		// The reaction is best-effort and network-bound, so give it its own short
+		// deadline: a hung GitHub must never delay dispatch or the acknowledgement.
+		reactCtx, cancel := context.WithTimeout(ctx, reactTimeout)
+		s.react(reactCtx, ev)
+		cancel()
+
 		if err := s.handle(ctx, ev, instruction); err != nil {
 			facades.Log().Errorf("agent: handle event %d: %v", ev.ID, err)
 			if !s.retry.RecordFailure(key) {
@@ -197,6 +221,21 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 		Agent:  agent,
 		Prompt: ev.agentPrompt(agent, instruction),
 	})
+}
+
+// react adds the eyes reaction to the triggering comment so the sender sees the
+// mention was picked up. It is best-effort: a failure is logged and the run
+// continues, and a body-only mention (no comment) is left alone. The caller
+// bounds the call with reactTimeout so a hung request cannot stall the loop.
+func (s *Service) react(ctx context.Context, ev *event) {
+	collection, commentID, ok := ev.reaction()
+	if !ok {
+		return
+	}
+
+	if err := s.reactor.React(ctx, ev.Repository, collection, commentID); err != nil {
+		facades.Log().Errorf("agent: react to event %d: %v", ev.ID, err)
+	}
 }
 
 // deleteEvents acknowledges the drained events with a bounded worker pool so a

@@ -21,6 +21,9 @@ const (
 	// issue/PR body without a new mention.
 	eventActionCreated = "created"
 	eventActionOpened  = "opened"
+	// eventPullRequestReviewComment is the GitHub event for an inline review
+	// comment; its comment is addressed through the pull request collection.
+	eventPullRequestReviewComment = "pull_request_review_comment"
 )
 
 // envelope is the relay's paginated response wrapper.
@@ -339,4 +342,22 @@ func (e *event) commentLink(payload *githubPayload) string {
 
 	return gitWebURL + e.Repository + "/" + path + "/" +
 		strconv.Itoa(e.target()) + "#issuecomment-" + strconv.FormatInt(payload.Comment.ID, 10)
+}
+
+// reaction reports which comment the eyes reaction belongs to. A comment
+// mention carries the comment under `comment`; an issue or pull request body
+// mention has no comment to react to, so ok is false. Inline review comments
+// live under the pull request collection, conversation comments under issues.
+func (e *event) reaction() (collection string, commentID int64, ok bool) {
+	payload, _ := e.payload()
+	if payload.Comment.ID == 0 {
+		return "", 0, false
+	}
+
+	collection = reactionCollectionIssue
+	if e.Event == eventPullRequestReviewComment {
+		collection = reactionCollectionReview
+	}
+
+	return collection, payload.Comment.ID, true
 }

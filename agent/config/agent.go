@@ -28,5 +28,12 @@ func init() {
 		// falls back to the built-in default (`@goravel-agent`); a value without
 		// the leading `@` is normalized.
 		"mention": config.Env("AGENT_MENTION", ""),
+
+		// GitHub token used to add the 👀 reaction to a mention comment. A
+		// fine-grained token needs `issues: write` for issue and pull request
+		// conversation comments and `pull-requests: write` for inline review
+		// comments; a classic token needs `repo`. Blank disables reactions; the
+		// poller still runs agents.
+		"github_token": config.Env("GITHUB_TOKEN", ""),
 	})
 }
