@@ -3,6 +3,7 @@ module goravel
 go 1.25.0
 
 require (
+	github.com/google/go-github/v89 v89.0.0
 	github.com/goravel/framework v1.18.0
 	github.com/goravel/openai v1.18.0
 	github.com/goravel/sqlite v1.18.0
@@ -50,6 +51,7 @@ require (
 	github.com/go-sql-driver/mysql v1.9.3 // indirect
 	github.com/go-viper/mapstructure/v2 v2.5.0 // indirect
 	github.com/goforj/godump v1.9.1 // indirect
+	github.com/google/go-querystring v1.2.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/gookit/color v1.6.0 // indirect
 	github.com/grpc-ecosystem/grpc-gateway/v2 v2.29.0 // indirect

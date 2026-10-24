@@ -1,6 +1,7 @@
 package commands
 
 import (
+	"net/http"
 	"testing"
 
 	testifymock "github.com/stretchr/testify/mock"
@@ -20,8 +21,11 @@ func TestPollEventsHandle(t *testing.T) {
 	configMock.EXPECT().GetString("agent.workspace").Return("/tmp/ws").Once()
 	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen").Once()
 	configMock.EXPECT().GetString("agent.mention").Return("@goravel-agent").Once()
+	configMock.EXPECT().GetString("agent.github_token").Return("").Once()
 
 	httpMock := factory.Http()
+	httpMock.EXPECT().HttpClient().Return(&http.Client{}).Once()
+
 	getResp := mockshttp.NewResponse(t)
 	getResp.EXPECT().Failed().Return(false).Once()
 	getResp.EXPECT().Body().Return(`{"data":[],"total":0,"page":1,"limit":50}`, nil).Once()
