@@ -121,15 +121,67 @@ Show the shape of the real code.
 
 ## Open Questions
 
-Things that must be confirmed before implementation:
+Things that must be confirmed before implementation. Plain words only — one short question per item, plus a small code example when the answer has a code shape:
 
-1. <question> — <why it matters, what the two possible answers imply>
+1. <short question a non-expert can answer?> — <one sentence: what changes with each answer>
+   <small code fence: before / after, or option A / option B — only if the answer has a code shape>
 2. ...
 
 (Omit this section if there are no genuine ambiguities.)
 ```
 
 ---
+
+## How to write Open Questions
+
+Open Questions are read by the person who asked for the change, not by the person
+who writes the code. Write them so a non-expert can answer without opening the
+source. This section is the full rule — the template above and the quality bar
+below only point here.
+
+For each question:
+
+- Ask one short question in plain words — around 12 words is a good target, not a
+  hard limit. Ask what you actually need to know, not "should we consider whether…".
+- Add one plain sentence saying what changes with each answer, and why it matters.
+- Add a small code fence showing the shape of the answer — before/after, or option A
+  vs option B — only when the answer has a code shape. Show only the lines that
+  differ, never a whole file. When the answer has no code shape at all (a package
+  name, a doc sentence, the spelling of a config key), skip the fence and say so in
+  one sentence instead.
+- One decision per item. Never bundle two questions with "and".
+- Keep the question sentence plain; put the real names — real field names, route
+  paths, method names — inside the fence and in the sentence that explains the
+  answers.
+- In a real plan, never use `foo`, `...`, or `TBD`. The template above is the one
+  exception — its placeholders are there to be replaced.
+- Avoid "utilize", "leverage", "aforementioned", "hereby", "consider whether".
+
+Example output:
+
+1. Should a wrong password return 401 or 403? — 401 means "wrong login", 403 means
+   "right login but blocked". The app returns the login screen on 401 and the
+   support link on 403, so the frontend needs the code to tell the two apart.
+
+   ```go
+   // if 401: wrong login
+   return ctx.Response().Json(401, http.Json{"error": "email or password is incorrect"})
+
+   // if 403: login is right but the account is blocked — same message on purpose
+   return ctx.Response().Json(403, http.Json{"error": "email or password is incorrect"})
+   ```
+
+2. Should two accounts be able to share one email? — No adds a unique index, so the
+   second signup fails; yes lets both accounts exist.
+
+   ```go
+   // if no (unique)
+   table.String("email")
+   table.Unique("email")
+
+   // if yes (not unique)
+   table.String("email")
+   ```
 
 ## What counts as actual code
 
@@ -179,6 +231,7 @@ Before outputting, verify:
 - Code snippets use the correct identifiers (function names, type names, constant names) as they actually exist in the codebase, not guesses
 - The sequence respects actual build and dependency order for this project
 - Open Questions are genuine ambiguities, not things that can be determined by reading the code
+- Every Open Question follows `How to write Open Questions` above — one short plain-words question, a plain sentence on what each answer changes, and a code example only where the answer has a code shape
 - The plan does not contain implementation — only description of what to implement
 - If the work affects user-facing behavior, include `Real User Code Example`. 
 - If the work is entirely internal, say that explicitly and omit the user code example only when no realistic user-facing snippet exists.
