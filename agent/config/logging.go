@@ -37,7 +37,7 @@ func init() {
 				"path":      "storage/logs/goravel.log",
 				"level":     config.Env("LOG_LEVEL", "debug"),
 				"days":      7,
-				"print":     false,
+				"print":     true,
 				"formatter": "text",
 			},
 		},

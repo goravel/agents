@@ -8,10 +8,8 @@ import (
 	"os"
 	"slices"
 	"strings"
-	"sync"
 
 	"github.com/goravel/framework/contracts/ai"
-	"github.com/goravel/framework/contracts/process"
 
 	"goravel/app/facades"
 	"goravel/app/services/agent/dispatch"
@@ -75,6 +73,9 @@ func (r *aiRouter) Route(ctx context.Context, prompt string) (string, string, er
 	}
 
 	response, err := conversation.Prompt(prompt)
+
+	facades.Log().Debugf("Routing prompt: \n%s\nresponse: %s", prompt, response.Text())
+
 	if err != nil {
 		return "", "", fmt.Errorf("route prompt: %w", err)
 	}
@@ -311,26 +312,6 @@ func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) erro
 		return err
 	}
 
-	var (
-		mu     sync.Mutex
-		stderr []byte
-	)
-	capture := func(typ process.OutputType, line []byte) {
-		if typ != process.OutputTypeStderr {
-			return
-		}
-
-		mu.Lock()
-		defer mu.Unlock()
-		if remaining := stderrLimit - len(stderr); remaining > 0 {
-			if len(line) > remaining {
-				line = line[:remaining]
-			}
-			stderr = append(stderr, line...)
-			stderr = append(stderr, '\n')
-		}
-	}
-
 	args := []string{
 		"-i",
 		"PATH=" + os.Getenv("PATH"),
@@ -346,24 +327,16 @@ func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) erro
 	// `--` keeps the prompt from being read as a flag.
 	args = append(args, "--no-wait", "--", req.Prompt)
 
+	facades.Log().Debug("Running paseo:", "\ndirectory: ", req.Dir, "\ncommand: ", strings.Join(args[3:], " "))
+
 	result := facades.Process().
 		WithContext(ctx).
 		Path(req.Dir).
 		DisableBuffering().
 		Quietly().
-		OnOutput(capture).
 		Run("env", args...)
 
 	if result.Failed() {
-		mu.Lock()
-		out := strings.TrimSpace(string(stderr))
-		mu.Unlock()
-
-		if out != "" {
-			// %q escapes untrusted stderr so it cannot forge log lines.
-			return fmt.Errorf("paseo run failed (exit %d): %q", result.ExitCode(), out)
-		}
-
 		return fmt.Errorf("paseo run failed (exit %d): %w", result.ExitCode(), result.Error())
 	}
 

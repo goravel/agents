@@ -159,6 +159,8 @@ func (s *Service) Poll(ctx context.Context) {
 			facades.Log().Errorf("agent: decode event payload %d: %v", ev.ID, err)
 		}
 
+		facades.Log().Debugf("Processing event %d: %+v", ev.ID, ev.actionable())
+
 		instruction, ok := ev.instruction(s.mention)
 		if !ok {
 			toDelete = append(toDelete, ev.ID)
