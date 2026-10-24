@@ -92,6 +92,14 @@ never re-verify or re-raise another SIDE's findings.
    - Naming, declarations, function organization, documentation
    - Package/module/import organization, logging conventions, linting
    - Community checklist compliance (Go Code Review, Uber Style Guide)
+   - Comments: only necessary ones, each short and plain — a comment earns its place only by
+     explaining why, a non-obvious constraint, or a gotcha the code cannot show. Flag a comment
+     this diff adds or rewrites that restates the code, narrates a step, banners a section, leaves
+     commented-out code, or is unclear, too long, or not plain. Anchor on the comment line. Report
+     these as Maybe Fix. A comment that exists to explain a bad name means the name is wrong: flag
+     the name on its own line under the normal naming rule — or, if that line is not in the diff,
+     flag the comment and say the name is the problem. A doc comment opening with the name is not
+     noise.
 
    Extra — run read-only automated checks:
    - Worktree mode: run inside the worktree (`workdir="$WORKTREE_DIR"`)
