@@ -238,7 +238,7 @@ func TestEventAgentPrompt(t *testing.T) {
 		"comment: https://github.com/goravel/goravel/pull/123#issuecomment-24680\n" +
 		"Instruction: review"
 	want := body + "\n" +
-		"the user asked you to comment the result to the pr"
+		"comment the review result to the pr"
 
 	got := event.agentPrompt(agentReview, "review")
 	require.Equal(t, want, got)

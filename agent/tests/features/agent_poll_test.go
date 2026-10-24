@@ -299,7 +299,7 @@ func (s *AgentPollTestSuite) TestPollShipsIssueMention() {
 	s.Require().Contains(got.prompt, "Instruction: ship this issue in goravel/framework")
 	s.Require().NotContains(got.prompt, "Repository:")
 	s.Require().NotContains(got.prompt, "PR:")
-	s.Require().NotContains(got.prompt, "comment the result to the pr")
+	s.Require().NotContains(got.prompt, "comment the review result to the pr")
 }
 
 // TestPollReviewsPullRequest covers a `@goravel-agent review` comment on a pull
@@ -318,7 +318,7 @@ func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
 	s.Require().True(strings.HasPrefix(filepath.Base(got.cloneDir), "goravel-framework-"))
 	s.Require().Contains(got.prompt, "PR: https://github.com/goravel/framework/pull/42")
 	s.Require().Contains(got.prompt, "comment: https://github.com/goravel/framework/pull/42#issuecomment-98765")
-	s.Require().Contains(got.prompt, "Instruction: review\nthe user asked you to comment the result to the pr")
+	s.Require().Contains(got.prompt, "Instruction: review\ncomment the review result to the pr")
 	s.Require().NotContains(got.prompt, "Repository:")
 	s.Require().NotContains(got.prompt, "Issue:")
 }

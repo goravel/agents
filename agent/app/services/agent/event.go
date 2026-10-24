@@ -230,7 +230,7 @@ const (
 // the review agent when the event targets a pull request, steering the run to
 // post its findings there. It is worded as the user's explicit request because
 // the review agent only posts a PR comment when the user asks for one.
-const reviewInstructionSuffix = "the user asked you to comment the result to the pr"
+const reviewInstructionSuffix = "comment the review result to the pr"
 
 // prompt builds the context block the router sees: the source repository line,
 // the PR/Issue/comment links, and the untrusted instruction. The fixed lines are
