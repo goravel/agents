@@ -195,7 +195,7 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 	return s.dispatcher.Run(ctx, dispatch.Request{
 		Dir:    dir,
 		Agent:  agent,
-		Prompt: ev.agentPrompt(instruction),
+		Prompt: ev.agentPrompt(agent, instruction),
 	})
 }
 

@@ -226,6 +226,12 @@ const (
 	instructionLabel = "Instruction"
 )
 
+// reviewInstructionSuffix is the trusted line appended under the Instruction for
+// the review agent when the event targets a pull request, steering the run to
+// post its findings there. It is worded as the user's explicit request because
+// the review agent only posts a PR comment when the user asks for one.
+const reviewInstructionSuffix = "the user asked you to comment the result to the pr"
+
 // prompt builds the context block the router sees: the source repository line,
 // the PR/Issue/comment links, and the untrusted instruction. The fixed lines are
 // emitted before the untrusted instruction so its text is read as the
@@ -240,8 +246,17 @@ func (e *event) prompt(instruction, repository string) string {
 // agentPrompt builds the context block handed to the agent. It carries the same
 // links and instruction as prompt but omits the Repository line: the agent runs
 // inside the checkout, so the repository is implied by its working directory.
-func (e *event) agentPrompt(instruction string) string {
-	return e.contextBlock(instruction)
+// The review agent is additionally steered to post its result on the pull
+// request; every other agent's prompt is unchanged.
+func (e *event) agentPrompt(agentName, instruction string) string {
+	payload, _ := e.payload()
+
+	prompt := e.contextBlock(instruction)
+	if agentName == agentReview && isPullRequest(payload) {
+		prompt += "\n" + reviewInstructionSuffix
+	}
+
+	return prompt
 }
 
 // contextBlock emits the PR/Issue/comment links followed by the instruction.
