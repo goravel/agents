@@ -9,7 +9,6 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"time"
 
 	"github.com/goravel/framework/contracts/ai"
 	"github.com/goravel/framework/contracts/process"
@@ -46,10 +45,8 @@ type Dispatcher interface {
 	Run(ctx context.Context, req dispatch.Request) error
 }
 
-// agentIntroductions maps each routable agent to the one-line introduction the
-// AI facade uses to choose it. It is the single source of truth for the routable
-// set: the parser accepts exactly these keys and the routing prompt is built
-// from them, keyed through slices.Sorted so it stays deterministic.
+// agentIntroductions maps each routable agent to the introduction the router
+// prompt shows. Every key needs an agent.models entry.
 var agentIntroductions = map[string]string{
 	agentShip:      "plans the task first, then implements and drives it through review to a pull request",
 	agentImplement: "implements a plan that is already provided, reviews the changes, and opens a pull request",
@@ -245,36 +242,75 @@ func (routerAgent) Middleware() []ai.Middleware { return nil }
 func (routerAgent) Tools() []ai.Tool { return nil }
 
 const (
-	// opencodeBin is the CLI used to run agents.
-	opencodeBin = "opencode"
-	// opencodeTimeout caps a single agent run.
-	opencodeTimeout = 30 * time.Minute
-	// stderrLimit bounds how much agent stderr is kept for the error message.
+	// paseoBin is the CLI that dispatches runs.
+	paseoBin = "paseo"
+	// opencodeProvider is the paseo agent provider.
+	opencodeProvider = "opencode"
+	// stderrLimit bounds the agent stderr kept for the error message.
 	stderrLimit = 64 * 1024
 )
 
-// opencodeDispatcher runs agents through the opencode CLI.
+// opencodeDispatcher dispatches agent runs through paseo.
 type opencodeDispatcher struct {
 	bin      string
-	deadline time.Duration
+	provider string
+	// models maps a mode to its `<model>[#<thinking>]` entry.
+	models map[string]string
 }
 
-// newOpencodeDispatcher returns a dispatcher using the hardcoded binary and
-// timeout constants.
-func newOpencodeDispatcher() *opencodeDispatcher {
+// newOpencodeDispatcher returns a dispatcher for the mode → model map.
+func newOpencodeDispatcher(models map[string]string) *opencodeDispatcher {
 	return &opencodeDispatcher{
-		bin:      opencodeBin,
-		deadline: opencodeTimeout,
+		bin:      paseoBin,
+		provider: opencodeProvider,
+		models:   models,
 	}
 }
 
-// Run executes `opencode run --agent <agent> -- <prompt>` in the request's
-// directory with a scrubbed environment. The agent is steered by untrusted
-// comment text, so it only receives PATH and HOME; the poller's secrets
-// (AGENT_API_TOKEN, DEEPSEEK_*, database credentials, ...) are not inherited.
-// Output is not buffered in full: only a bounded prefix of stderr is captured
-// (and later escaped) for the error message, and the live stream is suppressed.
+// parseModelEntry splits a `<model>[#<thinking>]` entry; ok is false without a model.
+func parseModelEntry(entry string) (model, thinking string, ok bool) {
+	model, thinking, _ = strings.Cut(strings.TrimSpace(entry), "#")
+
+	model = strings.TrimSpace(model)
+	thinking = strings.TrimSpace(thinking)
+
+	return model, thinking, model != ""
+}
+
+// modelFor returns the model and thinking level configured for mode.
+func (d *opencodeDispatcher) modelFor(mode string) (string, string, error) {
+	model, thinking, ok := parseModelEntry(d.models[mode])
+	if !ok {
+		return "", "", fmt.Errorf("no model configured for mode %q", mode)
+	}
+
+	return model, thinking, nil
+}
+
+// agentModels reads agent.models and checks every routable agent has a usable entry.
+func agentModels(value any) (map[string]string, error) {
+	models, _ := value.(map[string]string)
+	if len(models) == 0 {
+		return nil, errors.New("agent: agent.models must map every agent to a <model>[#<thinking>] entry")
+	}
+
+	for _, mode := range slices.Sorted(maps.Keys(agentIntroductions)) {
+		if _, _, ok := parseModelEntry(models[mode]); !ok {
+			return nil, fmt.Errorf("agent: agent.models has no model for the %q agent", mode)
+		}
+	}
+
+	return models, nil
+}
+
+// Run executes `paseo run --mode <mode> --model <model> [--thinking <level>]
+// --no-wait -- <prompt>` in the request's directory with a scrubbed environment.
 func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) error {
+	model, thinking, err := d.modelFor(req.Agent)
+	if err != nil {
+		return err
+	}
+
 	var (
 		mu     sync.Mutex
 		stderr []byte
@@ -295,30 +331,40 @@ func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) erro
 		}
 	}
 
+	args := []string{
+		"-i",
+		"PATH=" + os.Getenv("PATH"),
+		"HOME=" + os.Getenv("HOME"),
+		d.bin, "run",
+		"--provider", d.provider,
+		"--mode", req.Agent,
+		"--model", model,
+	}
+	if thinking != "" {
+		args = append(args, "--thinking", thinking)
+	}
+	// `--` keeps the prompt from being read as a flag.
+	args = append(args, "--no-wait", "--", req.Prompt)
+
 	result := facades.Process().
 		WithContext(ctx).
 		Path(req.Dir).
-		Timeout(d.deadline).
 		DisableBuffering().
 		Quietly().
 		OnOutput(capture).
-		Run("env", "-i",
-			"PATH="+os.Getenv("PATH"),
-			"HOME="+os.Getenv("HOME"),
-			d.bin, "run", "--agent", req.Agent, "--", req.Prompt)
+		Run("env", args...)
 
 	if result.Failed() {
 		mu.Lock()
 		out := strings.TrimSpace(string(stderr))
 		mu.Unlock()
 
-		// Prefer the captured stderr, escaped so untrusted agent output cannot
-		// forge multi-line log entries; fall back to the start error.
 		if out != "" {
-			return fmt.Errorf("opencode run failed (exit %d): %q", result.ExitCode(), out)
+			// %q escapes untrusted stderr so it cannot forge log lines.
+			return fmt.Errorf("paseo run failed (exit %d): %q", result.ExitCode(), out)
 		}
 
-		return fmt.Errorf("opencode run failed (exit %d): %w", result.ExitCode(), result.Error())
+		return fmt.Errorf("paseo run failed (exit %d): %w", result.ExitCode(), result.Error())
 	}
 
 	return nil

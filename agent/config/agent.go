@@ -35,5 +35,13 @@ func init() {
 		// comments; a classic token needs `repo`. Blank disables reactions; the
 		// poller still runs agents.
 		"github_token": config.Env("GITHUB_TOKEN", ""),
+
+		// Model each agent runs with, keyed by mode: `<model>[#<thinking>]`.
+		// Every routable agent needs an entry.
+		"models": map[string]string{
+			"ship":      "opencode-go/deepseek-v4.1-flash#high",
+			"implement": "opencode-go/deepseek-v4.1-flash#high",
+			"review":    "opencode-go/deepseek-v4.1-flash#high",
+		},
 	})
 }
