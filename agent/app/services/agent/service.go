@@ -72,6 +72,11 @@ func NewService() (*Service, error) {
 		return nil, errors.New("agent: AGENT_ALLOWED_SENDERS must not be empty")
 	}
 
+	models, err := agentModels(config.Get("agent.models"))
+	if err != nil {
+		return nil, err
+	}
+
 	// The empty base URL keeps go-github's default (https://api.github.com/).
 	reactor, err := newGitHubReactor(
 		config.GetString("agent.github_token"),
@@ -84,7 +89,7 @@ func NewService() (*Service, error) {
 
 	return &Service{
 		router:         newAIRouter(),
-		dispatcher:     newOpencodeDispatcher(),
+		dispatcher:     newOpencodeDispatcher(models),
 		checkouts:      newGitCheckouter(),
 		retry:          newCacheRetryTracker(),
 		handles:        newCacheHandleStore(),

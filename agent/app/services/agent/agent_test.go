@@ -5,7 +5,6 @@ import (
 	"errors"
 	"os"
 	"testing"
-	"time"
 
 	testifymock "github.com/stretchr/testify/mock"
 	"github.com/stretchr/testify/require"
@@ -315,22 +314,44 @@ func scrubbedEnvArgs() []any {
 	return []any{"env", "-i", "PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
 }
 
+// testModels is the mode → model map the dispatcher tests run with.
+func testModels() map[string]string {
+	return map[string]string{
+		agentShip:      "opencode-go/deepseek-v4.1-flash#high",
+		agentImplement: "opencode-go/deepseek-v4.1-flash#high",
+		agentReview:    "opencode-go/deepseek-v4.1-flash#high",
+	}
+}
+
+// dispatcherArgs returns the argv the dispatcher builds, with `do it` as prompt.
+func dispatcherArgs(mode, model, thinking string) []any {
+	args := append(scrubbedEnvArgs(), "paseo", "run",
+		"--provider", "opencode",
+		"--mode", mode,
+		"--model", model,
+	)
+	if thinking != "" {
+		args = append(args, "--thinking", thinking)
+	}
+
+	return append(args, "--no-wait", "--", "do it")
+}
+
 func TestOpencodeDispatcherRun(t *testing.T) {
 	processMock := mock.Factory().Process()
 	result := mocksprocess.NewResult(t)
 
-	args := append(scrubbedEnvArgs(), "opencode", "run", "--agent", "review", "--", "do it")
+	args := dispatcherArgs(agentReview, "opencode-go/deepseek-v4.1-flash", "high")
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
-	processMock.EXPECT().Timeout(opencodeTimeout).Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
 	processMock.EXPECT().OnOutput(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 	result.EXPECT().Failed().Return(false).Once()
 
-	dispatcher := newOpencodeDispatcher()
+	dispatcher := newOpencodeDispatcher(testModels())
 	require.NoError(t, dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:    "/tmp/ws/goravel/goravel",
 		Agent:  "review",
@@ -345,11 +366,10 @@ func TestOpencodeDispatcherRunFailure(t *testing.T) {
 	processMock := mock.Factory().Process()
 	result := mocksprocess.NewResult(t)
 
-	args := append(scrubbedEnvArgs(), "opencode", "run", "--agent", "ship", "--", "do it")
+	args := dispatcherArgs(agentShip, "opencode-go/deepseek-v4.1-flash", "high")
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/framework").Return(processMock).Once()
-	processMock.EXPECT().Timeout(opencodeTimeout).Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
 	// The dispatcher captures stderr via OnOutput; simulate a line arriving.
@@ -364,7 +384,7 @@ func TestOpencodeDispatcherRunFailure(t *testing.T) {
 	result.EXPECT().Failed().Return(true).Once()
 	result.EXPECT().ExitCode().Return(2).Once()
 
-	dispatcher := newOpencodeDispatcher()
+	dispatcher := newOpencodeDispatcher(testModels())
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:    "/tmp/ws/goravel/framework",
 		Agent:  "ship",
@@ -381,11 +401,10 @@ func TestOpencodeDispatcherRunStartError(t *testing.T) {
 	processMock := mock.Factory().Process()
 	result := mocksprocess.NewResult(t)
 
-	args := append(scrubbedEnvArgs(), "opencode", "run", "--agent", "review", "--", "do it")
+	args := dispatcherArgs(agentReview, "opencode-go/deepseek-v4.1-flash", "high")
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
-	processMock.EXPECT().Timeout(opencodeTimeout).Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
 	// No stderr captured, so the start error is reported instead.
@@ -395,7 +414,7 @@ func TestOpencodeDispatcherRunStartError(t *testing.T) {
 	result.EXPECT().ExitCode().Return(-1).Once()
 	result.EXPECT().Error().Return(errors.New("start failed")).Once()
 
-	dispatcher := newOpencodeDispatcher()
+	dispatcher := newOpencodeDispatcher(testModels())
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:    "/tmp/ws/goravel/goravel",
 		Agent:  "review",
@@ -409,7 +428,142 @@ func TestOpencodeDispatcherRunStartError(t *testing.T) {
 }
 
 func TestOpencodeDispatcherDefaults(t *testing.T) {
-	dispatcher := newOpencodeDispatcher()
-	require.Equal(t, opencodeBin, dispatcher.bin)
-	require.Equal(t, 30*time.Minute, dispatcher.deadline)
+	models := testModels()
+	dispatcher := newOpencodeDispatcher(models)
+	require.Equal(t, paseoBin, dispatcher.bin)
+	require.Equal(t, "opencode", dispatcher.provider)
+	require.Equal(t, models, dispatcher.models)
+}
+
+func TestOpencodeDispatcherRunUnknownMode(t *testing.T) {
+	// No process expectation: an unknown mode fails before the CLI is touched.
+	mock.Factory().Process()
+
+	dispatcher := newOpencodeDispatcher(map[string]string{
+		agentShip: "opencode-go/deepseek-v4.1-flash#high",
+	})
+	err := dispatcher.Run(context.Background(), dispatch.Request{
+		Dir:    "/tmp/ws/goravel/goravel",
+		Agent:  agentReview,
+		Prompt: "do it",
+	})
+	require.EqualError(t, err, `no model configured for mode "review"`)
+}
+
+func TestOpencodeDispatcherRunEmptyModels(t *testing.T) {
+	mock.Factory().Process()
+
+	dispatcher := newOpencodeDispatcher(nil)
+	err := dispatcher.Run(context.Background(), dispatch.Request{
+		Dir:    "/tmp/ws/goravel/goravel",
+		Agent:  agentShip,
+		Prompt: "do it",
+	})
+	require.EqualError(t, err, `no model configured for mode "ship"`)
+}
+
+func TestOpencodeDispatcherRunWithoutThinking(t *testing.T) {
+	// A value with no `#` produces no `--thinking` flag.
+	processMock := mock.Factory().Process()
+	result := mocksprocess.NewResult(t)
+
+	args := dispatcherArgs(agentReview, "opencode-go/deepseek-v4.1-flash", "")
+
+	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
+	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
+	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
+	processMock.EXPECT().Quietly().Return(processMock).Once()
+	processMock.EXPECT().OnOutput(testifymock.Anything).Return(processMock).Once()
+	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
+	result.EXPECT().Failed().Return(false).Once()
+
+	dispatcher := newOpencodeDispatcher(map[string]string{
+		agentReview: "opencode-go/deepseek-v4.1-flash",
+	})
+	require.NoError(t, dispatcher.Run(context.Background(), dispatch.Request{
+		Dir:    "/tmp/ws/goravel/goravel",
+		Agent:  agentReview,
+		Prompt: "do it",
+	}))
+
+	processMock.AssertExpectations(t)
+	result.AssertExpectations(t)
+}
+
+func TestModelFor(t *testing.T) {
+	tests := []struct {
+		name         string
+		entry        string
+		wantModel    string
+		wantThinking string
+		wantErr      string
+	}{
+		{name: "model and thinking", entry: "opencode-go/deepseek-v4.1-flash#high", wantModel: "opencode-go/deepseek-v4.1-flash", wantThinking: "high"},
+		{name: "model only", entry: "opencode-go/deepseek-v4.1-flash", wantModel: "opencode-go/deepseek-v4.1-flash"},
+		{name: "surrounding spaces", entry: " opencode-go/deepseek-v4.1-flash # high ", wantModel: "opencode-go/deepseek-v4.1-flash", wantThinking: "high"},
+		{name: "empty thinking after hash", entry: "opencode-go/deepseek-v4.1-flash#", wantModel: "opencode-go/deepseek-v4.1-flash"},
+		{name: "missing model before hash", entry: "#high", wantErr: `no model configured for mode "review"`},
+		{name: "blank entry", entry: "   ", wantErr: `no model configured for mode "review"`},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			dispatcher := newOpencodeDispatcher(map[string]string{agentReview: test.entry})
+			model, thinking, err := dispatcher.modelFor(agentReview)
+			if test.wantErr != "" {
+				require.EqualError(t, err, test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.wantModel, model)
+			require.Equal(t, test.wantThinking, thinking)
+		})
+	}
+}
+
+func TestAgentModels(t *testing.T) {
+	models := testModels()
+
+	tests := []struct {
+		name    string
+		value   any
+		want    map[string]string
+		wantErr string
+	}{
+		{name: "map of strings", value: models, want: models},
+		{name: "nil value", value: nil, wantErr: "agent: agent.models must map every agent to a <model>[#<thinking>] entry"},
+		{name: "not a map[string]string", value: "opencode-go/deepseek-v4.1-flash#high", wantErr: "agent: agent.models must map every agent to a <model>[#<thinking>] entry"},
+		{
+			name:    "map of any",
+			value:   map[string]any{agentShip: "opencode-go/deepseek-v4.1-flash#high", agentImplement: "opencode-go/deepseek-v4.1-flash#high", agentReview: "opencode-go/deepseek-v4.1-flash#high"},
+			wantErr: "agent: agent.models must map every agent to a <model>[#<thinking>] entry",
+		},
+		{
+			name:    "agent without model",
+			value:   map[string]string{agentShip: "opencode-go/deepseek-v4.1-flash#high", agentImplement: "opencode-go/deepseek-v4.1-flash#high"},
+			wantErr: `agent: agent.models has no model for the "review" agent`,
+		},
+		{
+			name:    "blank agent model",
+			value:   map[string]string{agentShip: "opencode-go/deepseek-v4.1-flash#high", agentImplement: "opencode-go/deepseek-v4.1-flash#high", agentReview: "  "},
+			wantErr: `agent: agent.models has no model for the "review" agent`,
+		},
+		{
+			name:    "entry without model",
+			value:   map[string]string{agentShip: "opencode-go/deepseek-v4.1-flash#high", agentImplement: "opencode-go/deepseek-v4.1-flash#high", agentReview: "#max"},
+			wantErr: `agent: agent.models has no model for the "review" agent`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := agentModels(test.value)
+			if test.wantErr != "" {
+				require.EqualError(t, err, test.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.Equal(t, test.want, got)
+		})
+	}
 }

@@ -20,6 +20,11 @@ func TestPollEventsHandle(t *testing.T) {
 	configMock.EXPECT().GetString("agent.api_token").Return("token").Once()
 	configMock.EXPECT().GetString("agent.workspace").Return("/tmp/ws").Once()
 	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen").Once()
+	configMock.EXPECT().Get("agent.models").Return(map[string]string{
+		"ship":      "opencode-go/deepseek-v4.1-flash#high",
+		"implement": "opencode-go/deepseek-v4.1-flash#high",
+		"review":    "opencode-go/deepseek-v4.1-flash#high",
+	}).Once()
 	configMock.EXPECT().GetString("agent.mention").Return("@goravel-agent").Once()
 	configMock.EXPECT().GetString("agent.github_token").Return("").Once()
 

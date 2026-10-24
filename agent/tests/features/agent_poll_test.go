@@ -91,9 +91,6 @@ func (r *relay) acknowledged() []string {
 }
 
 const (
-	// The opencode run timeout the dispatcher applies.
-	opencodeTimeout = 30 * time.Minute
-
 	// cloneTimeout is the git clone timeout the checkouter applies.
 	cloneTimeout = 5 * time.Minute
 
@@ -115,12 +112,14 @@ const (
 )
 
 // pollObservation is what one poll cycle observed at the process boundary: the
-// routed checkout it cloned, the opencode invocation it ran, and the
-// acknowledged event ids.
+// routed checkout it cloned, the paseo invocation it ran, and the acknowledged
+// event ids.
 type pollObservation struct {
 	cloneRemote  string
 	cloneDir     string
-	agent        string
+	mode         string
+	model        string
+	thinking     string
 	prompt       string
 	acknowledged []string
 	lastError    string
@@ -162,7 +161,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 
 	// Fresh, empty workspace plus the relay configuration. Each run checks out
 	// into its own timestamped directory, so the checkout never pre-exists and
-	// the real git checkouter clones before the opencode run.
+	// the real git checkouter clones before the paseo run.
 	s.Require().True(facades.Cache().Flush())
 
 	resolved, err := filepath.EvalSymlinks(s.T().TempDir())
@@ -174,12 +173,17 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 		"api_token":       "test-token",
 		"workspace":       resolved,
 		"allowed_senders": "bowen",
+		"models": map[string]string{
+			"ship":      "opencode-go/deepseek-v4.1-flash#high",
+			"implement": "opencode-go/deepseek-v4.1-flash#high",
+			"review":    "opencode-go/deepseek-v4.1-flash#high",
+		},
 	})
 	s.T().Cleanup(func() { facades.Config().Add("agent", originalConfig) })
 
 	observation := pollObservation{}
 
-	// The checkouter's git clone and the dispatcher's opencode run are the only
+	// The checkouter's git clone and the dispatcher's paseo run are the only
 	// external processes: mock both. Ensure claims the per-run directory before
 	// invoking git, so the clone callback only asserts it exists. The routed
 	// repository and agent are captured here and asserted per test.
@@ -219,7 +223,6 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 		})).
 		Return(processMock).
 		Once()
-	processMock.EXPECT().Timeout(opencodeTimeout).Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
 	processMock.EXPECT().OnOutput(testifymock.Anything).Return(processMock).Once()
@@ -227,20 +230,25 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 		Run("env", "-i",
 			"PATH="+os.Getenv("PATH"),
 			"HOME="+os.Getenv("HOME"),
-			"opencode", "run", "--agent",
-			// The exact agent is asserted per test from the captured value; do
-			// not restate the routable list that agentIntroductions already owns.
-			testifymock.Anything,
-			"--",
+			"paseo", "run",
+			"--provider", "opencode",
+			"--mode", testifymock.Anything,
+			"--model", testifymock.Anything,
+			"--thinking", testifymock.Anything,
+			"--no-wait", "--",
 			testifymock.MatchedBy(func(prompt string) bool {
-				// The agent prompt omits the Repository line: the checkout's
-				// working directory implies the repository.
+				// The prompt omits the Repository line: the checkout directory
+				// implies the repository.
 				return !strings.HasPrefix(prompt, "Repository: ")
 			})).
 		Run(func(_ string, args ...string) {
-			// args = [-i, PATH=…, HOME=…, opencode, run, --agent, <agent>, --, <prompt>].
-			observation.agent = args[6]
-			observation.prompt = args[8]
+			// args = [-i, PATH…, HOME…, paseo, run, --provider, opencode,
+			//         --mode, <mode>, --model, <model>, --thinking, <thinking>,
+			//         --no-wait, --, <prompt>].
+			observation.mode = args[8]
+			observation.model = args[10]
+			observation.thinking = args[12]
+			observation.prompt = args[15]
 		}).
 		Return(resultMock).
 		Once()
@@ -290,8 +298,10 @@ func (s *AgentPollTestSuite) TestPollShipsIssueMention() {
 	s.Require().Empty(got.lastError)
 	s.Require().Equal([]string{"1"}, got.acknowledged,
 		"poll-events did not acknowledge the event; last error: %s", got.lastError)
-	s.Require().Equal("ship", got.agent,
+	s.Require().Equal("ship", got.mode,
 		"live router did not choose the ship agent (context: %s)", got.lastError)
+	s.Require().Equal("opencode-go/deepseek-v4.1-flash", got.model)
+	s.Require().Equal("high", got.thinking)
 	s.Require().Equal("git@github.com:goravel/framework.git", got.cloneRemote)
 	s.Require().True(strings.HasPrefix(filepath.Base(got.cloneDir), "goravel-framework-"))
 	s.Require().Contains(got.prompt, "Issue: https://github.com/goravel/goravel/issues/123")
@@ -312,8 +322,10 @@ func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
 	s.Require().Empty(got.lastError)
 	s.Require().Equal([]string{"1"}, got.acknowledged,
 		"poll-events did not acknowledge the event; last error: %s", got.lastError)
-	s.Require().Equal("review", got.agent,
+	s.Require().Equal("review", got.mode,
 		"live router did not choose the review agent (context: %s)", got.lastError)
+	s.Require().Equal("opencode-go/deepseek-v4.1-flash", got.model)
+	s.Require().Equal("high", got.thinking)
 	s.Require().Equal("git@github.com:goravel/framework.git", got.cloneRemote)
 	s.Require().True(strings.HasPrefix(filepath.Base(got.cloneDir), "goravel-framework-"))
 	s.Require().Contains(got.prompt, "PR: https://github.com/goravel/framework/pull/42")
@@ -321,4 +333,17 @@ func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
 	s.Require().Contains(got.prompt, "Instruction: review\ncomment the review result to the pr")
 	s.Require().NotContains(got.prompt, "Repository:")
 	s.Require().NotContains(got.prompt, "Issue:")
+}
+
+// TestAgentModelsConfigCoversRoutableAgents checks the shipped agent.models map.
+func (s *AgentPollTestSuite) TestAgentModelsConfigCoversRoutableAgents() {
+	models, ok := facades.Config().Get("agent.models").(map[string]string)
+	s.Require().True(ok, "config/agent.go must register agent.models as map[string]string")
+
+	for _, mode := range []string{"ship", "implement", "review"} {
+		entry := strings.TrimSpace(models[mode])
+		s.Require().NotEmpty(entry, "agent.models has no entry for %q", mode)
+		model, _, _ := strings.Cut(entry, "#")
+		s.Require().NotEmpty(strings.TrimSpace(model), "agent.models entry for %q has no model", mode)
+	}
 }

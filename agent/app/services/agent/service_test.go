@@ -283,7 +283,7 @@ func TestServicePollKeepsFailedEventWhenRetryNotExceeded(t *testing.T) {
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).
-		Return(errors.New("opencode failed")).
+		Return(errors.New("paseo failed")).
 		Once()
 
 	retry := mocksagent.NewRetryTracker(t)
@@ -365,7 +365,7 @@ func TestServicePollDeletesWhenRetryExceeded(t *testing.T) {
 
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).
-		Return(errors.New("opencode failed")).
+		Return(errors.New("paseo failed")).
 		Once()
 
 	retry := mocksagent.NewRetryTracker(t)
@@ -668,6 +668,12 @@ func TestNewServiceReadsConfig(t *testing.T) {
 	configMock.EXPECT().GetString("agent.api_token").Return("secret").Once()
 	configMock.EXPECT().GetString("agent.workspace").Return("/srv/code").Once()
 	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen, alice").Once()
+	models := map[string]string{
+		agentShip:      "opencode-go/deepseek-v4.1-flash#high",
+		agentImplement: "opencode-go/deepseek-v4.1-flash#high",
+		agentReview:    "opencode-go/deepseek-v4.1-flash#high",
+	}
+	configMock.EXPECT().Get("agent.models").Return(models).Once()
 	configMock.EXPECT().GetString("agent.mention").Return("@bot").Once()
 	httpMock.EXPECT().HttpClient().Return(&http.Client{}).Once()
 	configMock.EXPECT().GetString("agent.github_token").Return("gh-token").Once()
@@ -680,6 +686,7 @@ func TestNewServiceReadsConfig(t *testing.T) {
 	require.Equal(t, "secret", service.apiToken)
 	require.Equal(t, "/srv/code", service.workspaceRoot)
 	require.Equal(t, "@bot", service.mention)
+	require.Equal(t, models, service.dispatcher.(*opencodeDispatcher).models)
 	require.IsType(t, &cacheHandleStore{}, service.handles)
 	require.IsType(t, &gitCheckouter{}, service.checkouts)
 	require.NotNil(t, service.now)
@@ -701,6 +708,39 @@ func TestNewServiceRejectsEmptySenders(t *testing.T) {
 	service, err := NewService()
 	require.Nil(t, service)
 	require.EqualError(t, err, "agent: AGENT_ALLOWED_SENDERS must not be empty")
+
+	configMock.AssertExpectations(t)
+}
+
+func TestNewServiceRejectsMissingModels(t *testing.T) {
+	factory := mock.Factory()
+	configMock := factory.Config()
+
+	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen").Once()
+	configMock.EXPECT().Get("agent.models").Return(nil).Once()
+
+	// NewService returns before touching the HTTP client, so no HTTP mock is
+	// registered.
+	service, err := NewService()
+	require.Nil(t, service)
+	require.EqualError(t, err, "agent: agent.models must map every agent to a <model>[#<thinking>] entry")
+
+	configMock.AssertExpectations(t)
+}
+
+func TestNewServiceRejectsAgentWithoutModel(t *testing.T) {
+	factory := mock.Factory()
+	configMock := factory.Config()
+
+	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen").Once()
+	configMock.EXPECT().Get("agent.models").Return(map[string]string{
+		agentShip:      "opencode-go/deepseek-v4.1-flash#high",
+		agentImplement: "opencode-go/deepseek-v4.1-flash#high",
+	}).Once()
+
+	service, err := NewService()
+	require.Nil(t, service)
+	require.EqualError(t, err, `agent: agent.models has no model for the "review" agent`)
 
 	configMock.AssertExpectations(t)
 }
