@@ -338,15 +338,16 @@ func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) erro
 		return err
 	}
 
-	args := []string{
-		"-i",
-		"PATH=" + os.Getenv("PATH"),
-		"HOME=" + os.Getenv("HOME"),
-		d.bin, "run",
+	// envArgs is the `env -i PATH=... HOME=...` prefix that strips secrets from
+	// the agent subprocess. It stays a named slice so the log below can drop
+	// exactly this many leading arguments: a hard-coded count would silently
+	// mis-slice the logged command the day the prefix grows a flag or a variable.
+	envArgs := []string{"-i", "PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
+	args := append(envArgs, d.bin, "run",
 		"--provider", d.provider,
 		"--mode", req.Agent,
 		"--model", model,
-	}
+	)
 	if thinking != "" {
 		args = append(args, "--thinking", thinking)
 	}
@@ -356,7 +357,12 @@ func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) erro
 	// `--` keeps the prompt from being read as a flag.
 	args = append(args, "--no-wait", "--", req.Prompt)
 
-	facades.Log().Debug("Running paseo:", "\ndirectory: ", req.Dir, "\ncommand: ", strings.Join(args[3:], " "))
+	// The logged command is quoted rather than space-joined so an operator can
+	// paste it into a shell and reproduce this argv exactly: the title stays one
+	// argument even when it has spaces, and the prompt keeps its newlines inside
+	// the quotes. envArgs is the scrubbing prefix above; it is left out of the
+	// log, so a paste runs with the operator's own environment.
+	facades.Log().Debug("Running paseo:", "\ndirectory: ", req.Dir, "\ncommand: ", shellCommand(args[len(envArgs):]))
 
 	result := facades.Process().
 		WithContext(ctx).
