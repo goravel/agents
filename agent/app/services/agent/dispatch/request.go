@@ -11,6 +11,8 @@ type Request struct {
 	Dir    string
 	Agent  string
 	Prompt string
-	// Title is the paseo agent title. Empty means paseo names the run itself.
+	// Title is the paseo title for the run: the agent title in `paseo ls` and,
+	// through the workspace the dispatcher creates, the session name in
+	// `paseo workspace ls`. Empty means paseo names both itself.
 	Title string
 }

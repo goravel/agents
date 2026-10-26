@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	mocksai "github.com/goravel/framework/mocks/ai"
+	mockslog "github.com/goravel/framework/mocks/log"
 	mocksprocess "github.com/goravel/framework/mocks/process"
 	"github.com/goravel/framework/testing/mock"
 
@@ -430,8 +431,9 @@ func testModels() map[string]string {
 	}
 }
 
-// dispatcherArgs returns the argv the dispatcher builds, with `do it` as prompt.
-func dispatcherArgs(mode, model, thinking, title string) []any {
+// dispatcherArgs returns the argv the dispatcher builds for the run, with
+// `do it` as prompt.
+func dispatcherArgs(mode, model, thinking, title, workspaceID string) []any {
 	args := append(scrubbedEnvArgs(), "paseo", "run",
 		"--provider", "opencode",
 		"--mode", mode,
@@ -443,17 +445,63 @@ func dispatcherArgs(mode, model, thinking, title string) []any {
 	if title != "" {
 		args = append(args, "--title", title)
 	}
+	if workspaceID != "" {
+		args = append(args, "--workspace", workspaceID)
+	}
 
 	return append(args, "--no-wait", "--", "do it")
+}
+
+// workspaceID is the id the faked `paseo workspace create` reports.
+const workspaceID = "wks_0123456789abcdef"
+
+// workspaceCommand returns the paseo argv the dispatcher builds — and logs — to
+// create the run workspace for dir and title. It is the same list the dispatcher
+// executes once the `env -i …` prefix is added.
+func workspaceCommand(dir, title string) []string {
+	return []string{"paseo", "workspace", "create",
+		"--isolation", "local",
+		"--path", dir,
+		"--title", title,
+		"--json",
+	}
+}
+
+// workspaceArgs returns workspaceCommand behind the `env -i PATH=... HOME=...`
+// prefix the dispatcher executes.
+func workspaceArgs(dir, title string) []any {
+	args := scrubbedEnvArgs()
+	for _, arg := range workspaceCommand(dir, title) {
+		args = append(args, arg)
+	}
+
+	return args
+}
+
+// expectWorkspaceCreate arms the shared process mock for one
+// `paseo workspace create` call; the caller owns the returned result's
+// expectations so the failure cases can drive it.
+func expectWorkspaceCreate(processMock *mocksprocess.Process, dir, title string, result *mocksprocess.Result) {
+	args := workspaceArgs(dir, title)
+
+	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
+	processMock.EXPECT().Path(dir).Return(processMock).Once()
+	processMock.EXPECT().Quietly().Return(processMock).Once()
+	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 }
 
 func TestOpencodeDispatcherRun(t *testing.T) {
 	factory := mock.Factory()
 	factory.Log()
 	processMock := factory.Process()
+	createResult := mocksprocess.NewResult(t)
 	result := mocksprocess.NewResult(t)
 
-	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "high", "Review PR 42")
+	expectWorkspaceCreate(processMock, "/tmp/ws/goravel/goravel", "Review PR 42", createResult)
+	createResult.EXPECT().Failed().Return(false).Once()
+	createResult.EXPECT().Output().Return(`{"workspaceId":"` + workspaceID + `"}`).Once()
+
+	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "high", "Review PR 42", workspaceID)
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
@@ -471,6 +519,7 @@ func TestOpencodeDispatcherRun(t *testing.T) {
 	}))
 
 	processMock.AssertExpectations(t)
+	createResult.AssertExpectations(t)
 	result.AssertExpectations(t)
 }
 
@@ -478,9 +527,14 @@ func TestOpencodeDispatcherRunFailure(t *testing.T) {
 	factory := mock.Factory()
 	factory.Log()
 	processMock := factory.Process()
+	createResult := mocksprocess.NewResult(t)
 	result := mocksprocess.NewResult(t)
 
-	args := dispatcherArgs(constants.AgentShip, "opencode-go/deepseek-v4.1-flash", "high", "Ship issue 123")
+	expectWorkspaceCreate(processMock, "/tmp/ws/goravel/framework", "Ship issue 123", createResult)
+	createResult.EXPECT().Failed().Return(false).Once()
+	createResult.EXPECT().Output().Return(`{"workspaceId":"` + workspaceID + `"}`).Once()
+
+	args := dispatcherArgs(constants.AgentShip, "opencode-go/deepseek-v4.1-flash", "high", "Ship issue 123", workspaceID)
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/framework").Return(processMock).Once()
@@ -502,6 +556,7 @@ func TestOpencodeDispatcherRunFailure(t *testing.T) {
 	require.Contains(t, err.Error(), "boom")
 
 	processMock.AssertExpectations(t)
+	createResult.AssertExpectations(t)
 	result.AssertExpectations(t)
 }
 
@@ -509,9 +564,14 @@ func TestOpencodeDispatcherRunStartError(t *testing.T) {
 	factory := mock.Factory()
 	factory.Log()
 	processMock := factory.Process()
+	createResult := mocksprocess.NewResult(t)
 	result := mocksprocess.NewResult(t)
 
-	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "high", "Review PR 42")
+	expectWorkspaceCreate(processMock, "/tmp/ws/goravel/goravel", "Review PR 42", createResult)
+	createResult.EXPECT().Failed().Return(false).Once()
+	createResult.EXPECT().Output().Return(`{"workspaceId":"` + workspaceID + `"}`).Once()
+
+	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "high", "Review PR 42", workspaceID)
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
@@ -533,7 +593,191 @@ func TestOpencodeDispatcherRunStartError(t *testing.T) {
 	require.Contains(t, err.Error(), "start failed")
 
 	processMock.AssertExpectations(t)
+	createResult.AssertExpectations(t)
 	result.AssertExpectations(t)
+}
+
+func TestOpencodeDispatcherWorkspaceCreateFailure(t *testing.T) {
+	factory := mock.Factory()
+	logMock := mockslog.NewLog(t)
+	factory.App().EXPECT().MakeLog().Return(logMock).Once()
+	processMock := factory.Process()
+	createResult := mocksprocess.NewResult(t)
+	// What a real Result carries for a process that exited 1: the wait error in
+	// Error() and paseo's own multi-line text in ErrorOutput().
+	exitErr := errors.New("exit status 1")
+	daemonDown := "Cannot connect to daemon at 127.0.0.1:6767:\n  connect ECONNREFUSED\n"
+
+	expectWorkspaceCreate(processMock, "/tmp/ws/goravel/framework", "Ship issue 123", createResult)
+	createResult.EXPECT().Failed().Return(true).Once()
+	createResult.EXPECT().ExitCode().Return(1).Once()
+	createResult.EXPECT().ErrorOutput().Return(daemonDown).Once()
+	createResult.EXPECT().Error().Return(exitErr).Once()
+
+	// The aborted dispatch is the only entry this run gets: the create that
+	// failed and its reason, and no run command because none was built. The
+	// reason is paseo's stderr collapsed to one line, before the wrapped error.
+	logMock.EXPECT().Debug("Running paseo:",
+		"\ndirectory: /tmp/ws/goravel/framework"+
+			"\ncommand: "+shellCommand(workspaceCommand("/tmp/ws/goravel/framework", "Ship issue 123"))+
+			"\nerror: paseo workspace create failed (exit 1): "+
+			"Cannot connect to daemon at 127.0.0.1:6767: connect ECONNREFUSED: exit status 1",
+	).Once()
+
+	// No run expectation: a create failure must abort before `paseo run`.
+	dispatcher := newOpencodeDispatcher(testModels())
+	err := dispatcher.Run(context.Background(), dispatch.Request{
+		Dir:    "/tmp/ws/goravel/framework",
+		Agent:  constants.AgentShip,
+		Prompt: "do it",
+		Title:  "Ship issue 123",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "paseo workspace create failed (exit 1)")
+	// Both parts: paseo's reason, collapsed onto the one line the log promises.
+	require.Contains(t, err.Error(), ": Cannot connect to daemon at 127.0.0.1:6767: connect ECONNREFUSED: ")
+	require.NotContains(t, err.Error(), "\n")
+	// The underlying wait error is wrapped, so a caller can still inspect it.
+	require.ErrorIs(t, err, exitErr)
+
+	processMock.AssertExpectations(t)
+	createResult.AssertExpectations(t)
+	logMock.AssertExpectations(t)
+}
+
+func TestOpencodeDispatcherWorkspaceCreateFailureNoStderr(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+	processMock := factory.Process()
+	createResult := mocksprocess.NewResult(t)
+	// A process that never started reports its reason only through Error().
+	exitErr := errors.New(`exec: "paseo": executable file not found in $PATH`)
+
+	expectWorkspaceCreate(processMock, "/tmp/ws/goravel/framework", "Ship issue 123", createResult)
+	createResult.EXPECT().Failed().Return(true).Once()
+	createResult.EXPECT().ExitCode().Return(1).Once()
+	createResult.EXPECT().ErrorOutput().Return("").Once()
+	createResult.EXPECT().Error().Return(exitErr).Once()
+
+	dispatcher := newOpencodeDispatcher(testModels())
+	err := dispatcher.Run(context.Background(), dispatch.Request{
+		Dir:    "/tmp/ws/goravel/framework",
+		Agent:  constants.AgentShip,
+		Prompt: "do it",
+		Title:  "Ship issue 123",
+	})
+	require.EqualError(t, err, `paseo workspace create failed (exit 1): exec: "paseo": executable file not found in $PATH`)
+	require.ErrorIs(t, err, exitErr)
+
+	processMock.AssertExpectations(t)
+	createResult.AssertExpectations(t)
+}
+
+func TestOpencodeDispatcherWorkspaceCreateBadJSON(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+	processMock := factory.Process()
+	createResult := mocksprocess.NewResult(t)
+
+	expectWorkspaceCreate(processMock, "/tmp/ws/goravel/framework", "Ship issue 123", createResult)
+	createResult.EXPECT().Failed().Return(false).Once()
+	createResult.EXPECT().Output().Return("not json").Once()
+
+	// Unreadable output aborts instead of falling back to an untitled run.
+	dispatcher := newOpencodeDispatcher(testModels())
+	err := dispatcher.Run(context.Background(), dispatch.Request{
+		Dir:    "/tmp/ws/goravel/framework",
+		Agent:  constants.AgentShip,
+		Prompt: "do it",
+		Title:  "Ship issue 123",
+	})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "decode paseo workspace create output")
+
+	processMock.AssertExpectations(t)
+	createResult.AssertExpectations(t)
+}
+
+func TestOpencodeDispatcherWorkspaceCreateNoID(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+	processMock := factory.Process()
+	createResult := mocksprocess.NewResult(t)
+
+	expectWorkspaceCreate(processMock, "/tmp/ws/goravel/framework", "Ship issue 123", createResult)
+	createResult.EXPECT().Failed().Return(false).Once()
+	createResult.EXPECT().Output().Return(`{"name":"x"}`).Once()
+
+	// A JSON reply without an id aborts for the same reason.
+	dispatcher := newOpencodeDispatcher(testModels())
+	err := dispatcher.Run(context.Background(), dispatch.Request{
+		Dir:    "/tmp/ws/goravel/framework",
+		Agent:  constants.AgentShip,
+		Prompt: "do it",
+		Title:  "Ship issue 123",
+	})
+	require.EqualError(t, err, "paseo workspace create returned no workspace id")
+
+	processMock.AssertExpectations(t)
+	createResult.AssertExpectations(t)
+}
+
+func TestLogDispatch(t *testing.T) {
+	create := []string{"paseo", "workspace", "create", "--isolation", "local",
+		"--path", "/tmp/ws/goravel/framework", "--title", "Ship issue 123", "--json"}
+	run := []string{"paseo", "run", "--provider", "opencode",
+		"--workspace", workspaceID, "--no-wait", "--", "do it"}
+	untitled := []string{"paseo", "run", "--provider", "opencode", "--no-wait", "--", "do it"}
+
+	// The whole entry is compared, not fragments: the contract is one line per
+	// command, in execution order, and an exact match also catches a duplicated
+	// or reordered command line that a substring check would let through.
+	directory := "\ndirectory: /tmp/ws/goravel/framework"
+
+	tests := []struct {
+		name     string
+		reason   error
+		commands [][]string
+		want     string
+	}{
+		{
+			name:     "titled dispatch logs both commands in one entry",
+			commands: [][]string{create, run},
+			want: directory +
+				"\ncommand: " + shellCommand(create) +
+				"\ncommand: " + shellCommand(run),
+		},
+		{
+			name:     "untitled dispatch logs only the run",
+			commands: [][]string{nil, untitled},
+			want:     directory + "\ncommand: " + shellCommand(untitled),
+		},
+		{
+			name:     "failed create logs the command and the reason",
+			reason:   errors.New("paseo workspace create failed (exit 1): daemon down"),
+			commands: [][]string{create},
+			want: directory +
+				"\ncommand: " + shellCommand(create) +
+				"\nerror: paseo workspace create failed (exit 1): daemon down",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			// mock.Factory installs the fake application, and the log facade
+			// resolves through MakeLog, so the generated log mock records the
+			// single Debug entry a dispatch is allowed.
+			factory := mock.Factory()
+			logMock := mockslog.NewLog(t)
+			factory.App().EXPECT().MakeLog().Return(logMock).Once()
+
+			logMock.EXPECT().Debug("Running paseo:", test.want).Once()
+
+			logDispatch("/tmp/ws/goravel/framework", test.reason, test.commands...)
+
+			logMock.AssertExpectations(t)
+		})
+	}
 }
 
 func TestOpencodeDispatcherDefaults(t *testing.T) {
@@ -572,13 +816,15 @@ func TestOpencodeDispatcherRunEmptyModels(t *testing.T) {
 }
 
 func TestOpencodeDispatcherRunWithoutThinking(t *testing.T) {
-	// A value with no `#` produces no `--thinking` flag.
+	// A value with no `#` produces no `--thinking` flag. The empty title also
+	// takes the untitled path: no title → no workspace call, and the strict mock
+	// has no create expectation, so an accidental create fails the test.
 	factory := mock.Factory()
 	factory.Log()
 	processMock := factory.Process()
 	result := mocksprocess.NewResult(t)
 
-	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "", "")
+	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "", "", "")
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()

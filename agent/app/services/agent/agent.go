@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"maps"
@@ -274,6 +275,10 @@ const (
 	opencodeProvider = "opencode"
 	// stderrLimit bounds the agent stderr kept for the error message.
 	stderrLimit = 64 * 1024
+	// workspaceIsolation is the workspace kind paseo creates for a run: the
+	// per-run checkout already exists, so the workspace must point at it rather
+	// than mint a new worktree.
+	workspaceIsolation = "local"
 )
 
 // opencodeDispatcher dispatches agent runs through paseo.
@@ -329,47 +334,147 @@ func agentModels(value any) (map[string]string, error) {
 	return models, nil
 }
 
-// Run executes `paseo run --mode <mode> --model <model> [--thinking <level>]
-// [--title <title>] --no-wait -- <prompt>` in the request's directory with a
-// scrubbed environment.
+// scrubbedEnv is the `env -i PATH=... HOME=...` prefix that strips secrets from
+// every paseo subprocess the dispatcher starts. Commands are built without it and
+// carry it only when they are executed, so the command that reaches the log is
+// exactly what an operator would paste.
+func scrubbedEnv() []string {
+	return []string{"-i", "PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
+}
+
+// logDispatch writes the one Debug entry for a dispatch: the directory, then one
+// `command:` line per paseo command in the order they ran, quoted by
+// shellCommand so the whole block pastes into a shell unchanged. A nil command
+// is skipped, so an untitled dispatch logs just the run. reason explains why a
+// command never produced its successor: it is only set by a failed workspace
+// create, whose run command was never built.
+func logDispatch(dir string, reason error, commands ...[]string) {
+	var b strings.Builder
+	b.WriteString("\ndirectory: ")
+	b.WriteString(dir)
+	for _, command := range commands {
+		if command == nil {
+			continue
+		}
+		b.WriteString("\ncommand: ")
+		b.WriteString(shellCommand(command))
+	}
+	if reason != nil {
+		b.WriteString("\nerror: ")
+		b.WriteString(reason.Error())
+	}
+
+	facades.Log().Debug("Running paseo:", b.String())
+}
+
+// createWorkspace creates the paseo workspace the run will live in, titled with
+// the run title so the session name in `paseo workspace ls` matches the run in
+// `paseo ls`. It returns the workspace id and the command it attempted — the
+// command comes back even on failure, so the caller can log what did not work.
+// The JSON branch is read for the id: with --json paseo prints only
+// {"workspaceId":"wks_…","project":…,"name":…,"isolation":"local","cwd":…}.
+func (d *opencodeDispatcher) createWorkspace(ctx context.Context, req dispatch.Request) (string, []string, error) {
+	command := []string{
+		d.bin, "workspace", "create",
+		"--isolation", workspaceIsolation,
+		"--path", req.Dir,
+		"--title", req.Title,
+		"--json",
+	}
+
+	// Buffering must stay on for this call: DisableBuffering makes Result.Output
+	// empty, and the id is read from stdout. Quietly alone only stops the copy to
+	// the terminal.
+	result := facades.Process().
+		WithContext(ctx).
+		Path(req.Dir).
+		Quietly().
+		Run("env", append(scrubbedEnv(), command...)...)
+
+	if result.Failed() {
+		// paseo explains itself on stderr, while Result.Error is only the wait
+		// error (`exit status 1`), so the message needs both: the stderr collapsed
+		// to the one line the log promises, and the wait error wrapped so a caller
+		// can still match it. Without stderr (a process that never started) the
+		// wrapped error is the whole reason.
+		reason := strings.Join(strings.Fields(result.ErrorOutput()), " ")
+		if reason != "" {
+			return "", command, fmt.Errorf("paseo workspace create failed (exit %d): %s: %w", result.ExitCode(), reason, result.Error())
+		}
+
+		return "", command, fmt.Errorf("paseo workspace create failed (exit %d): %w", result.ExitCode(), result.Error())
+	}
+
+	var created struct {
+		WorkspaceID string `json:"workspaceId"`
+	}
+	if err := json.Unmarshal([]byte(result.Output()), &created); err != nil {
+		return "", command, fmt.Errorf("decode paseo workspace create output: %w", err)
+	}
+	if created.WorkspaceID == "" {
+		return "", command, errors.New("paseo workspace create returned no workspace id")
+	}
+
+	return created.WorkspaceID, command, nil
+}
+
+// Run executes `paseo run --provider <provider> --mode <mode> --model <model>
+// [--thinking <level>] [--title <title>] [--workspace <id>] --no-wait --
+// <prompt>` in the request's directory with a scrubbed environment. A titled run
+// first creates the workspace it will live in with that same title, so the paseo
+// session is named after the run instead of after the checkout's branch; an
+// untitled run keeps the single call and lets paseo name everything itself.
 func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) error {
 	model, thinking, err := d.modelFor(req.Agent)
 	if err != nil {
 		return err
 	}
 
-	// envArgs is the `env -i PATH=... HOME=...` prefix that strips secrets from
-	// the agent subprocess. It stays a named slice so the log below can drop
-	// exactly this many leading arguments: a hard-coded count would silently
-	// mis-slice the logged command the day the prefix grows a flag or a variable.
-	envArgs := []string{"-i", "PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
-	args := append(envArgs, d.bin, "run",
+	// createCommand stays nil for an untitled run: there is no workspace call to
+	// log, and paseo names the workspace from the checkout.
+	var (
+		workspaceID   string
+		createCommand []string
+	)
+	if req.Title != "" {
+		workspaceID, createCommand, err = d.createWorkspace(ctx, req)
+		if err != nil {
+			// The dispatch stops here, so this is the only entry this run gets:
+			// it logs the create that failed, because the run command was never
+			// built. One entry per dispatch, never two.
+			logDispatch(req.Dir, err, createCommand)
+			return err
+		}
+	}
+
+	command := []string{
+		d.bin, "run",
 		"--provider", d.provider,
 		"--mode", req.Agent,
 		"--model", model,
-	)
+	}
 	if thinking != "" {
-		args = append(args, "--thinking", thinking)
+		command = append(command, "--thinking", thinking)
 	}
 	if req.Title != "" {
-		args = append(args, "--title", req.Title)
+		command = append(command, "--title", req.Title)
+	}
+	if workspaceID != "" {
+		command = append(command, "--workspace", workspaceID)
 	}
 	// `--` keeps the prompt from being read as a flag.
-	args = append(args, "--no-wait", "--", req.Prompt)
+	command = append(command, "--no-wait", "--", req.Prompt)
 
-	// The logged command is quoted rather than space-joined so an operator can
-	// paste it into a shell and reproduce this argv exactly: the title stays one
-	// argument even when it has spaces, and the prompt keeps its newlines inside
-	// the quotes. envArgs is the scrubbing prefix above; it is left out of the
-	// log, so a paste runs with the operator's own environment.
-	facades.Log().Debug("Running paseo:", "\ndirectory: ", req.Dir, "\ncommand: ", shellCommand(args[len(envArgs):]))
+	// One entry for the whole sequence: the create (nil, and therefore skipped,
+	// for an untitled run) and the run it enabled.
+	logDispatch(req.Dir, nil, createCommand, command)
 
 	result := facades.Process().
 		WithContext(ctx).
 		Path(req.Dir).
 		DisableBuffering().
 		Quietly().
-		Run("env", args...)
+		Run("env", append(scrubbedEnv(), command...)...)
 
 	if result.Failed() {
 		return fmt.Errorf("paseo run failed (exit %d): %w", result.ExitCode(), result.Error())
