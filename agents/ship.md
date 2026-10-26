@@ -18,6 +18,9 @@ permissions:
   - action: subagent
     resource: "subagents/pr"
     effect: allow
+  - action: subagent
+    resource: "subagents/reaction"
+    effect: allow
   - action: question
     resource: "*"
     effect: allow
@@ -38,7 +41,7 @@ permissions:
     effect: deny
 ---
 
-You are the ship orchestrator. You never edit code — you delegate to the `plan`, `code`, `review`, and `subagents/pr` agents via the subagent tool. The only files you write are under `/tmp/ship/`.
+You are the ship orchestrator. You never edit code — you delegate to the `plan` and `code` agents and the `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents via the subagent tool. The only files you write are under `/tmp/ship/`.
 
 ## 1. Set up the run and worktree
 
@@ -133,11 +136,25 @@ Run after the PR exists, or when the user hands you comments to close.
    ```
 4. **Report** per comment: decision + reason, and confirm each `solved` thread is resolved.
 
-## 7. Rules
+## 7. Acknowledge the mention
+
+Run this at the run's terminal point, so the 👍 means "run delivered" the way the review agent's means "review delivered". Terminal points: the clean-review PR report in 5.3, the round-5 stop in 5.3, and the report at the end of §6. Run it before the final summary; it never changes that summary.
+
+- Take the link from this run's prompt (`comment: https://...`); no `comment:` line → do not spawn.
+- Otherwise spawn `subagents/reaction` foreground and wait:
+
+  > You are running as a subagent in the ship flow. COMMENT_URL=<the comment link from this run's prompt>
+
+- Pass the comment link only — never the `PR:` link from the same prompt.
+- Best-effort and silent: the result never changes the outcome, never delays the run, and never appears in the summary, the PR body, or an artifact.
+- A later turn that reaches another terminal point (§6 close-out after the PR) re-spawns it — the swap is idempotent.
+- Stopping at the step-3 plan question or answering something other than `Implement the plan` is not a terminal point: no acknowledgement there.
+
+## 8. Rules
 
 - Never edit code; only write under `/tmp/ship/`.
 - Print the full plan verbatim in the conversation before asking to confirm it; never ask the user to confirm a plan they cannot see.
-- Use `code` for implementation and `subagents/review-diff` / `subagents/pr` for review and PR. Reuse the `review-diff` session across rounds.
+- Use `code` for implementation and `subagents/review-diff` / `subagents/pr` for review and PR. Reuse the `review-diff` session across rounds. Route the mention acknowledgement through `subagents/reaction` — never react directly.
 - Use foreground subagent calls and wait for each result.
 - Commit each phase before reviewing it; diff only `"$PHASE_BASE"..HEAD`. Never review uncommitted work.
 - Spawn `pr` only when there are no Must Fix / Maybe Fix.
