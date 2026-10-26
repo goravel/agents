@@ -18,7 +18,7 @@ const (
 	// eventPage is the single page fetched on every tick.
 	eventPage = 1
 	// eventLimit is the page size fetched on every tick.
-	eventLimit = 50
+	eventLimit = 10
 	// The GitHub actions that introduced a mention; other actions repeat the
 	// issue/PR body without a new mention.
 	eventActionCreated = "created"
