@@ -113,18 +113,21 @@ const (
 )
 
 // pollObservation is what one poll cycle observed at the process boundary: the
-// routed checkout it cloned, the paseo invocation it ran, and the acknowledged
-// event ids.
+// routed checkout it cloned, the paseo workspace it created and the paseo run it
+// started inside it, and the acknowledged event ids.
 type pollObservation struct {
-	cloneRemote  string
-	cloneDir     string
-	mode         string
-	model        string
-	thinking     string
-	title        string
-	prompt       string
-	acknowledged []string
-	lastError    string
+	cloneRemote    string
+	cloneDir       string
+	workspaceID    string
+	workspaceDir   string
+	workspaceTitle string
+	mode           string
+	model          string
+	thinking       string
+	title          string
+	prompt         string
+	acknowledged   []string
+	lastError      string
 }
 
 type AgentPollTestSuite struct {
@@ -149,10 +152,11 @@ func (s *AgentPollTestSuite) requireAIProvider() {
 }
 
 // pollOnce runs one poll-events cycle against a single-event relay page. Only
-// the process boundary (the checkouter's git clone and the dispatcher's opencode
-// run) is mocked; the relay, the live AI router and every other layer are real.
-// The routed agent and repository are the live router's choice, so they are
-// captured rather than constrained here and asserted by each test.
+// the process boundary (the checkouter's git clone and the dispatcher's two
+// paseo calls — workspace create, then run) is mocked; the relay, the live AI
+// router and every other layer are real. The routed agent and repository are the
+// live router's choice, so they are captured rather than constrained here and
+// asserted by each test.
 func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 	s.requireAIProvider()
 
@@ -185,10 +189,10 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 
 	observation := pollObservation{}
 
-	// The checkouter's git clone and the dispatcher's paseo run are the only
-	// external processes: mock both. Ensure claims the per-run directory before
-	// invoking git, so the clone callback only asserts it exists. The routed
-	// repository and agent are captured here and asserted per test.
+	// The checkouter's git clone and the dispatcher's two paseo calls are the
+	// only external processes: mock both. Ensure claims the per-run directory
+	// before invoking git, so the clone callback only asserts it exists. The
+	// routed repository and agent are captured here and asserted per test.
 	//
 	// Captures happen in the Run callbacks, not the argument matchers: testify
 	// probes every same-method expectation by running its matchers against each
@@ -218,6 +222,41 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 		Once()
 	cloneResultMock.EXPECT().Failed().Return(false).Once()
 
+	// The dispatcher creates the run workspace first and runs the agent inside
+	// it, so the create expectations are armed before the run ones.
+	createResultMock := mocksprocess.NewResult(s.T())
+
+	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
+	processMock.EXPECT().
+		Path(testifymock.MatchedBy(func(p string) bool {
+			return strings.HasPrefix(p, resolved)
+		})).
+		Return(processMock).
+		Once()
+	processMock.EXPECT().Quietly().Return(processMock).Once()
+	processMock.EXPECT().
+		Run("env", "-i",
+			"PATH="+os.Getenv("PATH"),
+			"HOME="+os.Getenv("HOME"),
+			"paseo", "workspace", "create",
+			"--isolation", "local",
+			"--path", testifymock.MatchedBy(func(p string) bool { return strings.HasPrefix(p, resolved) }),
+			"--title", testifymock.MatchedBy(func(title string) bool { return title != "" }),
+			"--json").
+		Run(func(_ string, args ...string) {
+			// args = [-i, PATH…, HOME…, paseo, workspace, create, --isolation,
+			//         local, --path, <dir>, --title, <title>, --json].
+			observation.workspaceDir = args[9]
+			observation.workspaceTitle = args[11]
+		}).
+		Return(createResultMock).
+		Once()
+	createResultMock.EXPECT().Failed().Return(false).Once()
+	createResultMock.EXPECT().
+		Output().
+		Return(`{"workspaceId":"wks_0123456789abcdef","project":"goravel-framework-20260101-000000","name":"probe","isolation":"local","cwd":"/tmp"}`).
+		Once()
+
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
 	processMock.EXPECT().
 		Path(testifymock.MatchedBy(func(p string) bool {
@@ -237,6 +276,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 			"--model", testifymock.Anything,
 			"--thinking", testifymock.Anything,
 			"--title", testifymock.MatchedBy(func(title string) bool { return title != "" }),
+			"--workspace", "wks_0123456789abcdef",
 			"--no-wait", "--",
 			testifymock.MatchedBy(func(prompt string) bool {
 				// The prompt omits the Repository line: the checkout directory
@@ -246,12 +286,14 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 		Run(func(_ string, args ...string) {
 			// args = [-i, PATH…, HOME…, paseo, run, --provider, opencode,
 			//         --mode, <mode>, --model, <model>, --thinking, <thinking>,
-			//         --title, <title>, --no-wait, --, <prompt>].
+			//         --title, <title>, --workspace, <id>, --no-wait, --,
+			//         <prompt>].
 			observation.mode = args[8]
 			observation.model = args[10]
 			observation.thinking = args[12]
 			observation.title = args[14]
-			observation.prompt = args[17]
+			observation.workspaceID = args[16]
+			observation.prompt = args[19]
 		}).
 		Return(resultMock).
 		Once()
@@ -310,6 +352,9 @@ func (s *AgentPollTestSuite) TestPollShipsIssueMention() {
 	s.Require().LessOrEqual(len([]rune(got.title)), 60)
 	s.Require().Equal("git@github.com:goravel/framework.git", got.cloneRemote)
 	s.Require().True(strings.HasPrefix(filepath.Base(got.cloneDir), "goravel-framework-"))
+	s.Require().Equal("wks_0123456789abcdef", got.workspaceID)
+	s.Require().Equal(got.title, got.workspaceTitle, "workspace title must match the run title")
+	s.Require().Equal(got.cloneDir, got.workspaceDir, "workspace must point at the per-run checkout")
 	s.Require().Contains(got.prompt, "Issue: https://github.com/goravel/goravel/issues/123")
 	s.Require().Contains(got.prompt, "comment: https://github.com/goravel/goravel/issues/123#issuecomment-24680")
 	s.Require().Contains(got.prompt, "Instruction: ship this issue in goravel/framework")
@@ -337,6 +382,9 @@ func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
 	s.Require().LessOrEqual(len([]rune(got.title)), 60)
 	s.Require().Equal("git@github.com:goravel/framework.git", got.cloneRemote)
 	s.Require().True(strings.HasPrefix(filepath.Base(got.cloneDir), "goravel-framework-"))
+	s.Require().Equal("wks_0123456789abcdef", got.workspaceID)
+	s.Require().Equal(got.title, got.workspaceTitle, "workspace title must match the run title")
+	s.Require().Equal(got.cloneDir, got.workspaceDir, "workspace must point at the per-run checkout")
 	s.Require().Contains(got.prompt, "PR: https://github.com/goravel/framework/pull/42")
 	s.Require().Contains(got.prompt, "comment: https://github.com/goravel/framework/pull/42#issuecomment-98765")
 	s.Require().Contains(got.prompt, "Instruction: review\ncomment the review result to the pr")
