@@ -92,40 +92,13 @@ jq -Rs '{body: .}' "$BODY_FILE" \
 
   Never un-tick a resolved finding; never tick a still-open one.
 - Load the `goravel-review-template` skill and emit the consolidated review to the conversation.
+- Acknowledge the mention last, once the review is emitted, so the 👍 means "review delivered". Take the link from the `comment: https://...` line in your prompt — no such line → do not spawn. With one, spawn `subagents/reaction` foreground and wait:
 
-### 5. Acknowledge the mention
-Run this after the review is emitted, so the 👍 means "review delivered". Scan your prompt for a GitHub comment link — the prompt style is not fixed, so match the URL itself, not a label. Two shapes count:
+  > You are running as a subagent in the review flow. COMMENT_URL=<the comment link found in the prompt>
 
-- `https://github.com/<owner>/<repo>/{pull|issues}/<number>#issuecomment-<id>` → `issues/comments`
-- `https://github.com/<owner>/<repo>/pull/<number>#discussion_r<id>` → `pulls/comments`
+  Pass the comment link only — never the `PR:` link from the same prompt. Best-effort: never fail or delay the review over it, and never mention the spawn or its result in the review output.
 
-No such link → no comment to acknowledge → do nothing. With one: replace every 👀 on that comment with a 👍, whoever added it. Best-effort: never fail or delay the review over it, and never mention it in the review output.
-
-```bash
-COMMENT_URL='<the GitHub comment link found anywhere in the prompt>'
-FRAGMENT=${COMMENT_URL##*#}
-case "$FRAGMENT" in
-  issuecomment-*) COLLECTION=issues/comments; COMMENT_ID=${FRAGMENT#issuecomment-} ;;
-  discussion_r*)  COLLECTION=pulls/comments;  COMMENT_ID=${FRAGMENT#discussion_r} ;;
-  *)              COLLECTION=""; COMMENT_ID="" ;;
-esac
-REPO=$(printf '%s' "$COMMENT_URL" | sed -nE 's#.*https://github\.com/([^/]+/[^/]+)/(pull|issues)/[0-9]+.*#\1#p')
-if [ -n "$COLLECTION" ] && [ -n "$REPO" ] && [ -n "$COMMENT_ID" ]; then
-  IDS=$(gh api --paginate "repos/$REPO/$COLLECTION/$COMMENT_ID/reactions" \
-    --jq '.[] | select(.content=="eyes") | .id')
-  printf '%s\n' "$IDS" | while read -r REACTION_ID; do
-    [ -n "$REACTION_ID" ] || continue
-    gh api -X DELETE "repos/$REPO/$COLLECTION/$COMMENT_ID/reactions/$REACTION_ID"
-  done
-  gh api -X POST "repos/$REPO/$COLLECTION/$COMMENT_ID/reactions" -f content='+1'
-fi
-```
-
-- React on `$REPO` from the link, not from the checkout: a routed run may review a different repository from the one the mention was posted in, and that link names the repository the 👀 was added to.
-- Always post the 👍, even when nothing was deleted (reactions disabled, or a human started the run). Re-posting the same reaction is idempotent on GitHub's side.
-- No link in the prompt, a link that matches neither shape, or a rejected call → continue in silence.
-
-### 6. Clean up
+### 5. Clean up
 After step 3 has verified against the worktree:
 
 ```bash
@@ -134,4 +107,4 @@ git branch -D "pr-${PR_NUM}"
 ```
 
 ## Output
-Never auto-post: you never create PR comments or replies automatically — you only read what step 1 fetched. The automatic writes are the in-place tick in step 4 and the reaction swap in step 5. If the user explicitly asks you to post the review, post a top-level issue comment with `gh pr comment <N> --body-file <tmp>`; NEVER use `gh pr review`.
+Never auto-post: you never create PR comments or replies automatically — you only read what step 1 fetched. The automatic writes are both in step 4: the in-place tick, and the reaction swap at its end, delegated to `subagents/reaction`. If the user explicitly asks you to post the review, post a top-level issue comment with `gh pr comment <N> --body-file <tmp>`; NEVER use `gh pr review`.
