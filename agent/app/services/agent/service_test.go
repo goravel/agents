@@ -41,18 +41,23 @@ const (
 	],
 	"total": 1,
 	"page": 1,
-	"limit": 50
+	"limit": 10
 }`
 
 	// zeroNumberEnvelope is a mention whose payload carries no issue or pull
 	// request number, so the run has no fallback title.
-	zeroNumberEnvelope = `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":50}`
+	zeroNumberEnvelope = `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":10}`
 )
 
+// relayQueryParams pins the relay request query. The limit is the literal wire
+// value the service sends, pinned on purpose: it must not be derived from
+// eventLimit, or the page size would be asserted against itself and a drift like
+// 50 -> 10 would go unnoticed. Changing the relay page size must be a deliberate
+// change to this pin too.
 var relayQueryParams = map[string]string{
 	"platform": "github",
 	"page":     "1",
-	"limit":    "50",
+	"limit":    "10",
 }
 
 // checkoutTime pins the injected clock so the per-run checkout name is stable.
@@ -172,7 +177,7 @@ func TestServicePollDispatchesMentionsAndDeletes(t *testing.T) {
 	body := `{"data":[
 		{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"},
 		{"id":2,"delivery_id":"d-2","sender":"bowen","event":"issues","action":"opened","repository":"goravel/framework","payload":"{\"number\":5,\"issue\":{\"number\":5,\"body\":\"nothing to see\"}}"}
-	],"total":2,"page":1,"limit":50}`
+	],"total":2,"page":1,"limit":10}`
 
 	getResp.EXPECT().Failed().Return(false).Once()
 	getResp.EXPECT().Body().Return(body, nil).Once()
@@ -493,7 +498,7 @@ func TestServicePollDeletesFullPageThroughPool(t *testing.T) {
 		))
 		want = append(want, fmt.Sprintf("http://relay.test/webhooks/events/%d", i))
 	}
-	body := `{"data":[` + strings.Join(events, ",") + `],"total":` + strconv.Itoa(count) + `,"page":1,"limit":50}`
+	body := `{"data":[` + strings.Join(events, ",") + `],"total":` + strconv.Itoa(count) + `,"page":1,"limit":10}`
 
 	getResp.EXPECT().Failed().Return(false).Once()
 	getResp.EXPECT().Body().Return(body, nil).Once()
@@ -825,7 +830,7 @@ func TestServicePollDispatchesAllowedSender(t *testing.T) {
 	getResp := mockshttp.NewResponse(t)
 	deleteResp := mockshttp.NewResponse(t)
 
-	envelope := `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":50}`
+	envelope := `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":10}`
 
 	getResp.EXPECT().Failed().Return(false).Once()
 	getResp.EXPECT().Body().Return(envelope, nil).Once()
@@ -984,7 +989,7 @@ func TestServicePollDeletesEventWithInvalidPayload(t *testing.T) {
 	getResp := mockshttp.NewResponse(t)
 	deleteResp := mockshttp.NewResponse(t)
 
-	env := `{"data":[{"id":1,"delivery_id":"d-1","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"not json"}],"total":1,"page":1,"limit":50}`
+	env := `{"data":[{"id":1,"delivery_id":"d-1","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"not json"}],"total":1,"page":1,"limit":10}`
 
 	getResp.EXPECT().Failed().Return(false).Once()
 	getResp.EXPECT().Body().Return(env, nil).Once()
@@ -1015,7 +1020,7 @@ func TestServicePollSkipsNonActionableAction(t *testing.T) {
 	deleteResp := mockshttp.NewResponse(t)
 
 	// A mention in the issue body repeated by a `labeled` action must not dispatch.
-	env := `{"data":[{"id":1,"delivery_id":"d-1","event":"issues","action":"labeled","repository":"goravel/goravel","payload":"{\"number\":123,\"issue\":{\"number\":123,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":50}`
+	env := `{"data":[{"id":1,"delivery_id":"d-1","event":"issues","action":"labeled","repository":"goravel/goravel","payload":"{\"number\":123,\"issue\":{\"number\":123,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":10}`
 
 	getResp.EXPECT().Failed().Return(false).Once()
 	getResp.EXPECT().Body().Return(env, nil).Once()
@@ -1216,7 +1221,7 @@ func TestServicePollUsesConfiguredMention(t *testing.T) {
 	envelope := `{"data":[
 		{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@bot review\"}}"},
 		{"id":2,"delivery_id":"d-2","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/framework","payload":"{\"number\":5,\"comment\":{\"id\":13579,\"body\":\"@goravel-agent review\"}}"}
-	],"total":2,"page":1,"limit":50}`
+	],"total":2,"page":1,"limit":10}`
 
 	getResp.EXPECT().Failed().Return(false).Once()
 	getResp.EXPECT().Body().Return(envelope, nil).Once()
@@ -1315,7 +1320,7 @@ func TestServicePollReactsToReviewComment(t *testing.T) {
 	getResp := mockshttp.NewResponse(t)
 	deleteResp := mockshttp.NewResponse(t)
 
-	envelope := `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"pull_request_review_comment","action":"created","repository":"goravel/framework","payload":"{\"pull_request\":{\"number\":123},\"comment\":{\"id\":98765,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":50}`
+	envelope := `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"pull_request_review_comment","action":"created","repository":"goravel/framework","payload":"{\"pull_request\":{\"number\":123},\"comment\":{\"id\":98765,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":10}`
 
 	getResp.EXPECT().Failed().Return(false).Once()
 	getResp.EXPECT().Body().Return(envelope, nil).Once()
@@ -1418,7 +1423,7 @@ func TestServicePollDoesNotReactToBodyMention(t *testing.T) {
 	getResp := mockshttp.NewResponse(t)
 	deleteResp := mockshttp.NewResponse(t)
 
-	envelope := `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issues","action":"opened","repository":"goravel/framework","payload":"{\"number\":5,\"issue\":{\"number\":5,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":50}`
+	envelope := `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issues","action":"opened","repository":"goravel/framework","payload":"{\"number\":5,\"issue\":{\"number\":5,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":10}`
 
 	getResp.EXPECT().Failed().Return(false).Once()
 	getResp.EXPECT().Body().Return(envelope, nil).Once()
