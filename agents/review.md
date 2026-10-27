@@ -27,13 +27,20 @@ You are the primary `review` agent. You never edit source files — analysis onl
 ### 1. Prepare the PR surface
 Check out the PR into a worktree and gather everything the review needs.
 
+Spawn `subagents/setup` foreground and wait. Pass the `PR:` line from your prompt verbatim as the link.
+
+> You are running as a subagent in the review flow. LINK=<the PR link from the prompt>
+
+- The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
+  use it as given. A reply starting `setup: failed` → report that line and stop; never build a path or a
+  branch yourself.
+- Keep it all: this flow removes nothing. `setup` owns the checkout and the worktree, and a later run
+  reuses them.
+- Resolve the base branch and read the diff. `setup` refreshed every `origin/*` branch, so
+  `origin/$BASE_BRANCH` resolves:
+
 ```bash
 PR_NUM=<number>
-WORKTREE_DIR="/tmp/pr-reviews/pr-${PR_NUM}"
-git worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true
-git branch -D "pr-${PR_NUM}" 2>/dev/null || true
-git fetch origin "pull/${PR_NUM}/head:pr-${PR_NUM}" --force
-git worktree add "$WORKTREE_DIR" "pr-${PR_NUM}" --detach
 BASE_BRANCH=$(gh pr view "$PR_NUM" --json baseRefName --jq '.baseRefName')
 git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD --name-only
 ```
@@ -84,6 +91,7 @@ git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD -U0 | rg '^diff --git
 
 ```bash
 BODY_FILE="/tmp/pr-reviews/pr-${PR_NUM}-body.md"
+mkdir -p /tmp/pr-reviews
 gh api "repos/{owner}/{repo}/${COMMENT_ENDPOINT}" --jq .body > "$BODY_FILE"
 # rewrite only the matched anchor line in "$BODY_FILE": `[ ]` → `[x]` on the backticked `path:LINE` + Title
 jq -Rs '{body: .}' "$BODY_FILE" \
@@ -97,14 +105,6 @@ jq -Rs '{body: .}' "$BODY_FILE" \
   > You are running as a subagent in the review flow. COMMENT_URL=<the comment link found in the prompt>
 
   Pass the comment link only — never the `PR:` link from the same prompt. Best-effort: never fail or delay the review over it, and never mention the spawn or its result in the review output.
-
-### 5. Clean up
-After step 3 has verified against the worktree:
-
-```bash
-git worktree remove "/tmp/pr-reviews/pr-${PR_NUM}" --force
-git branch -D "pr-${PR_NUM}"
-```
 
 ## Output
 Never auto-post: you never create PR comments or replies automatically — you only read what step 1 fetched. The automatic writes are both in step 4: the in-place tick, and the reaction swap at its end, delegated to `subagents/reaction`. If the user explicitly asks you to post the review, post a top-level issue comment with `gh pr comment <N> --body-file <tmp>`; NEVER use `gh pr review`.

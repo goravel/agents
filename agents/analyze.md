@@ -18,6 +18,9 @@ permissions:
   - action: subagent
     resource: "subagents/reaction"
     effect: allow
+  - action: subagent
+    resource: "subagents/setup"
+    effect: allow
   - action: shell
     resource: "*"
     effect: allow
@@ -39,21 +42,26 @@ Report style, everywhere:
 
 ## 1. Prepare the PR
 
+No `PR:` line in your prompt → say so and stop; never guess a number. Otherwise spawn `subagents/setup`
+foreground and wait; pass the `PR:` line verbatim as the link and keep its number as `PR_NUM`.
+
+> You are running as a subagent in the analyze flow. LINK=<the PR link from the prompt>
+
+- The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
+  use it as given. A reply starting `setup: failed` → report that line and stop; never build a path or a
+  branch yourself.
+- Keep it all: this flow removes nothing. `setup` owns the checkout and the worktree, and a later run
+  reuses them.
+- Resolve the base branch and read the diff. `setup` refreshed every `origin/*` branch, so
+  `origin/$BASE_BRANCH` resolves:
+
 ```bash
 PR_NUM=<number>
-WORKTREE_DIR="/tmp/pr-analysis/pr-${PR_NUM}"
-git worktree remove "$WORKTREE_DIR" --force 2>/dev/null || true
-git branch -D "analyze-${PR_NUM}" 2>/dev/null || true
-git fetch origin "pull/${PR_NUM}/head:analyze-${PR_NUM}" --force
-git worktree add "$WORKTREE_DIR" "analyze-${PR_NUM}" --detach
 BASE_BRANCH=$(gh pr view "$PR_NUM" --json baseRefName --jq '.baseRefName')
-git fetch origin "${BASE_BRANCH}:refs/remotes/origin/${BASE_BRANCH}"
 git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD --stat
 git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD
 ```
 
-- `PR_NUM` comes from the `PR: https://github.com/<owner>/<repo>/pull/<n>` line in your prompt. No
-  `PR:` line → say so and stop; never guess a number.
 - Context, read-only — the body and the issue feed the usage block and the Laravel comparison:
 
 ```bash
@@ -237,7 +245,7 @@ Headings and order are fixed:
 
 ## 7. Acknowledge the mention
 
-Run this once the report is emitted and before the cleanup, so the 👍 means "analysis delivered". Take
+Run this once the report is emitted, so the 👍 means "analysis delivered". Take
 the link from the `comment: https://...` line in your prompt — no such line → do not spawn. With one,
 spawn `subagents/reaction` foreground and wait:
 
@@ -246,13 +254,6 @@ spawn `subagents/reaction` foreground and wait:
 - Pass the comment link only — never the `PR:` link from the same prompt.
 - Best-effort: never fail or delay the report over it, and never mention the spawn or its result in
   the report.
-
-## 8. Clean up
-
-```bash
-git worktree remove "/tmp/pr-analysis/pr-${PR_NUM}" --force
-git branch -D "analyze-${PR_NUM}"
-```
 
 ## Output
 
