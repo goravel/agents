@@ -54,27 +54,53 @@ Confirm `plan.md` exists before the first code phase.
 
 ## 3. Create the worktree
 
-Do all code work in a worktree of the target repo, not in the target checkout itself. Spawn
-`subagents/setup` foreground and wait; pass the repo link only. This session sits inside that repo's
-checkout, so setup reuses the checkout and puts the worktree beside its root.
+Do all code work in a worktree of the target repo, not in the target checkout itself.
+
+A `PR:` line in this run's prompt is the target. Only without one does the repository `origin` name it —
+never the worktree, whose branch belongs to the last run.
 
 ```bash
-URL=$(git remote get-url origin) || { echo "no origin remote"; exit 1; }
-case "$URL" in *github.com[:/]*) ;; *) echo "origin is not a GitHub remote: $URL"; exit 1 ;; esac
-REPO=$(printf '%s' "$URL" | sed -E 's#/+$##; s#\.git$##' | awk -F'[:/]' '{print $(NF-1)"/"$NF}')
+LINK='<the PR link from this run'"'"'s prompt>'
+if [ -z "$LINK" ]; then
+  URL=$(git remote get-url origin) || { echo "no origin remote"; exit 1; }
+  case "$URL" in *github.com[:/]*) ;; *) echo "origin is not a GitHub remote: $URL"; exit 1 ;; esac
+  LINK=$(printf '%s' "$URL" | sed -E 's#/+$##; s#\.git$##' | awk -F'[:/]' '{print $(NF-1)"/"$NF}')
+fi
+REPO=$(printf '%s' "$LINK" | sed -nE 's#^https?://(www\.)?github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/pull/([0-9]+).*#\2/\3#p')
+PR_NUM=$(printf '%s' "$LINK" | sed -nE 's#^https?://(www\.)?github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/([0-9]+).*#\2#p')
+[ -n "$REPO" ] || REPO="$LINK"
+
+BASE_BRANCH=
+if [ -n "$PR_NUM" ]; then
+  META=$(gh pr view "$PR_NUM" -R "$REPO" --json baseRefName,isCrossRepository \
+    --jq '[.baseRefName, (.isCrossRepository|tostring)] | @tsv') || { echo "cannot read PR #$PR_NUM of $REPO"; exit 1; }
+  BASE_BRANCH=$(printf '%s\n' "$META" | cut -f1)
+  if [ "$(printf '%s\n' "$META" | cut -f2)" = true ]; then
+    echo "PR #$PR_NUM comes from a fork; this flow does not push to it"; exit 1
+  fi
+fi
 ```
 
-Either message it prints → report that line and stop: without a GitHub `origin` there is no repo to set up.
+Either message the block prints → report that line and stop: without a GitHub `origin` there is no repo to
+set up, and a PR that cannot be read or comes from a fork has nothing this flow can push to.
 
-> You are running as a subagent in the implement flow. LINK=<REPO>
+Spawn `subagents/setup` foreground and wait, passing `LINK`:
+
+> You are running as a subagent in the implement flow. LINK=<the value of LINK: the PR link from the prompt, else owner/repo>
+
+This session sits inside that repo's checkout, so setup reuses the checkout and puts the worktree beside
+its root.
 
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build the path
   yourself.
-- Resolve the base branch from the worktree, then set a local commit identity if none exists:
+- Resolve the base branch from the worktree when the prompt did not, then set a local commit identity if
+  none exists:
   ```
-  BASE_BRANCH=$(git -C "$WORKTREE_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
-  [ -z "$BASE_BRANCH" ] && BASE_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name)
+  [ -n "$BASE_BRANCH" ] || {
+    BASE_BRANCH=$(git -C "$WORKTREE_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
+    [ -z "$BASE_BRANCH" ] && BASE_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name)
+  }
   git -C "$WORKTREE_DIR" config user.email >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.email "implement-agent@localhost"
   git -C "$WORKTREE_DIR" config user.name  >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.name  "implement agent"
   ```
@@ -161,6 +187,8 @@ Run this at the run's terminal point, so the 👍 means "run delivered" the way 
 
 - Never edit code; only write under `/tmp/implement/`.
 - Set up the environment with `subagents/setup` — never clone, fetch a PR, or add a worktree yourself.
+- A `PR:` line in the prompt is this run's target: pass it to `subagents/setup` and never rebuild it from
+  the worktree. A fork PR stops the flow before the first code round — say so and stop.
 - Use `code` for implementation and `subagents/go-review` / `subagents/pr` for review and PR. Never spawn `review`. Route the mention acknowledgement through `subagents/reaction` — never react directly.
 - Use foreground subagent calls and wait for each result.
 - Never exceed 5 rounds.
