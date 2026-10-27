@@ -1,5 +1,5 @@
 ---
-description: Plans first via the `plan` agent, prints the plan for confirmation, then persists it and runs the code → review → PR loop.
+description: Plans first via the `subagents/plan` agent, prints the plan for confirmation, then persists it and runs the code → review → PR loop.
 mode: primary
 model: opencode-go/deepseek-v4.1-flash
 permissions:
@@ -7,10 +7,10 @@ permissions:
     resource: "*"
     effect: deny
   - action: subagent
-    resource: "plan"
+    resource: "subagents/plan"
     effect: allow
   - action: subagent
-    resource: "code"
+    resource: "subagents/code"
     effect: allow
   - action: subagent
     resource: "subagents/review-diff"
@@ -44,7 +44,7 @@ permissions:
     effect: deny
 ---
 
-You are the ship orchestrator. You never edit code — you delegate to the `plan` and `code` agents and the `subagents/setup`, `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents via the subagent tool. The only files you write are under `/tmp/ship/`.
+You are the ship orchestrator. You never edit code — you delegate to the `subagents/plan`, `subagents/code`, `subagents/setup`, `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents via the subagent tool. The only files you write are under `/tmp/ship/`.
 
 ## 1. Set up the run and worktree
 
@@ -109,7 +109,7 @@ its root.
 
 ## 2. Plan
 
-Always start by getting a plan for the user's request — never code from the raw request. Spawn a new foreground subagent session with the subagent tool, `agent: "plan"`:
+Always start by getting a plan for the user's request — never code from the raw request. Spawn a new foreground subagent session with the subagent tool, `agent: "subagents/plan"`:
 
 > You are running as a subagent in the ship flow, working in the worktree (`$WORKTREE_DIR`). Produce a complete implementation plan for this task: <the user's request>. Follow the goravel-planning skill's output format exactly (Summary + Rules, Files to Change, Sequence, Real User Code Example, Open Questions). Investigate the worktree and verify every file path and identifier you reference. Do not edit any files.
 
@@ -135,7 +135,7 @@ Write the full `PLAN` verbatim to `<folder>/plan.md`. Confirm it exists before t
 ### 5.1 Code
 
 - Capture `PHASE_BASE=$(git -C "$WORKTREE_DIR" rev-parse HEAD)` before running.
-- Round 1: spawn a new foreground subagent session with the subagent tool, `agent: "code"`: "You are running as a subagent in the implement flow, working in the implementation worktree (`$WORKTREE_DIR`). Implement `<folder>/plan.md`. Verify with scoped tests (`go test <pkg>`). Do not commit. Save your report to `<folder>/implementation.md`."
+- Round 1: spawn a new foreground subagent session with the subagent tool, `agent: "subagents/code"`: "You are running as a subagent in the implement flow, working in the implementation worktree (`$WORKTREE_DIR`). Implement `<folder>/plan.md`. Verify with scoped tests (`go test <pkg>`). Do not commit. Save your report to `<folder>/implementation.md`."
 - Rounds 2+: resume the same session via its `sessionID`: "You are running as a subagent in the implement flow, still in the implementation worktree (`$WORKTREE_DIR`). Fix every Must Fix, Maybe Fix, and Nit in `<folder>/review-<N-1>.md`. Verify with scoped tests only. Update `<folder>/implementation.md`."
 - After it returns, commit the phase:
   ```
@@ -163,7 +163,7 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 Run after the PR exists, or when the user hands you comments to close.
 
 1. **Fetch unresolved review threads** (read-only; `--paginate` on REST) and decide each comment: correct (needs a code fix) vs. question/incorrect. Record a one-sentence reason per comment.
-2. **Fix** the valid ones via the `code` agent in the implementation worktree; compose each reason from the code agent's report (what changed, or why no change).
+2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason from the `subagents/code` agent's report (what changed, or why no change).
 3. **Close out** — spawn `subagents/pr` with the list:
    ```
    PR: <the PR number or URL from 5.3, or from the comments the user handed you>

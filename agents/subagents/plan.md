@@ -1,6 +1,6 @@
 ---
 description: Investigates a task and writes an implementation plan; never edits files.
-mode: all
+mode: subagent
 model: opencode-go/deepseek-v4.1-flash#high
 permissions:
   - action: edit
