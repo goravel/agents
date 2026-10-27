@@ -14,6 +14,15 @@ permissions:
     effect: allow
   - action: subagent
     resource: "*"
+    effect: deny
+  - action: subagent
+    resource: "subagents/go-review"
+    effect: allow
+  - action: subagent
+    resource: "subagents/reaction"
+    effect: allow
+  - action: subagent
+    resource: "subagents/setup"
     effect: allow
   - action: shell
     resource: "*"
@@ -27,7 +36,8 @@ You are the primary `review` agent. You never edit source files — analysis onl
 ### 1. Prepare the PR surface
 Check out the PR into a worktree and gather everything the review needs.
 
-Spawn `subagents/setup` foreground and wait. Pass the `PR:` line from your prompt verbatim as the link.
+No `PR:` line in your prompt → say so and stop; never guess a number. Otherwise spawn `subagents/setup`
+foreground and wait. Pass the `PR:` line verbatim as the link and keep its number as `PR_NUM`.
 
 > You are running as a subagent in the review flow. LINK=<the PR link from the prompt>
 
@@ -40,13 +50,11 @@ Spawn `subagents/setup` foreground and wait. Pass the `PR:` line from your promp
   `origin/$BASE_BRANCH` resolves:
 
 ```bash
-PR_NUM=<number>
 BASE_BRANCH=$(gh pr view "$PR_NUM" --json baseRefName --jq '.baseRefName')
 git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD --name-only
 ```
 
 - Build the knowledge graph: `build_or_update_graph_tool({ repo_root: "$WORKTREE_DIR", base: "origin/${BASE_BRANCH}" })`.
-- Sub-agent context: `WORKTREE_DIR` and `BASE_BRANCH` from above.
 - Fetch the conversation and PR body (read-only; every call `--paginate`):
 
 ```bash
@@ -86,7 +94,8 @@ git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD -U0 | rg '^diff --git
 - Apply comment input: match each entry to the findings it addresses — inline comments by `path` + `line` (fall back to `original_line`); a reply via `in_reply_to_id` → its parent's path/line; otherwise a quoted `file:line` or the finding Title. Verify every claim against `$WORKTREE_DIR` (bot or human alike): a claim that holds (intentional guard, unreachable path, already fixed) → withdraw the finding; a claim that does not hold, or a question, leaves it unchanged. Unmatched entries are ignored; no output section. A withdrawn prior finding counts as resolved and joins the tick set. Stateless: re-derive from the fetched input every run.
 
 ### 4. Emit
-- Count per severity per status and give the `goravel-review-template` skill the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → it emits `✅ Review clean — no findings.` (this string keys the implement orchestrator's convergence check).
+Load the `goravel-review-template` skill once, then:
+- Count per severity per status and give it the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → it emits `✅ Review clean — no findings.` (this string keys the implement orchestrator's convergence check).
 - Tick resolved findings in prior comments whose endpoint is editable (`issues/comments/{id}` or `pulls/comments/{id}`, recorded as `$COMMENT_ENDPOINT` per comment in the tick set): `[ ]` → `[x]` on the anchor line of each resolved finding, matched by file path + Title, rewriting only the anchor line (`^\s*\d+\.\s*\[ \]\s*` + backticked `path:LINE`). Fetch that comment's current body, rewrite the anchor line there, then PATCH it back to the same endpoint:
 
 ```bash
@@ -99,7 +108,7 @@ jq -Rs '{body: .}' "$BODY_FILE" \
 ```
 
   Never un-tick a resolved finding; never tick a still-open one.
-- Load the `goravel-review-template` skill and emit the consolidated review to the conversation.
+- Emit the consolidated review to the conversation.
 - Acknowledge the mention last, once the review is emitted, so the 👍 means "review delivered". Take the link from the `comment: https://...` line in your prompt — no such line → do not spawn. With one, spawn `subagents/reaction` foreground and wait:
 
   > You are running as a subagent in the review flow. COMMENT_URL=<the comment link found in the prompt>

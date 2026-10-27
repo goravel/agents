@@ -1,5 +1,5 @@
 ---
-description: Go review worker invoked by the review agent and implement orchestrator; runs ONE SIDE per call (safe | logic | performance | standard | testing | architecture) on Go diffs and returns findings only.
+description: Go review worker invoked by the review agent and the review-diff worker; runs ONE SIDE per call (safe | logic | performance | standard | testing | architecture) on Go diffs and returns findings only.
 mode: subagent
 model: opencode-go/deepseek-v4.1-flash#high
 permissions:

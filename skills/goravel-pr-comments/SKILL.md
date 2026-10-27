@@ -33,8 +33,8 @@ and a `reason` posted verbatim.
    Map each `databaseId` -> `{ threadId, isResolved }`.
 
 ## Per comment
-1. **Post the reply** (reason via a `/tmp` file so quotes/newlines are safe):
-   `gh api "repos/$OWNER/$REPO/pulls/$PR/comments/$COMMENT_ID/replies" -f body="$(cat "$tmp")"`
+1. **Post the reply** — write the reason to `/tmp/pr-comment-reply.md` first, so quotes and newlines are safe:
+   `gh api "repos/$OWNER/$REPO/pulls/$PR/comments/$COMMENT_ID/replies" -f body="$(cat /tmp/pr-comment-reply.md)"`
    Fails -> `reply failed`, do NOT resolve.
 2. **Resolve only when `status: solved`** and the comment id has a thread in the map. No matching thread -> record `skipped (no thread)`; otherwise, when not already resolved:
    `gh api graphql -f query='mutation($threadId:ID!){ resolveReviewThread(input:{threadId:$threadId}){ thread{ isResolved } } }' -F threadId="$THREAD_ID"`
@@ -48,7 +48,7 @@ Re-run the thread-map query — every `solved` target's thread is `isResolved ==
 - Only touch comments the caller listed. Never reply to or resolve an unlisted comment.
 - Never resolve a `declined` comment or one whose reply failed.
 - Never touch reactions. The 👀 on the mention is swapped by `subagents/reaction`, not here.
-- Top-level issue comments have no thread — reply with `gh pr comment "$PR" --body-file "$tmp"` and report `replied (not resolvable)`.
+- Top-level issue comments have no thread — reply with `gh pr comment "$PR" --body-file /tmp/pr-comment-reply.md` and report `replied (not resolvable)`.
 - Never edit code; never fabricate a reason — post the caller's text verbatim.
 
 ## Output Contract

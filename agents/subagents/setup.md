@@ -29,9 +29,8 @@ the work in the worktree.
   | issue | `https://github.com/goravel/goravel/issues/42` | `issue-42-<TS>` at the default branch |
   | repository | `https://github.com/goravel/goravel`, `…/goravel.git`, `…/goravel/`, `git@github.com:goravel/goravel.git`, `goravel/goravel` | `task-<TS>` at the default branch |
 
-  A `#issuecomment-…` or `#discussion_r…` suffix is fine. A `PR:` or `Issue:` line beats a `Repository:`
-  one, and a bare `owner/repo` counts only from `REPO=<owner/repo>`, `Repository: <owner/repo>`, or the
-  filled `LINK` — never from running prose, where `and/or` and `ci/cd` also match. The `owner/repo` of a
+  A `#issuecomment-…` or `#discussion_r…` suffix is fine. The caller passes exactly one `LINK=<link>`; a
+  bare `owner/repo` is accepted only as that whole value. The `owner/repo` of a
   pull request link is the repository the PR lives in, not its head: `gh -R <owner/repo>` reads the PR and
   `origin` stays the base repository.
 - **The workspace root is always `pwd`.** No input moves it and an environment `WORKSPACE_DIR` is ignored.

@@ -1,5 +1,5 @@
 ---
-description: Swaps a mention comment's 👀 for a 👍 once a run delivers. Invoked by the review agent and the ship/implement orchestrators; executor only — no code edits, no PR comments, no ticks.
+description: Swaps a mention comment's 👀 for a 👍 once a run delivers. Invoked by the analyze and review agents and the ship/implement orchestrators; executor only — no code edits, no PR comments, no ticks.
 mode: subagent
 model: opencode-go/deepseek-v4.1-flash#high
 permissions:
@@ -20,8 +20,7 @@ Callers run you after delivery, so the 👍 means "delivered".
 
 ## Input
 
-The caller passes `COMMENT_URL=<url>`. When it is absent, scan your own prompt for the URL — the
-prompt style is not fixed, so match the URL itself, not a label. Two shapes count:
+The caller passes `COMMENT_URL=<url>`. Two shapes count:
 
 - `https://github.com/<owner>/<repo>/{pull|issues}/<number>#issuecomment-<id>` → `issues/comments`
 - `https://github.com/<owner>/<repo>/pull/<number>#discussion_r<id>` → `pulls/comments`
