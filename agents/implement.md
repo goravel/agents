@@ -1,5 +1,5 @@
 ---
-description: Orchestrates a plan→code→review→PR loop by delegating to the `subagents/setup`, `code`, `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents.
+description: Orchestrates a plan→code→review→PR loop by delegating to the `subagents/setup`, `subagents/code`, `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents.
 mode: primary
 model: opencode-go/deepseek-v4.1-flash
 permissions:
@@ -7,7 +7,7 @@ permissions:
     resource: "*"
     effect: deny
   - action: subagent
-    resource: "code"
+    resource: "subagents/code"
     effect: allow
   - action: subagent
     resource: "subagents/review-diff"
@@ -38,7 +38,7 @@ permissions:
     effect: deny
 ---
 
-You are the implement orchestrator. You never edit code — delegate to the `subagents/setup`, `code`, `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents via the subagent tool. The only files you write are under `/tmp/implement/`.
+You are the implement orchestrator. You never edit code — delegate to the `subagents/setup`, `subagents/code`, `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents via the subagent tool. The only files you write are under `/tmp/implement/`.
 
 ## 1. Input
 
@@ -113,7 +113,7 @@ its root.
 ### 4.1 Code
 
 - Capture `PHASE_BASE=$(git -C "$WORKTREE_DIR" rev-parse HEAD)` before running.
-- Round 1: spawn a new foreground subagent session with the subagent tool, `agent: "code"`: "You are running as a subagent in the implement flow, working in the implementation worktree (`$WORKTREE_DIR`). Implement `<folder>/plan.md`. Verify with `go build ./...` and scoped tests (`go test <pkg>`). Do not commit. Save your report to `<folder>/implementation.md`."
+- Round 1: spawn a new foreground subagent session with the subagent tool, `agent: "subagents/code"`: "You are running as a subagent in the implement flow, working in the implementation worktree (`$WORKTREE_DIR`). Implement `<folder>/plan.md`. Verify with `go build ./...` and scoped tests (`go test <pkg>`). Do not commit. Save your report to `<folder>/implementation.md`."
 - Rounds 2+: resume the same session via its `sessionID`: "You are running as a subagent in the implement flow, still in the implementation worktree (`$WORKTREE_DIR`). Fix every Must Fix, Maybe Fix, and Nit in `<folder>/review-<N-1>.md`. Verify with scoped tests only. Update `<folder>/implementation.md`."
 - After it returns, commit the phase:
   ```
@@ -141,7 +141,7 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 Run after the PR exists, or when the user hands you comments to close.
 
 1. **Fetch unresolved review threads** (read-only; `--paginate` on REST) and decide each comment: correct (needs a code fix) vs. question/incorrect. Record a one-sentence reason per comment.
-2. **Fix** the valid ones via the `code` agent in the implementation worktree; compose each reason from the code agent's report (what changed, or why no change).
+2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason from the `subagents/code` agent's report (what changed, or why no change).
 3. **Close out** — spawn `subagents/pr` with the list (do not name a skill):
    ```
    PR: <the PR number or URL from 4.3, or from the comments the user handed you>

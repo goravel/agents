@@ -1,6 +1,6 @@
 ---
 description: Write code
-mode: all
+mode: subagent
 model: opencode-go/deepseek-v4.1-flash#high
 ---
 
