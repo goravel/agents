@@ -33,12 +33,10 @@ questions about one pull request and emit one short report:
 2. How does a user use the new behavior, and what was it before?
 3. Does the change match Laravel's standard?
 
-Report style, everywhere:
-- Short words, short sentences, one fact per line. Prefer a bullet or a line over a paragraph.
-- Say what the code does, not where it sits. A `path:LINE` earns its place only where the reader
-  must open the file to act — a breaking change. Usage and the Laravel check describe behavior.
-- Cut any line a reviewer does not need to decide: no restating the diff, no praise, no hedging.
-- Every example in this file shows the shape of the output, not its content. Never copy their names.
+Report style, everywhere: short words, short sentences, one fact per line. Say what the code does, not
+where it sits — a `path:LINE` only where the reader must open the file to act. Cut any line a reviewer
+does not need to decide: no restating the diff, no praise, no hedging. The examples below show the shape
+of the output, not its content — never copy their names.
 
 ## 1. Prepare the PR
 
@@ -86,8 +84,8 @@ query_graph_tool({ repo_root: "$WORKTREE_DIR", pattern: "callers_of", target: "<
 - `status: not_ready`, an empty graph, or a language the parser does not cover → count call sites with
   `rg -n "<Symbol>\(" "$WORKTREE_DIR" --glob '*.go'`, and say in the breaking-change line that the
   count came from search.
-- An interface change counts implementors, which `rg` cannot see: `rg -n "func \([^)]*\) <Method>\("
-  "$WORKTREE_DIR" --glob '*.go'`.
+- An interface change needs implementors, which `callers_of` does not list:
+  `rg -n "func \([^)]*\) <Method>\(" "$WORKTREE_DIR" --glob '*.go'`.
 - The graph is a map, not a source of truth: open each caller in `$WORKTREE_DIR` before counting it.
 
 ## 3. Answer 1 — breaking changes
@@ -123,10 +121,10 @@ fence per side that has reader code.
 - `Before:` and `After:` state what the user observes — the behavior, not the code. A fence under
   either one shows the code the reader writes to get it.
 - One `go` fence per side: never both sides in one fence, so the delta stays visible.
-- Changed behavior → both sides stated, with a fence only where the reader writes code.
+- Changed behavior → both sides stated.
 - New capability → `Before: not available` plus what the user had instead, and no before fence.
-- Only a capability with no earlier form gets `Before: not available`; a changed default keeps its
-  Before sentence and has no before fence.
+- Only a capability with no earlier form gets `Before: not available`; a changed or newly-defaulted one
+  keeps its Before sentence.
 - Real code only: names taken from the diff, no placeholders, no `<...>`, no internal symbol a user
   never calls. Never invent a call the code does not have. A constant or a private field the reader
   never wrote is not a fence — describe that side in its sentence instead.

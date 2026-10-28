@@ -5,71 +5,36 @@ description: >
   updating, reviewing, or running tests in Goravel repositories.
 ---
 
-# Golang Test
+# Goravel Testing
 
-- Don't run `go test ./...` unless ask to run all tests explicitly.
-- Prefer `go test <pkg>` or `-run <TestName>` over `go test ./...` (slow).
-- Use table-driven tests covering happy path, failure, and edge cases.
-- Skip trivial getters/setters unless they contain non-trivial logic.
-- Use `testify/assert` with `assert.*(t, *)` or `require.*(t, *)` directly, not `assert.New(t)`.
-- Use `testify/suite` for related test groups, and use `s.*(*, *)` when asserting.
-- Use the testify `EXPECT` method for mocks; avoid `mock.Anything`.
-- Use `assert.AnError` if needed, and `assert.Equal` for error assertions.
-- Assert full maps/structs/slices/arrays, not individual fields.
-- Prefer direct value assertions over `mock.MatchedBy`; use it only for dynamically-generated args.
-- Every mock must use `.Once()` or `.Times()`, only use `.Maybe()` when necessary; avoid no-op expectations.
-- Name tests `Test<FunctionName>_[Optional]`; use table style or sub-tests for multiple cases.
-- Don't use `assert.*` with `if` statements; use `assert.*` directly for clarity and better failure messages.
-- Use `t.Run()` for sub-tests when testing multiple cases for the same function, and use table-driven tests for multiple cases with similar setup/assertions. Avoid writing separate test functions for each case when they share common logic.
-- Prefer the simplest test setup that proves behavior; avoid extra helper abstractions/state tracking (e.g., counters/wrappers) unless reused or required by interface constraints.
-- The basic table-driven test pattern is:
+- Don't run `go test ./...` unless the user asks for all tests. Prefer `go test <pkg>` or `go test <pkg> -run <TestName>`.
+- Use table-driven tests with `t.Run` sub-tests: one row per case, covering happy path, failure, and edge cases. Never one test function per case.
+- Name tests `Test<FunctionName>_<Optional>`.
+- Skip trivial getters/setters unless they hold non-trivial logic.
+- Assert with `testify`: `assert.Equal(t, want, got)` or `require.NoError(t, err)` — not `assert.New(t)`, and never inside an `if`; the assertion reports for you.
+- Inside a `testify/suite`, assert with the suite methods, which take no `t`: `s.Equal(want, got)`, `s.Require().NoError(err)`.
+- Compare whole values — full maps, structs, slices — not field by field. For errors use `assert.Equal(t, assert.AnError, err)` or `assert.ErrorIs`.
+- Mocks: call `EXPECT()`; every expectation uses `.Once()` or `.Times(n)`, `.Maybe()` only when needed; avoid `mock.Anything` where a concrete value works, and `mock.MatchedBy` unless the argument is generated at runtime.
+- Keep the setup minimal: a `beforeEach` closure is enough; add a helper only when more than one test uses it.
+- The basic pattern:
 
 ```go
-import (
-	[system packages]
-
-	[third-party packages]
-
-	[internal packages]
-)
-
-func TestFunction(t *testing.T) {
-	// The name should start with `mock` to indicate it's a mocked function.
-	var (
-		ctx 	context.Context
-		mockFunc *mocks.MockedInterface
-	)
-
-	beforeEach := func() {
-		mockFunc = mocks.NewMockedInterface(t)
-	}
-
+func TestUserService_Store(t *testing.T) {
 	tests := []struct {
 		name        string
-		input       any
-		setup       func()
-		expect      any
+		input       models.User
+		want        uint
 		expectError error
 	}{
-		{
-			name:  "should do something",
-			input: someInput,
-			setup: func() {
-				mockFunc.EXPECT().SomeMethod(someArgs).Return(someResult, nil).Once()
-			},
-			expect:      someResult,
-			expectError: nil,
-		},
+		{name: "saves a valid user", input: models.User{Name: "Bowen"}, want: 1},
+		{name: "returns the repository error", input: models.User{}, expectError: assert.AnError},
 	}
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			beforeEach()
-			tt.setup()
-
-			result, err := FunctionUnderTest(tt.input)
-			assert.Equal(t, tt.expect, result)
+			id, err := userService.Store(tt.input)
 			assert.Equal(t, tt.expectError, err)
+			assert.Equal(t, tt.want, id)
 		})
 	}
 }

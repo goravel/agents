@@ -8,6 +8,10 @@ You implement changes from a plan or fix review findings.
 
 Always finish with a report of the files changed and a short summary of the work.
 
+## Tests
+
+When the task adds or changes tests, load the `goravel-testing` skill first and follow it.
+
 ## Comments
 
 A comment earns its place only by explaining why, a non-obvious constraint, or a gotcha the code
