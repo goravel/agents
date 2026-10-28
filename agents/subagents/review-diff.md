@@ -69,4 +69,4 @@ git -C "$WORKTREE_DIR" diff "$DIFF_BASE"..HEAD -U0 | rg '^diff --git |^@@'
 
 ## 4. Emit
 
-Write `<folder>/findings-by-side.json` (`path:LINE` + Title → SIDE) and `<folder>/review-<PHASE>.md` (NEW shape, per `implement.md` §4.2; the SIDE tag never appears in the text). Load the `goravel-review-template` skill and make its emission the file body. No tick, no cleanup, no comment posting.
+Write `<folder>/findings-by-side.json` (`path:LINE` + Title → SIDE) and `<folder>/review-<PHASE>.md` (the NEW shape in the `goravel-review-template` skill; the SIDE tag never appears in the text). Load and follow that skill and make its emission the file body. No tick, no cleanup, no comment posting.

@@ -24,6 +24,8 @@ No additional top-level sections are permitted.
 
 ### Template
 
+Fill in one `## Why` body — the feature block or the bug-fix block, never both.
+
 ````markdown
 ## Summary
 - <behavior bullet 1>
@@ -35,18 +37,18 @@ No additional top-level sections are permitted.
 ## Why
 <1–2 short paragraphs about what changed and why it matters.>
 
+<!-- feature: exactly one block, end-user usage -->
 ```go
 <real user-facing code, written in the style of https://github.com/goravel/example>
 ```
 
-<1–2 short paragraphs about what was fixed and why it matters.>
-
+<!-- bug fix: one block per bug, before and after inside one fence -->
 ```go
-// Before: <describe what was wrong>
-<real user-facing code before the fix, written in the style of https://github.com/goravel/example>
+// Before: <what was wrong>
+<real user-facing code before the fix>
 
-// After: <describe the fix>
-<real user-facing code after the fix, written in the style of https://github.com/goravel/example>
+// After: <the fix>
+<real user-facing code after the fix>
 ```
 ````
 
@@ -69,8 +71,7 @@ No additional top-level sections are permitted.
 - Model the snippet after the closest matching pattern in the example repository (controllers, routes, models, etc.).
 
 **Bug-fix PRs**
-- Include one fenced code block per distinct bug.
-- Describe before-fix vs. after-fix behavior in prose; code blocks contain only real user-facing code.
+- Include one fenced code block per distinct bug, with `// Before:` and `// After:` inside it; the prose says what was wrong and why it matters.
 
 **Mixed PRs (feature + bug fix)**
 - Use bug-fix formatting when multiple bug fixes are present; otherwise use feature formatting.
@@ -79,59 +80,16 @@ No additional top-level sections are permitted.
 
 ## Code Style Reference
 
-All user-facing code blocks must be written in the style of https://github.com/goravel/example. The following patterns are representative examples.
+Write user-facing blocks the way `goravel/example` writes them — open that repository and copy the closest
+pattern instead of inventing one:
 
-**Route registration** (`routes/api.go`)
-
-```go
-facades.Route().Prefix("jwt").Group(func(route route.Router) {
-	route.Post("login", authController.LoginByJwt)
-	route.Middleware(middleware.Jwt()).Get("info", authController.InfoByJwt)
-})
-```
-
-**ORM query** (`app/http/controllers/db_controller.go`)
+- routes: `facades.Route()`, with `middleware.*` and `route.Router` groups
+- input: `ctx.Request().Validate(...)`, then `validator.Fails()` / `validator.Bind(...)`
+- data: `facades.Orm().Query()`
+- auth: `facades.Auth(ctx).LoginUsingID(...)`
 
 ```go
-if err := facades.Orm().Query().Create(&models.User{
-	Name: ctx.Request().Input("name"),
-}); err != nil {
-	return ctx.Response().Json(http.StatusInternalServerError, http.Json{
-		"error": err.Error(),
-	})
-}
-```
-
-**Auth / JWT login** (`app/http/controllers/auth_controller.go`)
-
-```go
-token, err := facades.Auth(ctx).LoginUsingID(user.ID)
-if err != nil {
-	return ctx.Response().String(http.StatusInternalServerError, err.Error())
-}
-return ctx.Response().Success().Json(http.Json{
-	"token": token,
-	"user":  user,
-})
-```
-
-**Request validation** (`app/http/controllers/validation_controller.go`)
-
-```go
-validator, err := ctx.Request().Validate(map[string]any{
-	"name": "required",
-	"age":  "required|integer|min:1",
-})
-if err != nil {
-	return ctx.Response().Json(http.StatusBadRequest, http.Json{"message": err.Error()})
-}
-if validator.Fails() {
-	return ctx.Response().Json(http.StatusBadRequest, http.Json{"message": validator.Errors().All()})
-}
-var user User
-if err := validator.Bind(&user); err != nil {
-	return ctx.Response().Json(http.StatusBadRequest, http.Json{"message": err.Error()})
-}
+facades.Route().Middleware(middleware.Jwt()).Get("users", userController.Index)
 ```
 
 ---
@@ -141,22 +99,24 @@ if err := validator.Bind(&user); err != nil {
 1. **Detect branch**
    - Run `git branch --show-current` → `branch`.
    - If empty, stop and report failure.
-   - If the branch is the default (`master` / `main`), create a feature branch first: `git checkout -b <branch>` (e.g. `feat/<short-description>`) and continue on it.
+   - If the branch is the default (`master` / `main`), create a feature branch first: `git checkout -b feat/<short-description>`, then set `branch` to that name.
 
 2. **Detect issue number**
-   - Extract the first issue-like number from `branch` (e.g. `type/1234-description` → `1234`).
-   - If found, set `closing_line = Closes https://github.com/goravel/goravel/issues/<number>`; otherwise omit it.
+   - Only two branch shapes carry an issue: `issue-<n>-<TS>` (a run started from an issue link) and a head
+     branch shaped `<type>/<n>-<description>`, `<n>` 1–5 digits at the start of the last segment:
+     `feat/1234-description` → `1234`.
+   - Never read digits out of `task-<TS>` or `pr-<n>-<TS>`: there they are a timestamp and a pull request.
+   - Found → `closing_line = Closes https://github.com/goravel/goravel/issues/<number>`; otherwise omit it.
 
 3. **Detect existing PR**
-   - Run `gh pr view --json number,title,body,headRefName --head "$branch"`.
-   - Success → existing PR. Not found → no PR.
+   - Run `gh pr view "$branch" --json number,title,body,headRefName`. Success → existing PR. "no pull requests found" → no PR.
 
 4. **Commit pending work**
    - Run `git status --short`. If the working tree is dirty, stage and commit only the reviewed changes with a concise message summarizing the change.
    - If unrelated or unexpected changes are present, stop and report them instead of committing.
 
 5. **Push**
-   - Run `git push`. If the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails), run `git push -u origin "$branch"`. `gh pr create` requires the branch on the remote.
+   - Run `git push`. If the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails), run `git push -u origin "$branch"` — `gh pr create` requires the branch on the remote.
 
 6. **Build change context**
    - Resolve `BASE_BRANCH` from the prompt; fall back to the repo's detected default branch if absent.
@@ -183,7 +143,7 @@ if err := validator.Bind(&user); err != nil {
     - Write the body to a temp file under `/tmp` via a bash heredoc (file edits may be denied); never write into the repo.
 
 11. **Verify**
-    - Run `gh pr view --json number,title,url,body --head "$branch"`.
+    - Run `gh pr view "$branch" --json number,title,url,body`.
     - Confirm required sections and constraints are satisfied.
 
 ---

@@ -34,6 +34,8 @@ func TestParseReply(t *testing.T) {
 		{name: "implement with trailing punctuation", reply: "implement.", wantAgent: constants.AgentImplement},
 		{name: "review with backticks", reply: "`review`", wantAgent: constants.AgentReview},
 		{name: "review in bold markdown", reply: "**review**", wantAgent: constants.AgentReview},
+		{name: "analyze", reply: "analyze", wantAgent: constants.AgentAnalyze},
+		{name: "analyze in bold markdown", reply: "**analyze**", wantAgent: constants.AgentAnalyze},
 		{name: "ship in parentheses", reply: "(ship)", wantAgent: constants.AgentShip},
 		{name: "implement with trailing colon", reply: "implement:", wantAgent: constants.AgentImplement},
 		{name: "ship with quotes", reply: `"ship"`, wantAgent: constants.AgentShip},
@@ -43,6 +45,12 @@ func TestParseReply(t *testing.T) {
 			name:      "agent and repository",
 			reply:     "implement\ngoravel/framework",
 			wantAgent: constants.AgentImplement,
+			wantRepo:  "goravel/framework",
+		},
+		{
+			name:      "analyze with repository",
+			reply:     "analyze\ngoravel/framework",
+			wantAgent: constants.AgentAnalyze,
 			wantRepo:  "goravel/framework",
 		},
 		{
@@ -297,6 +305,7 @@ func TestRouterAgentInstructions(t *testing.T) {
 		"Decide how to handle a GitHub mention. "+
 			"Reply with exactly three lines. "+
 			"Line 1 holds one agent from: "+
+			"analyze (analyzes an existing GitHub pull request for breaking changes and usage, without editing code), "+
 			"implement (implements a plan that is already provided, reviews the changes, and opens a pull request), "+
 			"review (reviews an existing GitHub pull request and reports findings), "+
 			"ship (plans the task first, then implements and drives it through review to a pull request). "+
@@ -428,6 +437,7 @@ func testModels() map[string]string {
 		constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
 		constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
 		constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentAnalyze:   "opencode-go/deepseek-v4.1-flash#high",
 	}
 }
 
@@ -896,18 +906,23 @@ func TestAgentModels(t *testing.T) {
 		},
 		{
 			name:    "agent without model",
-			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high"},
+			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high"},
 			wantErr: `agent: agent.models has no model for the "review" agent`,
 		},
 		{
 			name:    "blank agent model",
-			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "  "},
+			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "  "},
 			wantErr: `agent: agent.models has no model for the "review" agent`,
 		},
 		{
 			name:    "entry without model",
-			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "#max"},
+			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "#max"},
 			wantErr: `agent: agent.models has no model for the "review" agent`,
+		},
+		{
+			name:    "analyze without model",
+			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "opencode-go/deepseek-v4.1-flash#high"},
+			wantErr: `agent: agent.models has no model for the "analyze" agent`,
 		},
 	}
 
