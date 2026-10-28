@@ -250,11 +250,11 @@ const (
 	instructionLabel = "Instruction"
 )
 
-// reviewInstructionSuffix is the trusted line appended under the Instruction for
-// the review agent when the event targets a pull request, steering the run to
-// post its findings there. It is worded as the user's explicit request because
-// the review agent only posts a PR comment when the user asks for one.
-const reviewInstructionSuffix = "comment the review result to the pr"
+// postInstructionSuffix is the trusted line appended under the Instruction for
+// an agent that posts its result on the pull request, steering the run to post
+// there. It is worded as the user's explicit request because those agents only
+// post a PR comment when the user asks for one.
+const postInstructionSuffix = "comment the review result to the pr"
 
 // prompt builds the context block the router sees: the source repository line,
 // the PR/Issue/comment links, and the untrusted instruction. The fixed lines are
@@ -270,17 +270,23 @@ func (e *event) prompt(instruction, repository string) string {
 // agentPrompt builds the context block handed to the agent. It carries the same
 // links and instruction as prompt but omits the Repository line: the agent runs
 // inside the checkout, so the repository is implied by its working directory.
-// The review agent is additionally steered to post its result on the pull
-// request; every other agent's prompt is unchanged.
+// The review and analyze agents are additionally steered to post their result
+// on the pull request; every other agent's prompt is unchanged.
 func (e *event) agentPrompt(agentName, instruction string) string {
 	payload, _ := e.payload()
 
 	prompt := e.contextBlock(instruction)
-	if agentName == constants.AgentReview && isPullRequest(payload) {
-		prompt += "\n" + reviewInstructionSuffix
+	if postsOnPullRequest(agentName) && isPullRequest(payload) {
+		prompt += "\n" + postInstructionSuffix
 	}
 
 	return prompt
+}
+
+// postsOnPullRequest reports whether the agent posts its result on the pull
+// request when the event targets one.
+func postsOnPullRequest(agentName string) bool {
+	return agentName == constants.AgentReview || agentName == constants.AgentAnalyze
 }
 
 // contextBlock emits the PR/Issue/comment links followed by the instruction.

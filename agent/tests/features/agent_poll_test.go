@@ -420,7 +420,7 @@ func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
 // comment on a pull request in goravel/framework. The router is live, so this
 // asserts the poller's observable outcome: paseo runs --mode analyze against a
 // checkout of goravel/framework, with the PR link the analyze prompt needs and
-// no post-to-PR steering.
+// the same post-to-PR line the review agent gets.
 func (s *AgentPollTestSuite) TestPollAnalyzesPullRequest() {
 	got := s.pollOnce(analyzePullRequestPage)
 
@@ -437,10 +437,11 @@ func (s *AgentPollTestSuite) TestPollAnalyzesPullRequest() {
 	s.Require().Equal("git@github.com:goravel/framework.git", got.cloneRemote)
 	s.Require().Contains(got.prompt, "PR: https://github.com/goravel/framework/pull/42")
 	s.Require().Contains(got.prompt, "comment: https://github.com/goravel/framework/pull/42#issuecomment-98765")
-	s.Require().Contains(got.prompt, "Instruction: analyze this pull request")
+	s.Require().Contains(got.prompt, "Instruction: analyze this pull request\ncomment the review result to the pr")
+	s.Require().Equal(1, strings.Count(got.prompt, "comment the review result to the pr"),
+		"the post-to-PR line must appear once, not once per agent branch")
 	s.Require().NotContains(got.prompt, "Repository:")
 	s.Require().NotContains(got.prompt, "Issue:")
-	s.Require().NotContains(got.prompt, "comment the review result to the pr")
 }
 
 // TestAgentModelsConfigCoversRoutableAgents checks the shipped agent.models map.
