@@ -43,6 +43,7 @@ func init() {
 			constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
 			constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
 			constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentAnalyze:   "opencode-go/deepseek-v4.1-flash#high",
 		},
 	})
 }

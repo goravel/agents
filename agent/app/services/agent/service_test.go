@@ -683,6 +683,7 @@ func TestNewServiceReadsConfig(t *testing.T) {
 		constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
 		constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
 		constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentAnalyze:   "opencode-go/deepseek-v4.1-flash#high",
 	}
 	configMock.EXPECT().Get("agent.models").Return(models).Once()
 	configMock.EXPECT().GetString("agent.mention").Return("@bot").Once()
@@ -747,6 +748,7 @@ func TestNewServiceRejectsAgentWithoutModel(t *testing.T) {
 	configMock.EXPECT().Get("agent.models").Return(map[string]string{
 		constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
 		constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentAnalyze:   "opencode-go/deepseek-v4.1-flash#high",
 	}).Once()
 
 	service, err := NewService()

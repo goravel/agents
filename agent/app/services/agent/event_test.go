@@ -323,6 +323,10 @@ func TestEventAgentPrompt(t *testing.T) {
 	// A non-review agent on the same pull request keeps the bare context block,
 	// so the review-only gate cannot silently widen to every agent on a PR.
 	require.Equal(t, body, event.agentPrompt(constants.AgentShip, "review"))
+
+	// The analyze agent runs on the same pull request and must never be steered
+	// to post: it reports to the conversation only.
+	require.Equal(t, body, event.agentPrompt(constants.AgentAnalyze, "review"))
 }
 
 // TestEventAgentPromptReviewOnIssue pins that a review mention on a plain issue

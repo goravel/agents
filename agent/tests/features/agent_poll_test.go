@@ -102,15 +102,38 @@ const (
 		 "repository":"goravel/goravel","sender":"bowen",
 		 "payload":"{\"number\":123,\"issue\":{\"number\":123,\"html_url\":\"https://github.com/goravel/goravel/issues/123\",\"body\":\"Tracking issue\"},\"comment\":{\"id\":24680,\"html_url\":\"https://github.com/goravel/goravel/issues/123#issuecomment-24680\",\"body\":\"@goravel-agent ship this issue in goravel/framework\"}}"}
 	],"total":1,"page":1,"limit":50}`
+)
 
+var (
 	// reviewPullRequestPage is one issue_comment on a pull request in
 	// goravel/framework.
-	reviewPullRequestPage = `{"data":[
+	reviewPullRequestPage = pullRequestPage("@goravel-agent review")
+
+	// analyzePullRequestPage is the same pull request, asking for the analyze
+	// agent.
+	analyzePullRequestPage = pullRequestPage("@goravel-agent analyze this pull request")
+)
+
+// pullRequestPage is one issue_comment on pull request 42 in goravel/framework
+// carrying body. It is a pull request so the prompt builder emits the PR: line.
+func pullRequestPage(body string) string {
+	// body is JSON inside the payload string, which is JSON inside the page, so
+	// it takes one round of escaping per level.
+	escaper := strings.NewReplacer(
+		"\\", "\\\\",
+		"\"", "\\\"",
+		"\n", "\\n",
+		"\r", "\\r",
+		"\t", "\\t",
+	)
+	escaped := escaper.Replace(escaper.Replace(body))
+
+	return `{"data":[
 		{"id":1,"delivery_id":"d-1","event":"issue_comment","action":"created",
 		 "repository":"goravel/framework","sender":"bowen",
-		 "payload":"{\"number\":42,\"issue\":{\"number\":42,\"html_url\":\"https://github.com/goravel/framework/pull/42\",\"pull_request\":{\"html_url\":\"https://github.com/goravel/framework/pull/42\"},\"body\":\"A change\"},\"comment\":{\"id\":98765,\"html_url\":\"https://github.com/goravel/framework/pull/42#issuecomment-98765\",\"body\":\"@goravel-agent review\"}}"}
+		 "payload":"{\"number\":42,\"issue\":{\"number\":42,\"html_url\":\"https://github.com/goravel/framework/pull/42\",\"pull_request\":{\"html_url\":\"https://github.com/goravel/framework/pull/42\"},\"body\":\"A change\"},\"comment\":{\"id\":98765,\"html_url\":\"https://github.com/goravel/framework/pull/42#issuecomment-98765\",\"body\":\"` + escaped + `\"}}"}
 	],"total":1,"page":1,"limit":50}`
-)
+}
 
 // pollObservation is what one poll cycle observed at the process boundary: the
 // routed checkout it cloned, the paseo workspace it created and the paseo run it
@@ -183,6 +206,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 			constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
 			constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
 			constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentAnalyze:   "opencode-go/deepseek-v4.1-flash#high",
 		},
 	})
 	s.T().Cleanup(func() { facades.Config().Add("agent", originalConfig) })
@@ -392,12 +416,39 @@ func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
 	s.Require().NotContains(got.prompt, "Issue:")
 }
 
+// TestPollAnalyzesPullRequest covers a `@goravel-agent analyze this pull request`
+// comment on a pull request in goravel/framework. The router is live, so this
+// asserts the poller's observable outcome: paseo runs --mode analyze against a
+// checkout of goravel/framework, with the PR link the analyze prompt needs and
+// no post-to-PR steering.
+func (s *AgentPollTestSuite) TestPollAnalyzesPullRequest() {
+	got := s.pollOnce(analyzePullRequestPage)
+
+	s.Require().Empty(got.lastError)
+	s.Require().Equal([]string{"1"}, got.acknowledged,
+		"poll-events did not acknowledge the event; last error: %s", got.lastError)
+	s.Require().Equal("analyze", got.mode,
+		"live router did not choose the analyze agent (context: %s)", got.lastError)
+	s.Require().Equal("opencode-go/deepseek-v4.1-flash", got.model)
+	s.Require().Equal("high", got.thinking)
+	s.Require().NotEmpty(got.title)
+	s.Require().Equal(got.title, got.workspaceTitle, "workspace title must match the run title")
+	s.Require().Equal(got.cloneDir, got.workspaceDir, "workspace must point at the per-run checkout")
+	s.Require().Equal("git@github.com:goravel/framework.git", got.cloneRemote)
+	s.Require().Contains(got.prompt, "PR: https://github.com/goravel/framework/pull/42")
+	s.Require().Contains(got.prompt, "comment: https://github.com/goravel/framework/pull/42#issuecomment-98765")
+	s.Require().Contains(got.prompt, "Instruction: analyze this pull request")
+	s.Require().NotContains(got.prompt, "Repository:")
+	s.Require().NotContains(got.prompt, "Issue:")
+	s.Require().NotContains(got.prompt, "comment the review result to the pr")
+}
+
 // TestAgentModelsConfigCoversRoutableAgents checks the shipped agent.models map.
 func (s *AgentPollTestSuite) TestAgentModelsConfigCoversRoutableAgents() {
 	models, ok := facades.Config().Get("agent.models").(map[string]string)
 	s.Require().True(ok, "config/agent.go must register agent.models as map[string]string")
 
-	for _, mode := range []string{constants.AgentShip, constants.AgentImplement, constants.AgentReview} {
+	for _, mode := range []string{constants.AgentShip, constants.AgentImplement, constants.AgentReview, constants.AgentAnalyze} {
 		entry := strings.TrimSpace(models[mode])
 		s.Require().NotEmpty(entry, "agent.models has no entry for %q", mode)
 		model, _, _ := strings.Cut(entry, "#")
