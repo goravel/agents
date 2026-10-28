@@ -117,8 +117,9 @@ facades.Route().Middleware(middleware.Jwt()).Get("users", userController.Index)
 
 5. **Push**
    - Run `git push`. If the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails), run `git push -u origin "$branch"` — `gh pr create` requires the branch on the remote.
+   - If the push is rejected as non-fast-forward, run `git fetch origin` and stop to report it. Never a bare `--force`.
 
-6. **Build change context**
+6. **Build change context** (`BASE_BRANCH` from the prompt)
    - Resolve `BASE_BRANCH` from the prompt; fall back to the repo's detected default branch if absent.
    - Compute base: `base=$(git merge-base HEAD "origin/$BASE_BRANCH")`.
    - Compute diff: `git diff "$base"...HEAD`.
