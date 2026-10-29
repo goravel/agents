@@ -154,7 +154,7 @@ Delegate the round review to the `subagents/review-diff` agent.
 ### 5.3 Decide
 
 Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
-- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Squash the per-phase commits into one, then create or update the PR. Base: `$BASE_BRANCH`. Report: `<folder>/implementation.md`." Report the PR URL; list Nits as non-blocking.
+- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Create or update the PR. Base: `$BASE_BRANCH`. Report: `<folder>/implementation.md`." Report the PR URL; list Nits as non-blocking.
 - **Round 5**: stop, no PR. Report the outstanding Must Fix / Maybe Fix; list the Nits as non-blocking.
 - **Otherwise**: increment N and loop.
 

@@ -115,46 +115,35 @@ facades.Route().Middleware(middleware.Jwt()).Get("users", userController.Index)
    - Run `git status --short`. If the working tree is dirty, stage and commit only the reviewed changes with a concise message summarizing the change.
    - If unrelated or unexpected changes are present, stop and report them instead of committing.
 
-5. **Squash per-phase commits**
-   - The implement loop commits one `phase <N>` commit per round; collapse them into a single commit before pushing.
-   - Resolve `BASE_BRANCH` from the prompt; fall back to the repo's detected default branch if absent.
-   - Only when every commit in `"origin/$BASE_BRANCH"..HEAD` is a `phase <N>` commit from this run (check `git log --oneline "origin/$BASE_BRANCH"..HEAD`; skip otherwise):
-     ```bash
-     BASE=$(git merge-base HEAD "origin/$BASE_BRANCH")
-     git reset --soft "$BASE"
-     git commit -m "<concise summary>"
-     ```
-
-   - This rewrites commits that may already be on the remote, so step 6 pushes with `--force-with-lease`.
-
-6. **Push**
+5. **Push**
    - Run `git push`. If the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails), run `git push -u origin "$branch"` — `gh pr create` requires the branch on the remote.
-   - After a squash (or any rewrite of pushed commits) the remote still holds the old history: `git push --force-with-lease`, or `git push --force-with-lease -u origin "$branch"` on the first push. Never a bare `--force`.
+   - If the push is rejected as non-fast-forward, run `git fetch origin` and stop to report it. Never a bare `--force`.
 
-7. **Build change context**
+6. **Build change context** (`BASE_BRANCH` from the prompt)
+   - Resolve `BASE_BRANCH` from the prompt; fall back to the repo's detected default branch if absent.
    - Compute base: `base=$(git merge-base HEAD "origin/$BASE_BRANCH")`.
    - Compute diff: `git diff "$base"...HEAD`.
    - Derive behavior-oriented summary bullets from the diff.
    - Detect PR type (`feature` or `bug fix`) from branch intent and diff semantics.
    - Derive code example(s) in the style of https://github.com/goravel/example per the Why Rules above.
 
-8. **Compose PR body**
-   - Fill the PR Body Specification template using the context from step 7.
+7. **Compose PR body**
+   - Fill the PR Body Specification template using the context from step 6.
 
-9. **Validate before applying**
+8. **Validate before applying**
    - Confirm the composed body satisfies all constraints in the PR Body Specification.
    - Ensure no placeholder markers (`<...>`) remain in the final body.
 
-10. **Determine title**
-    - Summarize from the logic changes, or fall back to the branch name.
-    - Title must satisfy: https://github.com/goravel/.github/blob/master/.github/workflows/check_pr_title.yml
+9. **Determine title**
+   - Summarize from the logic changes, or fall back to the branch name.
+   - Title must satisfy: https://github.com/goravel/.github/blob/master/.github/workflows/check_pr_title.yml
 
-11. **Apply**
+10. **Apply**
     - Existing PR: `gh pr edit <number> --body-file <tempfile>`
     - No PR: `gh pr create --title "<title>" --body-file <tempfile> --base "$BASE_BRANCH" --head "$branch"`
     - Write the body to a temp file under `/tmp` via a bash heredoc (file edits may be denied); never write into the repo.
 
-12. **Verify**
+11. **Verify**
     - Run `gh pr view "$branch" --json number,title,url,body`.
     - Confirm required sections and constraints are satisfied.
 
