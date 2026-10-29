@@ -230,6 +230,7 @@ Headings and order are fixed:
 
 ```text
 # 🔎 PR analysis
+<!-- goravel-agent: analysis -->
 
 ## 1. Breaking changes — <No breaking changes|N found>
 ## 2. How to use it
@@ -239,13 +240,50 @@ Headings and order are fixed:
 - §3 is conditional: drop its heading when the skip rule in §5 applies, and end the report at §2.
   Never leave an empty `## 3.` heading.
 - Each section uses the shape its rule above shows; add no section, intro, or closing line.
-- No severity, no checkboxes, no round markers — this is not a review.
+- No severity, no checkboxes, no round markers — this is not a review. The single exception is the
+  `<!-- goravel-agent: analysis -->` marker, which is identity, not a round.
+- The marker line is the only hidden line you add: it sits on the first line under the heading, renders
+  as nothing, and lets a later run find this comment. Emit it exactly, in both the conversation copy and
+  the PR copy — it is not a section, an intro, or a closing line.
+- Post or update when the prompt asks. A pull request mention appends
+  `comment the review result to the pr` under `Instruction:` — the line says review because it is shared
+  with the review agent; for you it means the report you just emitted. Write the report to a file, then
+  put it on the PR:
+
+  ```bash
+  mkdir -p /tmp/pr-analysis
+  REPORT="/tmp/pr-analysis/pr-${PR_NUM}.md"
+  # write the report to $REPORT first, exactly as emitted
+  BOT_LOGIN=$(gh api user --jq .login)
+  [ -z "$BOT_LOGIN" ] && { echo "no bot login; skipping the PR copy"; exit 0; }
+  ANALYSIS_COMMENT_ID=$(gh api --paginate "repos/{owner}/{repo}/issues/${PR_NUM}/comments" \
+    --jq '.[] | select(.body | contains("<!-- goravel-agent: analysis -->"))
+          | select(.user.login == "'"${BOT_LOGIN}"'")
+          | [.created_at, .id] | @tsv' \
+    | sort | tail -1 | cut -f2)
+  if [ -n "$ANALYSIS_COMMENT_ID" ]; then
+    jq -Rs '{body: .}' < "$REPORT" \
+      | gh api -X PATCH "repos/{owner}/{repo}/issues/comments/${ANALYSIS_COMMENT_ID}" --input -
+  else
+    gh pr comment "$PR_NUM" --body-file "$REPORT"
+  fi
+  ```
+
+  - Both filters are required. The marker alone can hit another author's comment; `user.login` is the only
+    comment you may edit.
+  - Several of your own matches → the newest wins (`sort | tail -1`); older ones are the same report from
+    earlier runs.
+  - No match → `gh pr comment` creates the comment, and the next run updates it.
+  - No login → no PR copy. Without it you cannot tell your comments from anyone else's, so a PATCH could
+    overwrite theirs and a create would stack duplicates. The conversation report is already out.
+  - Post it unchanged: no intro, no closing line. Emitting to the conversation is not replaced by this:
+    do both. No such line under `Instruction:` → post nothing. NEVER use `gh pr review`.
 
 ## 7. Acknowledge the mention
 
-Run this once the report is emitted, so the 👍 means "analysis delivered". Take
-the link from the `comment: https://...` line in your prompt — no such line → do not spawn. With one,
-spawn `subagents/reaction` foreground and wait:
+Run this last — once the report is emitted and, when the prompt asked, the PR copy posted or updated — so
+the 👍 means "analysis delivered". Take the link from the `comment: https://...` line in your prompt — no
+such line → do not spawn. With one, spawn `subagents/reaction` foreground and wait:
 
 > You are running as a subagent in the analyze flow. COMMENT_URL=<the comment link found in the prompt>
 
@@ -255,7 +293,8 @@ spawn `subagents/reaction` foreground and wait:
 
 ## Output
 
-Never auto-post: the analysis goes to the conversation only. The single automatic write is the
-reaction swap in step 7, delegated to `subagents/reaction`. If the user explicitly asks you to post
-the analysis, post one top-level issue comment with `gh pr comment <N> --body-file <tmp>`; NEVER use
-`gh pr review`.
+The report goes to the conversation every run; the PR copy is an addition, not a replacement. A pull
+request mention always carries the post line, and step 6 posts or updates one comment. A mention on a
+plain issue stops at step 1 and never reaches a report. The other write is the reaction swap in step 7,
+delegated to `subagents/reaction`. If the user explicitly asks you to post the analysis, post one
+top-level issue comment with `gh pr comment <N> --body-file <tmp>`; NEVER use `gh pr review`.

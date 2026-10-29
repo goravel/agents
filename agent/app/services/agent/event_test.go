@@ -1,6 +1,8 @@
 package agent
 
 import (
+	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -313,25 +315,35 @@ func TestEventAgentPrompt(t *testing.T) {
 	body := "PR: https://github.com/goravel/goravel/pull/123\n" +
 		"comment: https://github.com/goravel/goravel/pull/123#issuecomment-24680\n" +
 		"Instruction: review"
-	want := body + "\n" +
+	posting := body + "\n" +
 		"comment the review result to the pr"
 
-	got := event.agentPrompt(constants.AgentReview, "review")
-	require.Equal(t, want, got)
-	require.NotContains(t, got, "Repository:")
+	tests := []struct {
+		agent string
+		want  string
+	}{
+		// Analyze posts its report on the same pull request and gets the same
+		// line as review: one string, two agents.
+		{agent: constants.AgentReview, want: posting},
+		{agent: constants.AgentAnalyze, want: posting},
+		// Ship and implement never post on a mention, so the gate cannot widen
+		// to them.
+		{agent: constants.AgentShip, want: body},
+		{agent: constants.AgentImplement, want: body},
+	}
 
-	// A non-review agent on the same pull request keeps the bare context block,
-	// so the review-only gate cannot silently widen to every agent on a PR.
-	require.Equal(t, body, event.agentPrompt(constants.AgentShip, "review"))
-
-	// The analyze agent runs on the same pull request and must never be steered
-	// to post: it reports to the conversation only.
-	require.Equal(t, body, event.agentPrompt(constants.AgentAnalyze, "review"))
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			got := event.agentPrompt(tt.agent, "review")
+			require.Equal(t, tt.want, got)
+			require.NotContains(t, got, "Repository:")
+		})
+	}
 }
 
-// TestEventAgentPromptReviewOnIssue pins that a review mention on a plain issue
-// is not steered: only a pull request gets the post-to-PR line.
-func TestEventAgentPromptReviewOnIssue(t *testing.T) {
+// TestEventAgentPromptNoPostOnIssue pins that a mention on a plain issue is never
+// steered, for every agent: only a pull request gets the post-to-PR line.
+func TestEventAgentPromptNoPostOnIssue(t *testing.T) {
 	event := &event{
 		Event:      "issue_comment",
 		Repository: "goravel/goravel",
@@ -341,7 +353,20 @@ func TestEventAgentPromptReviewOnIssue(t *testing.T) {
 	want := "Issue: https://github.com/goravel/goravel/issues/45\n" +
 		"comment: https://github.com/goravel/goravel/issues/45#issuecomment-24680\n" +
 		"Instruction: review"
-	require.Equal(t, want, event.agentPrompt(constants.AgentReview, "review"))
+
+	for _, agent := range []string{constants.AgentShip, constants.AgentImplement, constants.AgentReview, constants.AgentAnalyze} {
+		t.Run(agent, func(t *testing.T) {
+			require.Equal(t, want, event.agentPrompt(agent, "review"))
+		})
+	}
+}
+
+// TestPostInstructionSuffixDoc keeps agents/analyze.md from quoting a line the
+// harness no longer appends: the doc decides whether the PR copy runs.
+func TestPostInstructionSuffixDoc(t *testing.T) {
+	doc, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "agents", "analyze.md"))
+	require.NoError(t, err)
+	require.Contains(t, string(doc), postInstructionSuffix)
 }
 
 func TestEventPromptWithoutComment(t *testing.T) {
