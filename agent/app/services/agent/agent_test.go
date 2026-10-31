@@ -31,22 +31,13 @@ func TestParseReply(t *testing.T) {
 	}{
 		{name: "review", reply: "review", wantAgent: constants.AgentReview},
 		{name: "ship with spaces", reply: "  SHIP ", wantAgent: constants.AgentShip},
-		{name: "implement with trailing punctuation", reply: "implement.", wantAgent: constants.AgentImplement},
 		{name: "review with backticks", reply: "`review`", wantAgent: constants.AgentReview},
 		{name: "review in bold markdown", reply: "**review**", wantAgent: constants.AgentReview},
 		{name: "analyze", reply: "analyze", wantAgent: constants.AgentAnalyze},
 		{name: "analyze in bold markdown", reply: "**analyze**", wantAgent: constants.AgentAnalyze},
 		{name: "ship in parentheses", reply: "(ship)", wantAgent: constants.AgentShip},
-		{name: "implement with trailing colon", reply: "implement:", wantAgent: constants.AgentImplement},
 		{name: "ship with quotes", reply: `"ship"`, wantAgent: constants.AgentShip},
-		{name: "implement with newline", reply: "implement\n", wantAgent: constants.AgentImplement},
 		{name: "review with carriage return", reply: "review\r\n", wantAgent: constants.AgentReview},
-		{
-			name:      "agent and repository",
-			reply:     "implement\ngoravel/framework",
-			wantAgent: constants.AgentImplement,
-			wantRepo:  "goravel/framework",
-		},
 		{
 			name:      "analyze with repository",
 			reply:     "analyze\ngoravel/framework",
@@ -183,8 +174,8 @@ func TestParseReply(t *testing.T) {
 		},
 		{
 			name:         "empty repository token",
-			reply:        "implement\n.",
-			wantAgent:    constants.AgentImplement,
+			reply:        "ship\n.",
+			wantAgent:    constants.AgentShip,
 			wantRejected: ".",
 		},
 		{
@@ -277,6 +268,7 @@ func TestParseReply(t *testing.T) {
 		{name: "empty", reply: "", wantErr: true},
 		{name: "unrecognised", reply: "nonsense", wantErr: true},
 		{name: "removed reply token", reply: "plan", wantErr: true},
+		{name: "removed implement reply token", reply: "implement", wantErr: true},
 	}
 
 	for _, test := range tests {
@@ -306,7 +298,6 @@ func TestRouterAgentInstructions(t *testing.T) {
 			"Reply with exactly three lines. "+
 			"Line 1 holds one agent from: "+
 			"analyze (analyzes an existing GitHub pull request for breaking changes and usage, without editing code), "+
-			"implement (implements a plan that is already provided, reviews the changes, and opens a pull request), "+
 			"review (reviews an existing GitHub pull request and reports findings), "+
 			"ship (plans the task first, then implements and drives it through review to a pull request). "+
 			"Line 2 holds the repository to work on as a bare owner/name, or - when there is no usable repository. "+
@@ -434,10 +425,9 @@ func scrubbedEnvArgs() []any {
 // testModels is the mode → model map the dispatcher tests run with.
 func testModels() map[string]string {
 	return map[string]string{
-		constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
-		constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
-		constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
-		constants.AgentAnalyze:   "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentShip:    "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentReview:  "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high",
 	}
 }
 
@@ -975,27 +965,27 @@ func TestAgentModels(t *testing.T) {
 		{name: "not a map[string]string", value: "opencode-go/deepseek-v4.1-flash#high", wantErr: "agent: agent.models must map every agent to a <model>[#<thinking>] entry"},
 		{
 			name:    "map of any",
-			value:   map[string]any{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "opencode-go/deepseek-v4.1-flash#high"},
+			value:   map[string]any{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "opencode-go/deepseek-v4.1-flash#high"},
 			wantErr: "agent: agent.models must map every agent to a <model>[#<thinking>] entry",
 		},
 		{
 			name:    "agent without model",
-			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high"},
+			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high"},
 			wantErr: `agent: agent.models has no model for the "review" agent`,
 		},
 		{
 			name:    "blank agent model",
-			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "  "},
+			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "  "},
 			wantErr: `agent: agent.models has no model for the "review" agent`,
 		},
 		{
 			name:    "entry without model",
-			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "#max"},
+			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "#max"},
 			wantErr: `agent: agent.models has no model for the "review" agent`,
 		},
 		{
 			name:    "analyze without model",
-			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "opencode-go/deepseek-v4.1-flash#high"},
+			value:   map[string]string{constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high", constants.AgentReview: "opencode-go/deepseek-v4.1-flash#high"},
 			wantErr: `agent: agent.models has no model for the "analyze" agent`,
 		},
 	}

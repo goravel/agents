@@ -63,10 +63,9 @@ type Dispatcher interface {
 // agentIntroductions maps each routable agent to the introduction the router
 // prompt shows. Every key needs an agent.models entry.
 var agentIntroductions = map[string]string{
-	constants.AgentShip:      "plans the task first, then implements and drives it through review to a pull request",
-	constants.AgentImplement: "implements a plan that is already provided, reviews the changes, and opens a pull request",
-	constants.AgentReview:    "reviews an existing GitHub pull request and reports findings",
-	constants.AgentAnalyze:   "analyzes an existing GitHub pull request for breaking changes and usage, without editing code",
+	constants.AgentShip:    "plans the task first, then implements and drives it through review to a pull request",
+	constants.AgentReview:  "reviews an existing GitHub pull request and reports findings",
+	constants.AgentAnalyze: "analyzes an existing GitHub pull request for breaking changes and usage, without editing code",
 }
 
 // aiRouter routes instructions to an agent using the configured AI provider.

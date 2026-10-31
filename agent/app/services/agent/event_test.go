@@ -90,8 +90,8 @@ func TestEventInstructionFallbacks(t *testing.T) {
 		},
 		{
 			name:    "issue body",
-			payload: `{"number":2,"issue":{"number":2,"body":"@goravel-agent implement"}}`,
-			want:    "implement",
+			payload: `{"number":2,"issue":{"number":2,"body":"@goravel-agent ship"}}`,
+			want:    "ship",
 			ok:      true,
 		},
 		{
@@ -326,10 +326,8 @@ func TestEventAgentPrompt(t *testing.T) {
 		// line as review: one string, two agents.
 		{agent: constants.AgentReview, want: posting},
 		{agent: constants.AgentAnalyze, want: posting},
-		// Ship and implement never post on a mention, so the gate cannot widen
-		// to them.
+		// Ship never posts on a mention, so the gate cannot widen to it.
 		{agent: constants.AgentShip, want: body},
-		{agent: constants.AgentImplement, want: body},
 	}
 
 	for _, tt := range tests {
@@ -354,7 +352,7 @@ func TestEventAgentPromptNoPostOnIssue(t *testing.T) {
 		"comment: https://github.com/goravel/goravel/issues/45#issuecomment-24680\n" +
 		"Instruction: review"
 
-	for _, agent := range []string{constants.AgentShip, constants.AgentImplement, constants.AgentReview, constants.AgentAnalyze} {
+	for _, agent := range []string{constants.AgentShip, constants.AgentReview, constants.AgentAnalyze} {
 		t.Run(agent, func(t *testing.T) {
 			require.Equal(t, want, event.agentPrompt(agent, "review"))
 		})

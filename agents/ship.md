@@ -167,8 +167,8 @@ Write the full `PLAN` verbatim to `<folder>/plan.md`. Confirm it exists before t
 ### 5.1 Code
 
 - Capture `PHASE_BASE=$(git -C "$WORKTREE_DIR" rev-parse HEAD)` before running.
-- Round 1: spawn a new foreground subagent session with the subagent tool, `agent: "subagents/code"`: "You are running as a subagent in the implement flow, working in the implementation worktree (`$WORKTREE_DIR`). Implement `<folder>/plan.md`. Verify with scoped tests (`go test <pkg>`). Do not commit. Save your report to `<folder>/implementation.md`."
-- Rounds 2+: resume the same session via its `sessionID`: "You are running as a subagent in the implement flow, still in the implementation worktree (`$WORKTREE_DIR`). Fix every Must Fix, Maybe Fix, and Nit in `<folder>/review-<N-1>.md`. Verify with scoped tests only. Update `<folder>/implementation.md`."
+- Round 1: spawn a new foreground subagent session with the subagent tool, `agent: "subagents/code"`: "You are running as a subagent in the ship flow, working in the implementation worktree (`$WORKTREE_DIR`). Implement `<folder>/plan.md`. Verify with scoped tests (`go test <pkg>`). Do not commit. Save your report to `<folder>/implementation.md`."
+- Rounds 2+: resume the same session via its `sessionID`: "You are running as a subagent in the ship flow, still in the implementation worktree (`$WORKTREE_DIR`). Fix every Must Fix, Maybe Fix, and Nit in `<folder>/review-<N-1>.md`. Verify with scoped tests only. Update `<folder>/implementation.md`."
 - After it returns, commit the phase:
   ```
   git -C "$WORKTREE_DIR" add -A

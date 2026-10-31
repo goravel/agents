@@ -223,10 +223,9 @@ func (s *AgentPollTestSuite) setupPoll(page string) pollEnv {
 		"project_name":    projectName,
 		"allowed_senders": "bowen",
 		"models": map[string]string{
-			constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
-			constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
-			constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
-			constants.AgentAnalyze:   "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentShip:    "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentReview:  "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high",
 		},
 	})
 	s.T().Cleanup(func() { facades.Config().Add("agent", originalConfig) })
@@ -478,7 +477,7 @@ func (s *AgentPollTestSuite) TestAgentModelsConfigCoversRoutableAgents() {
 	models, ok := facades.Config().Get("agent.models").(map[string]string)
 	s.Require().True(ok, "config/agent.go must register agent.models as map[string]string")
 
-	for _, mode := range []string{constants.AgentShip, constants.AgentImplement, constants.AgentReview, constants.AgentAnalyze} {
+	for _, mode := range []string{constants.AgentShip, constants.AgentReview, constants.AgentAnalyze} {
 		entry := strings.TrimSpace(models[mode])
 		s.Require().NotEmpty(entry, "agent.models has no entry for %q", mode)
 		model, _, _ := strings.Cut(entry, "#")
@@ -503,10 +502,9 @@ func (s *AgentPollTestSuite) TestPollRejectsBlankProjectName() {
 		"project_name":    "",
 		"allowed_senders": "bowen",
 		"models": map[string]string{
-			constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
-			constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
-			constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
-			constants.AgentAnalyze:   "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentShip:    "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentReview:  "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high",
 		},
 	})
 	s.T().Cleanup(func() { facades.Config().Add("agent", originalConfig) })

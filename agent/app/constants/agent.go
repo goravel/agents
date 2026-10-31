@@ -5,8 +5,7 @@ package constants
 // Agent names route a mention to a paseo mode. Each name is also a key in
 // agent.models and the value passed to `paseo run --mode`.
 const (
-	AgentShip      = "ship"
-	AgentImplement = "implement"
-	AgentReview    = "review"
-	AgentAnalyze   = "analyze"
+	AgentShip    = "ship"
+	AgentReview  = "review"
+	AgentAnalyze = "analyze"
 )

@@ -671,10 +671,9 @@ func TestNewServiceReadsConfig(t *testing.T) {
 	configMock.EXPECT().GetString("agent.project_name").Return("tmp").Once()
 	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen, alice").Once()
 	models := map[string]string{
-		constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
-		constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
-		constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
-		constants.AgentAnalyze:   "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentShip:    "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentReview:  "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high",
 	}
 	configMock.EXPECT().Get("agent.models").Return(models).Once()
 	configMock.EXPECT().GetString("agent.mention").Return("@bot").Once()
@@ -755,9 +754,8 @@ func TestNewServiceRejectsAgentWithoutModel(t *testing.T) {
 
 	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen").Once()
 	configMock.EXPECT().Get("agent.models").Return(map[string]string{
-		constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
-		constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
-		constants.AgentAnalyze:   "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentShip:    "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high",
 	}).Once()
 
 	service, err := NewService()
@@ -1063,7 +1061,7 @@ func TestServicePollUsesRoutedRepository(t *testing.T) {
 	// The router sends the event's goravel/goravel mention to goravel/framework.
 	router := mocksagent.NewAgentRouter(t)
 	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).
-		Return(constants.AgentImplement, "goravel/framework", "", nil).
+		Return(constants.AgentShip, "goravel/framework", "", nil).
 		Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
@@ -1071,7 +1069,7 @@ func TestServicePollUsesRoutedRepository(t *testing.T) {
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
 			return req.Dir == runDir("/tmp/ws", "goravel/framework", checkoutTime) &&
 				req.Project == "prj_tmp" &&
-				req.Agent == constants.AgentImplement &&
+				req.Agent == constants.AgentShip &&
 				req.Title == "Issue #123" &&
 				!strings.Contains(req.Prompt, "Repository:")
 		})).
@@ -1697,6 +1695,6 @@ func TestServicePollRetriesFailedProjectLookup(t *testing.T) {
 func TestFallbackTitle(t *testing.T) {
 	require.Equal(t, "review in goravel/framework", fallbackTitle("review", "goravel/framework"))
 
-	long := fallbackTitle("implement", "goravel/"+strings.Repeat("a", 80))
+	long := fallbackTitle("ship", "goravel/"+strings.Repeat("a", 80))
 	require.Len(t, []rune(long), titleLimit)
 }
