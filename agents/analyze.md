@@ -18,6 +18,9 @@ permissions:
   - action: subagent
     resource: "subagents/reaction"
     effect: allow
+  - action: subagent
+    resource: "subagents/setup"
+    effect: allow
   - action: shell
     resource: "*"
     effect: allow
@@ -37,40 +40,26 @@ of the output, not its content — never copy their names.
 
 ## 1. Prepare the PR
 
-No `PR:` line in your prompt → say so and stop; never guess a number. paseo already checked this run's
-repository out when this session started, so the session's working directory is the checkout:
+No `PR:` line in your prompt → say so and stop; never guess a number. Otherwise spawn `subagents/setup`
+foreground and wait; pass the `PR:` line verbatim as the link and keep its number as `PR_NUM`.
 
-```bash
-WORKTREE_DIR=$(pwd)
-git -C "$WORKTREE_DIR" rev-parse --show-toplevel >/dev/null 2>&1 || {
-  echo "workspace not prepared: paseo's setup did not check this repository out"; exit 1
-}
-if [ "$(git -C "$WORKTREE_DIR" rev-parse --is-shallow-repository)" = true ]; then
-  git -C "$WORKTREE_DIR" fetch --unshallow --no-tags origin >/dev/null 2>&1 || true
-fi
-git -C "$WORKTREE_DIR" fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || true
-```
+> You are running as a subagent in the analyze flow. LINK=<the PR link from the prompt>
 
-- A printed message → report it and stop. Never clone the repository yourself: paseo's setup owns the
-  checkout, and every run gets its own directory under the project folder.
-- Keep the PR number from the `PR:` line as `PR_NUM`, then move `HEAD` onto the pull request's head branch
-  and read the diff. `gh pr checkout` is what fetches `refs/pull/<n>/head`, so the diff is the pull
-  request's own change, not the base branch against itself:
+- The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
+  use it as given. A reply starting `setup: failed` → report that line and stop; never build a path or a
+  branch yourself.
+- Keep it all: this flow removes nothing. `setup` owns the checkout and the worktree, and a later run
+  reuses them.
+- Resolve the base branch and read the diff. `setup` refreshed every `origin/*` branch, so
+  `origin/$BASE_BRANCH` resolves:
 
 ```bash
 PR_NUM=<number>
-gh pr checkout "$PR_NUM" || { echo "cannot check out PR #$PR_NUM"; exit 1; }
-META=$(gh pr view "$PR_NUM" --json baseRefName,headRefName --jq '[.baseRefName, .headRefName] | @tsv') \
-  || { echo "cannot read PR #$PR_NUM"; exit 1; }
-BASE_BRANCH=$(printf '%s\n' "$META" | cut -f1)
-HEAD_BRANCH=$(printf '%s\n' "$META" | cut -f2)
-[ "$(git -C "$WORKTREE_DIR" rev-parse --abbrev-ref HEAD)" = "$HEAD_BRANCH" ] \
-  || { echo "HEAD is not PR #$PR_NUM's branch ($HEAD_BRANCH)"; exit 1; }
+BASE_BRANCH=$(gh pr view "$PR_NUM" --json baseRefName --jq '.baseRefName')
 git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD --stat
 git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD
 ```
 
-- A message from that block → report it and stop rather than analyzing the wrong tree.
 - Context, read-only — the body and the issue feed the usage block and the Laravel comparison:
 
 ```bash
@@ -121,7 +110,7 @@ section carries no body.
 
 Shape:
 
-- `runDir` gained `root` → 1 caller → pass `project.Path`, `workspace.go:19`
+- `Checkouter.Ensure` gained `dir` → 2 callers → pass `runDir(...)`, `workspace.go:91`
 
 ## 4. Answer 2 — how to use it
 

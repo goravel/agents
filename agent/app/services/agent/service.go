@@ -256,8 +256,9 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 		return err
 	}
 
-	// The run directory must exist before paseo starts an agent in it; paseo's
-	// setup and the primary agent check the repository out inside it.
+	// The poller only makes the empty run directory: paseo starts the primary
+	// agent there, and the agent's `setup` subagent clones the repository and
+	// creates the run's worktree.
 	dir := runDir(project.Path, repository, s.now())
 	if err := prepareRunDir(dir); err != nil {
 		return err

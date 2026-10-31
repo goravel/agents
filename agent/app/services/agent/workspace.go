@@ -14,8 +14,9 @@ const runTimeLayout = "20060102-150405.000"
 
 // runDir resolves the per-run directory for a repository under the resolved
 // paseo project folder. Each run gets its own uniquely named directory
-// (<root>/<owner>-<repo>-<timestamp>) so two runs never share one; paseo's setup
-// and the primary agent check the repository out inside it.
+// (<root>/<owner>-<repo>-<timestamp>) so two runs never share one. It starts
+// empty: the run's `setup` subagent clones the repository and creates the
+// worktree the run then works inside.
 func runDir(root, repository string, now time.Time) string {
 	return filepath.Join(root, runDirName(repository, now))
 }
