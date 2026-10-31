@@ -29,6 +29,8 @@ func TestPollEventsHandle(t *testing.T) {
 	}).Once()
 	configMock.EXPECT().GetString("agent.mention").Return("@goravel-agent").Once()
 	configMock.EXPECT().GetString("agent.github_token").Return("").Once()
+	configMock.EXPECT().GetString("agent.clone_prefix").Return("git@github.com:").Once()
+	configMock.EXPECT().GetString("agent.clone_depth").Return("1").Once()
 
 	httpMock := factory.Http()
 	httpMock.EXPECT().HttpClient().Return(&http.Client{}).Once()

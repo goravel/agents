@@ -221,6 +221,8 @@ func (s *AgentPollTestSuite) setupPoll(page string) pollEnv {
 		"base_url":        srv.URL + "/webhooks/events",
 		"api_token":       "test-token",
 		"project_name":    projectName,
+		"clone_prefix":    "git@github.com:",
+		"clone_depth":     "1",
 		"allowed_senders": "bowen",
 		"models": map[string]string{
 			constants.AgentShip:    "opencode-go/deepseek-v4.1-flash#high",
@@ -347,6 +349,8 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 		Run("env", "-i",
 			"PATH="+os.Getenv("PATH"),
 			"HOME="+os.Getenv("HOME"),
+			"GITHUB_CLONE_PREFIX=git@github.com:",
+			"CLONE_DEPTH=1",
 			"paseo", "run",
 			"--provider", "opencode",
 			"--mode", testifymock.Anything,
@@ -361,16 +365,16 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 				return !strings.HasPrefix(prompt, "Repository: ")
 			})).
 		Run(func(_ string, args ...string) {
-			// args = [-i, PATH…, HOME…, paseo, run, --provider, opencode,
-			//         --mode, <mode>, --model, <model>, --thinking, <thinking>,
-			//         --title, <title>, --workspace, <id>, --no-wait, --,
-			//         <prompt>].
-			observation.mode = args[8]
-			observation.model = args[10]
-			observation.thinking = args[12]
-			observation.title = args[14]
-			observation.workspaceID = args[16]
-			observation.prompt = args[19]
+			// args = [-i, PATH…, HOME…, GITHUB_CLONE_PREFIX…, CLONE_DEPTH…,
+			//         paseo, run, --provider, opencode, --mode, <mode>, --model,
+			//         <model>, --thinking, <thinking>, --title, <title>,
+			//         --workspace, <id>, --no-wait, --, <prompt>].
+			observation.mode = args[10]
+			observation.model = args[12]
+			observation.thinking = args[14]
+			observation.title = args[16]
+			observation.workspaceID = args[18]
+			observation.prompt = args[21]
 		}).
 		Return(runResultMock).
 		Once()

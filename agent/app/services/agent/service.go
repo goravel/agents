@@ -96,8 +96,12 @@ func NewService() (*Service, error) {
 	}
 
 	return &Service{
-		router:         newAIRouter(),
-		dispatcher:     newOpencodeDispatcher(models),
+		router: newAIRouter(),
+		dispatcher: newOpencodeDispatcher(
+			models,
+			config.GetString("agent.clone_prefix"),
+			config.GetString("agent.clone_depth"),
+		),
 		retry:          newCacheRetryTracker(),
 		handles:        newCacheHandleStore(),
 		reactor:        reactor,

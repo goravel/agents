@@ -431,20 +431,43 @@ func testModels() map[string]string {
 	}
 }
 
-// dispatcherArgs returns the argv the dispatcher builds for the run, with
-// `do it` as prompt.
-func dispatcherArgs(mode, model, thinking, title, workspaceID string) []any {
-	args := append(scrubbedEnvArgs(), "paseo", "run",
+// testClonePrefix and testCloneDepth are the clone settings the dispatcher tests
+// run with: the agent app's defaults.
+const (
+	testClonePrefix = "git@github.com:"
+	testCloneDepth  = "1"
+)
+
+// runEnvArgs returns the `env -i …` prefix of the `paseo run` call: the scrubbed
+// base plus the clone settings its setup subagent reads.
+func runEnvArgs(clonePrefix, cloneDepth string) []any {
+	return append(scrubbedEnvArgs(),
+		"GITHUB_CLONE_PREFIX="+clonePrefix,
+		"CLONE_DEPTH="+cloneDepth,
+	)
+}
+
+// runCommandArgs returns the `paseo run …` argv without the environment prefix,
+// with `do it` as prompt.
+func runCommandArgs(mode, model, thinking, title, workspaceID string) []any {
+	args := []any{"paseo", "run",
 		"--provider", "opencode",
 		"--mode", mode,
 		"--model", model,
-	)
+	}
 	if thinking != "" {
 		args = append(args, "--thinking", thinking)
 	}
 	args = append(args, "--title", title, "--workspace", workspaceID)
 
 	return append(args, "--no-wait", "--", "do it")
+}
+
+// dispatcherArgs returns the argv the dispatcher builds for the run with the
+// default clone settings.
+func dispatcherArgs(mode, model, thinking, title, workspaceID string) []any {
+	return append(runEnvArgs(testClonePrefix, testCloneDepth),
+		runCommandArgs(mode, model, thinking, title, workspaceID)...)
 }
 
 // workspaceID is the id the faked `paseo workspace create` reports.
@@ -509,10 +532,48 @@ func TestOpencodeDispatcherRun(t *testing.T) {
 	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 	result.EXPECT().Failed().Return(false).Once()
 
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testModels(), testClonePrefix, testCloneDepth)
 	require.NoError(t, dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/goravel",
 		Agent:   "review",
+		Prompt:  "do it",
+		Project: projectID,
+		Title:   "Review PR 42",
+	}))
+
+	processMock.AssertExpectations(t)
+	createResult.AssertExpectations(t)
+	result.AssertExpectations(t)
+}
+
+// TestOpencodeDispatcherPassesCloneSettings pins that the configured prefix and
+// depth reach the `paseo run` environment (where the setup subagent reads them)
+// and that `paseo workspace create` keeps the base environment.
+func TestOpencodeDispatcherPassesCloneSettings(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+	processMock := factory.Process()
+	createResult := mocksprocess.NewResult(t)
+	result := mocksprocess.NewResult(t)
+
+	expectWorkspaceCreate(processMock, "/tmp/ws/goravel/goravel", "Review PR 42", projectID, createResult)
+	createResult.EXPECT().Failed().Return(false).Once()
+	createResult.EXPECT().Output().Return(`{"workspaceId":"` + workspaceID + `"}`).Once()
+
+	args := append(runEnvArgs("ssh://git@example.com/", "2"),
+		runCommandArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "high", "Review PR 42", workspaceID)...)
+
+	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
+	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
+	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
+	processMock.EXPECT().Quietly().Return(processMock).Once()
+	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
+	result.EXPECT().Failed().Return(false).Once()
+
+	dispatcher := newOpencodeDispatcher(testModels(), "ssh://git@example.com/", "2")
+	require.NoError(t, dispatcher.Run(context.Background(), dispatch.Request{
+		Dir:     "/tmp/ws/goravel/goravel",
+		Agent:   constants.AgentReview,
 		Prompt:  "do it",
 		Project: projectID,
 		Title:   "Review PR 42",
@@ -545,7 +606,7 @@ func TestOpencodeDispatcherRunFailure(t *testing.T) {
 	result.EXPECT().ExitCode().Return(2).Once()
 	result.EXPECT().Error().Return(errors.New("boom")).Once()
 
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testModels(), testClonePrefix, testCloneDepth)
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/framework",
 		Agent:   "ship",
@@ -583,7 +644,7 @@ func TestOpencodeDispatcherRunStartError(t *testing.T) {
 	result.EXPECT().ExitCode().Return(-1).Once()
 	result.EXPECT().Error().Return(errors.New("start failed")).Once()
 
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testModels(), testClonePrefix, testCloneDepth)
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/goravel",
 		Agent:   "review",
@@ -627,7 +688,7 @@ func TestOpencodeDispatcherWorkspaceCreateFailure(t *testing.T) {
 	).Once()
 
 	// No run expectation: a create failure must abort before `paseo run`.
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testModels(), testClonePrefix, testCloneDepth)
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/framework",
 		Agent:   constants.AgentShip,
@@ -662,7 +723,7 @@ func TestOpencodeDispatcherWorkspaceCreateFailureNoStderr(t *testing.T) {
 	createResult.EXPECT().ErrorOutput().Return("").Once()
 	createResult.EXPECT().Error().Return(exitErr).Once()
 
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testModels(), testClonePrefix, testCloneDepth)
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/framework",
 		Agent:   constants.AgentShip,
@@ -688,7 +749,7 @@ func TestOpencodeDispatcherWorkspaceCreateBadJSON(t *testing.T) {
 	createResult.EXPECT().Output().Return("not json").Once()
 
 	// Unreadable output aborts instead of falling back to an untitled run.
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testModels(), testClonePrefix, testCloneDepth)
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/framework",
 		Agent:   constants.AgentShip,
@@ -714,7 +775,7 @@ func TestOpencodeDispatcherWorkspaceCreateNoID(t *testing.T) {
 	createResult.EXPECT().Output().Return(`{"name":"x"}`).Once()
 
 	// A JSON reply without an id aborts for the same reason.
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testModels(), testClonePrefix, testCloneDepth)
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/framework",
 		Agent:   constants.AgentShip,
@@ -783,10 +844,12 @@ func TestLogDispatch(t *testing.T) {
 
 func TestOpencodeDispatcherDefaults(t *testing.T) {
 	models := testModels()
-	dispatcher := newOpencodeDispatcher(models)
+	dispatcher := newOpencodeDispatcher(models, testClonePrefix, testCloneDepth)
 	require.Equal(t, paseoBin, dispatcher.bin)
 	require.Equal(t, "opencode", dispatcher.provider)
 	require.Equal(t, models, dispatcher.models)
+	require.Equal(t, testClonePrefix, dispatcher.clonePrefix)
+	require.Equal(t, testCloneDepth, dispatcher.cloneDepth)
 }
 
 func TestOpencodeDispatcherRunUnknownMode(t *testing.T) {
@@ -795,7 +858,7 @@ func TestOpencodeDispatcherRunUnknownMode(t *testing.T) {
 
 	dispatcher := newOpencodeDispatcher(map[string]string{
 		constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high",
-	})
+	}, testClonePrefix, testCloneDepth)
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:    "/tmp/ws/goravel/goravel",
 		Agent:  constants.AgentReview,
@@ -807,7 +870,7 @@ func TestOpencodeDispatcherRunUnknownMode(t *testing.T) {
 func TestOpencodeDispatcherRunEmptyModels(t *testing.T) {
 	mock.Factory().Process()
 
-	dispatcher := newOpencodeDispatcher(nil)
+	dispatcher := newOpencodeDispatcher(nil, testClonePrefix, testCloneDepth)
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/goravel",
 		Agent:   constants.AgentShip,
@@ -821,7 +884,7 @@ func TestOpencodeDispatcherRejectsBlankProject(t *testing.T) {
 	factory := mock.Factory()
 	factory.Log()
 
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testModels(), testClonePrefix, testCloneDepth)
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:    "/tmp/ws/goravel/goravel",
 		Agent:  constants.AgentReview,
@@ -864,7 +927,7 @@ func TestOpencodeDispatcherAlwaysCreatesWorkspace(t *testing.T) {
 			processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 			result.EXPECT().Failed().Return(false).Once()
 
-			dispatcher := newOpencodeDispatcher(testModels())
+			dispatcher := newOpencodeDispatcher(testModels(), testClonePrefix, testCloneDepth)
 			require.NoError(t, dispatcher.Run(context.Background(), dispatch.Request{
 				Dir:     "/tmp/ws/goravel/goravel",
 				Agent:   constants.AgentReview,
@@ -906,7 +969,7 @@ func TestOpencodeDispatcherRunWithoutThinking(t *testing.T) {
 
 	dispatcher := newOpencodeDispatcher(map[string]string{
 		constants.AgentReview: "opencode-go/deepseek-v4.1-flash",
-	})
+	}, testClonePrefix, testCloneDepth)
 	require.NoError(t, dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/goravel",
 		Agent:   constants.AgentReview,
@@ -938,7 +1001,7 @@ func TestModelFor(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			dispatcher := newOpencodeDispatcher(map[string]string{constants.AgentReview: test.entry})
+			dispatcher := newOpencodeDispatcher(map[string]string{constants.AgentReview: test.entry}, testClonePrefix, testCloneDepth)
 			model, thinking, err := dispatcher.modelFor(constants.AgentReview)
 			if test.wantErr != "" {
 				require.EqualError(t, err, test.wantErr)

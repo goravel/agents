@@ -38,6 +38,13 @@ func init() {
 		// poller still runs agents.
 		"github_token": config.Env("GITHUB_TOKEN", ""),
 
+		// Clone settings for the run's `setup` subagent, passed to `paseo run` as
+		// GITHUB_CLONE_PREFIX and CLONE_DEPTH: paseo starts it with a scrubbed
+		// environment, so these are the only way the worker gets them. SSH at depth
+		// 1 keeps a run to one tip commit; a blank depth means a full clone.
+		"clone_prefix": config.Env("AGENT_CLONE_PREFIX", "git@github.com:"),
+		"clone_depth":  config.Env("AGENT_CLONE_DEPTH", "1"),
+
 		// Model each agent runs with, keyed by mode: `<model>[#<thinking>]`.
 		// Every routable agent needs an entry.
 		"models": map[string]string{
