@@ -204,15 +204,17 @@ comparison, so a reader can re-run the check.
 
 ### Pick the verdict
 
-Ask these three questions in order, and stop at the first yes:
+Ask these three questions in order, and stop at the first yes. They pick between the three comparison
+verdicts; the last two bullets cover the cases they do not reach.
 
 1. Does the result differ — another value, another default, another error, another edge case? → `Deviates`
-2. Does the name or the argument order differ? → `Partially matches`
+2. Does the name or the argument list differ? → `Partially matches`
 3. Neither differs → `Matches`
 
-- `Matches` — same name, same argument order, same result.
-- `Partially matches` — same job, but under another name or with arguments in another order.
-- `Deviates` — same idea, but the result, a default, or an edge case says the opposite of Laravel.
+- `Matches` — same name, same argument list, same result.
+- `Partially matches` — same job, under another name, with a different argument list, or with a value
+  returned another way.
+- `Deviates` — same idea, but the result, a default, or an edge case differs from Laravel.
 - `No Laravel equivalent` — the PR is user-facing and Laravel has no counterpart; name the closest
   concept in the same line.
 - `Not checked` — the docs and the source could not be reached; Goravel-side context cannot stand in
@@ -228,8 +230,8 @@ on the same example — Goravel first, Laravel second:
 ```
 
 Rules for every block:
-- Both fences, always. The one exception is `No Laravel equivalent`: the Goravel fence, then a closing
-  line naming the closest concept, where the Laravel side of the caption would go.
+- Both fences, always, except `No Laravel equivalent` and `Not checked`. For `No Laravel equivalent`:
+  the Goravel fence alone, with the closest concept named in the caption.
 - One to three lines per fence: the call that shows the difference, not the whole function.
 - Same example on both sides — the same route, the same key, the same call.
 - Real code only: the Goravel side from the diff, the Laravel side from the page or file you opened.
@@ -313,10 +315,11 @@ Headings and order are fixed:
 
 - §3 is conditional: drop its heading when the skip rule in §5 applies, and end the report at §2.
   Never leave an empty `## 3.` heading.
-- §3 carries one verdict, in the heading: the strongest block wins — `Deviates` over `Partially matches`
-  over `Matches`. Use `No Laravel equivalent` when every block has no counterpart, and `Not checked`
-  only when nothing could be checked. Each block repeats its own verdict, so a reader sees which thing
-  matches and which one does not.
+- §3 carries one verdict, in the heading: `No Laravel equivalent` and `Not checked` drop out first, then
+  the strongest remaining block wins — `Deviates` over `Partially matches` over `Matches`. Use
+  `No Laravel equivalent` when every block has no counterpart, and `Not checked` only when nothing could
+  be checked. Each block repeats its own verdict, so a reader sees which thing matches and which one
+  does not.
 - Each section uses the shape its rule above shows; add no section, intro, or closing line.
 - No severity, no checkboxes, no round markers — this is not a review. The single exception is the
   `<!-- goravel-agent: analysis -->` marker, which is identity, not a round.
