@@ -66,11 +66,14 @@ PR_NUM=$(printf '%s' "$LINK" | sed -nE 's#^https?://(www\.)?github\.com/[A-Za-z0
 REPO=${REPO:-$LINK}
 
 BASE_BRANCH=
+HEAD_BRANCH=
 if [ -n "$PR_NUM" ]; then
-  META=$(gh pr view "$PR_NUM" -R "$REPO" --json baseRefName,isCrossRepository \
-    --jq '[.baseRefName, (.isCrossRepository|tostring)] | @tsv') || { echo "cannot read PR #$PR_NUM of $REPO"; exit 1; }
+  META=$(gh pr view "$PR_NUM" -R "$REPO" --json baseRefName,headRefName,isCrossRepository \
+    --jq '[.baseRefName, .headRefName, (.isCrossRepository|tostring)] | @tsv') \
+    || { echo "cannot read PR #$PR_NUM of $REPO"; exit 1; }
   BASE_BRANCH=$(printf '%s\n' "$META" | cut -f1)
-  if [ "$(printf '%s\n' "$META" | cut -f2)" = true ]; then
+  HEAD_BRANCH=$(printf '%s\n' "$META" | cut -f2)
+  if [ "$(printf '%s\n' "$META" | cut -f3)" = true ]; then
     echo "PR #$PR_NUM comes from a fork; this flow does not push to it"; exit 1
   fi
 fi
@@ -109,23 +112,29 @@ git -C "$WORKTREE_DIR" fetch --no-tags origin '+refs/heads/*:refs/remotes/origin
   git -C "$WORKTREE_DIR" config user.email >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.email "implement-agent@localhost"
   git -C "$WORKTREE_DIR" config user.name  >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.name  "implement agent"
   ```
-- Put `HEAD` on this run's branch before the first commit. A `PR:` link moves to the pull request's head
-  branch so the later push updates that pull request. An issue or repository link keeps the checkout's
-  branch, or starts a task branch from the base when `HEAD` is detached or sits on the default:
+- Put `HEAD` on this run's branch before the first commit, and prove it landed there. A `PR:` link moves
+  to the pull request's head branch so the later push updates that pull request. An issue or repository
+  link keeps the checkout's branch, or starts a task branch from the base when `HEAD` is detached or sits
+  on the default:
   ```bash
   if [ -n "$PR_NUM" ]; then
-    gh pr checkout "$PR_NUM" -R "$REPO"
+    gh pr checkout "$PR_NUM" -R "$REPO" || { echo "cannot check out PR #$PR_NUM"; exit 1; }
+    [ "$(git -C "$WORKTREE_DIR" rev-parse --abbrev-ref HEAD)" = "$HEAD_BRANCH" ] \
+      || { echo "HEAD is not PR #$PR_NUM's branch ($HEAD_BRANCH)"; exit 1; }
   else
     CUR=$(git -C "$WORKTREE_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null)
     DEFAULT=$(git -C "$WORKTREE_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
     if [ -z "$CUR" ] || [ "$CUR" = "$DEFAULT" ]; then
-      git -C "$WORKTREE_DIR" switch -c "task-$(date +%Y%m%d-%H%M%S)" "origin/$BASE_BRANCH"
+      BRANCH="task-$(date +%Y%m%d-%H%M%S)"
+      git -C "$WORKTREE_DIR" switch -c "$BRANCH" "origin/$BASE_BRANCH" \
+        || { echo "cannot start $BRANCH from origin/$BASE_BRANCH"; exit 1; }
+      [ "$(git -C "$WORKTREE_DIR" rev-parse --abbrev-ref HEAD)" = "$BRANCH" ] \
+        || { echo "HEAD is not the new $BRANCH"; exit 1; }
     fi
   fi
-  git -C "$WORKTREE_DIR" symbolic-ref --quiet --short HEAD
   ```
-- That last command must print a branch name: an empty one means `HEAD` is detached, so report it and
-  stop rather than committing onto nothing.
+- A message from that block → report it and stop: nothing is committed on a branch the step did not
+  select.
 - Record `WORKTREE_DIR` and `BASE_BRANCH`; the session stays here for the rest of the run and after it.
   Artifacts stay at absolute paths under `<folder>/`.
 

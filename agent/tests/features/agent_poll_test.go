@@ -214,7 +214,7 @@ func (s *AgentPollTestSuite) setupPoll(page string) pollEnv {
 
 	// The resolver is cached for the process, so each test names its own project:
 	// a shared name would reuse another test's cached folder and skip its lookup.
-	projectName := strings.NewReplacer("/", "-", "_", "-").Replace(s.T().Name())
+	projectName := fmt.Sprintf("%s-%d", strings.NewReplacer("/", "-", "_", "-").Replace(s.T().Name()), time.Now().UnixNano())
 
 	originalConfig := facades.Config().Get("agent")
 	facades.Config().Add("agent", map[string]any{

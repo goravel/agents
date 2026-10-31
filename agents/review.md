@@ -52,14 +52,17 @@ git -C "$WORKTREE_DIR" fetch --no-tags origin '+refs/heads/*:refs/remotes/origin
   request's own change, not the base branch against itself:
 
 ```bash
-gh pr checkout "$PR_NUM"
-BASE_BRANCH=$(gh pr view "$PR_NUM" --json baseRefName --jq '.baseRefName')
-git -C "$WORKTREE_DIR" symbolic-ref --quiet --short HEAD
+gh pr checkout "$PR_NUM" || { echo "cannot check out PR #$PR_NUM"; exit 1; }
+META=$(gh pr view "$PR_NUM" --json baseRefName,headRefName --jq '[.baseRefName, .headRefName] | @tsv') \
+  || { echo "cannot read PR #$PR_NUM"; exit 1; }
+BASE_BRANCH=$(printf '%s\n' "$META" | cut -f1)
+HEAD_BRANCH=$(printf '%s\n' "$META" | cut -f2)
+[ "$(git -C "$WORKTREE_DIR" rev-parse --abbrev-ref HEAD)" = "$HEAD_BRANCH" ] \
+  || { echo "HEAD is not PR #$PR_NUM's branch ($HEAD_BRANCH)"; exit 1; }
 git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD --name-only
 ```
 
-- That `symbolic-ref` must print a branch name: an empty one means `HEAD` is detached, so report it and
-  stop rather than reviewing the wrong tree.
+- A message from that block → report it and stop rather than reviewing the wrong tree.
 - Build the knowledge graph: `build_or_update_graph_tool({ repo_root: "$WORKTREE_DIR", base: "origin/${BASE_BRANCH}" })`.
 - Fetch the conversation and PR body (read-only; every call `--paginate`):
 
