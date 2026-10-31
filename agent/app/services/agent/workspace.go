@@ -8,22 +8,22 @@ import (
 	"time"
 )
 
-// checkoutTimeLayout timestamps each run directory. Milliseconds keep two
-// mentions handled in the same second from sharing one directory.
-const checkoutTimeLayout = "20060102-150405.000"
+// runTimeLayout timestamps each run directory. Milliseconds keep two mentions
+// handled in the same second from sharing one directory.
+const runTimeLayout = "20060102-150405.000"
 
 // runDir resolves the per-run directory for a repository under the resolved
 // paseo project folder. Each run gets its own uniquely named directory
 // (<root>/<owner>-<repo>-<timestamp>) so two runs never share one; paseo's setup
 // and the primary agent check the repository out inside it.
 func runDir(root, repository string, now time.Time) string {
-	return filepath.Join(root, checkoutName(repository, now))
+	return filepath.Join(root, runDirName(repository, now))
 }
 
-// checkoutName flattens owner/name into a filesystem-safe basename and appends
+// runDirName flattens owner/name into a filesystem-safe basename and appends
 // the run timestamp. Flattening also removes any path separators, so a hostile
 // repository value cannot escape the project folder.
-func checkoutName(repository string, now time.Time) string {
+func runDirName(repository string, now time.Time) string {
 	var b strings.Builder
 	for _, r := range repository {
 		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
@@ -34,7 +34,7 @@ func checkoutName(repository string, now time.Time) string {
 		}
 	}
 
-	return strings.Trim(b.String(), "-") + "-" + now.UTC().Format(checkoutTimeLayout)
+	return strings.Trim(b.String(), "-") + "-" + now.UTC().Format(runTimeLayout)
 }
 
 // prepareRunDir creates the directory the paseo workspace points at. paseo

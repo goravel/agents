@@ -1095,8 +1095,9 @@ func TestServicePollUsesRoutedRepository(t *testing.T) {
 
 // TestServicePollFallsBackToAgentTitle pins that an event whose payload carries
 // no issue or pull request number still reaches the dispatcher titled: the
-// dispatcher always creates a titled workspace, so the agent and repository name
-// the run instead.
+// dispatcher always creates a titled workspace, so the agent and the source
+// repository name the run instead. The router names no repository either, so the
+// title must be built from the event's.
 func TestServicePollFallsBackToAgentTitle(t *testing.T) {
 	factory := mock.Factory()
 	factory.Log()
@@ -1115,10 +1116,10 @@ func TestServicePollFallsBackToAgentTitle(t *testing.T) {
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
-	// The router returns no title and the payload has no number to fall back to.
+	// No routed repository, no title, and no payload number to fall back to.
 	router := mocksagent.NewAgentRouter(t)
 	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).
-		Return(constants.AgentReview, "goravel/goravel", "", nil).
+		Return(constants.AgentReview, "", "", nil).
 		Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
@@ -1561,25 +1562,39 @@ func TestServicePollCachesProjectAcrossMentions(t *testing.T) {
 	httpMock.AssertExpectations(t)
 }
 
+// TestServicePollStopsOnProjectError pins the partial acknowledgement: a
+// non-mention ahead of the failing mention is already drained, so it is
+// acknowledged, while the mention keeps its retries and stays on the relay.
 func TestServicePollStopsOnProjectError(t *testing.T) {
 	factory := mock.Factory()
 	factory.Log()
 	processMock := factory.Process()
 	httpMock := factory.Http()
 	getResp := mockshttp.NewResponse(t)
+	deleteResp := mockshttp.NewResponse(t)
 
 	result := expectProjectLookup(t, processMock)
 	result.EXPECT().Failed().Return(true).Once()
 	result.EXPECT().ExitCode().Return(1).Once()
 	result.EXPECT().ErrorOutput().Return("daemon down").Once()
 
-	getResp.EXPECT().Failed().Return(false).Once()
-	getResp.EXPECT().Body().Return(mentionOnlyEnvelope, nil).Once()
+	// Event 1 carries no mention, so the page drains it before event 2 reaches
+	// the project lookup.
+	page := `{"data":[
+		{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issues","action":"opened","repository":"goravel/goravel","payload":"{\"number\":5,\"issue\":{\"number\":5,\"body\":\"nothing to see\"}}"},
+		{"id":2,"delivery_id":"d-2","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"}
+	],"total":2,"page":1,"limit":10}`
 
-	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Once()
+	getResp.EXPECT().Failed().Return(false).Once()
+	getResp.EXPECT().Body().Return(page, nil).Once()
+	deleteResp.EXPECT().Body().Return("", nil).Once()
+	deleteResp.EXPECT().Failed().Return(false).Once()
+
+	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Times(2)
 	httpMock.EXPECT().WithQueryParameters(relayQueryParams).Return(httpMock).Once()
-	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Once()
+	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Times(2)
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
+	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
 	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).
@@ -1591,7 +1606,7 @@ func TestServicePollStopsOnProjectError(t *testing.T) {
 	// replayed once the project is fixed.
 	retry := mocksagent.NewRetryTracker(t)
 	handles := mocksagent.NewHandleStore(t)
-	handles.EXPECT().Has("d-1").Return(false).Once()
+	handles.EXPECT().Has("d-2").Return(false).Once()
 
 	cfg := relayConfig("token")
 	cfg.projects = newProjectResolver(paseoBin, "tmp")
@@ -1606,7 +1621,9 @@ func TestServicePollStopsOnProjectError(t *testing.T) {
 	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
 	retry.AssertNotCalled(t, "RecordFailure", testifymock.Anything)
 	handles.AssertNotCalled(t, "Mark", testifymock.Anything)
-	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
+	// Only the drained event is acknowledged; the mention stays queued.
+	httpMock.AssertNumberOfCalls(t, "Delete", 1)
+	httpMock.AssertNotCalled(t, "Delete", "http://relay.test/webhooks/events/2", testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
 

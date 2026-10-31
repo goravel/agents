@@ -84,8 +84,13 @@ directory is the checkout:
 
 ```bash
 WORKTREE_DIR=$(pwd)
+git -C "$WORKTREE_DIR" rev-parse --show-toplevel >/dev/null 2>&1 || {
+  echo "workspace not prepared: paseo's setup did not check this repository out"; exit 1
+}
 ```
 
+- A printed message → report it and stop. Never clone the repository yourself: paseo's setup owns that
+  checkout.
 - Refresh `origin/*` and unshallow, because that checkout may be shallow: without this an
   `origin/<other-base>` diff has nothing to resolve.
 ```bash
@@ -104,6 +109,23 @@ git -C "$WORKTREE_DIR" fetch --no-tags origin '+refs/heads/*:refs/remotes/origin
   git -C "$WORKTREE_DIR" config user.email >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.email "implement-agent@localhost"
   git -C "$WORKTREE_DIR" config user.name  >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.name  "implement agent"
   ```
+- Put `HEAD` on this run's branch before the first commit. A `PR:` link moves to the pull request's head
+  branch so the later push updates that pull request. An issue or repository link keeps the checkout's
+  branch, or starts a task branch from the base when `HEAD` is detached or sits on the default:
+  ```bash
+  if [ -n "$PR_NUM" ]; then
+    gh pr checkout "$PR_NUM" -R "$REPO"
+  else
+    CUR=$(git -C "$WORKTREE_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null)
+    DEFAULT=$(git -C "$WORKTREE_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
+    if [ -z "$CUR" ] || [ "$CUR" = "$DEFAULT" ]; then
+      git -C "$WORKTREE_DIR" switch -c "task-$(date +%Y%m%d-%H%M%S)" "origin/$BASE_BRANCH"
+    fi
+  fi
+  git -C "$WORKTREE_DIR" symbolic-ref --quiet --short HEAD
+  ```
+- That last command must print a branch name: an empty one means `HEAD` is detached, so report it and
+  stop rather than committing onto nothing.
 - Record `WORKTREE_DIR` and `BASE_BRANCH`; the session stays here for the rest of the run and after it.
   Artifacts stay at absolute paths under `<folder>/`.
 
@@ -176,6 +198,6 @@ Run this at the run's terminal point, so the 👍 means "run delivered" the way 
 - Nits are fixed only in a round that also has Must Fix / Maybe Fix; a Nits-only review is clean.
 - Maintain `<folder>/considered.md` (consider-and-dismiss only).
 - Keep the worktree and its branch on every exit — success, failure, or 5 rounds. Nothing in this flow
-  removes them; paseo owns them and a later run reuses them.
+  removes them; paseo owns them, and each run gets its own directory under the project folder.
 - End with a concise summary: what changed, artifact paths, whether the loop converged, the PR URL (or outstanding findings), and the non-blocking Nits.
 - Route all PR-comment replies and resolutions through `subagents/pr` — never touch PR comments directly. Reactions are not part of close-out: the service adds the 👀 on dispatch, and only `subagents/reaction` swaps it.

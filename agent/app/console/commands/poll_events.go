@@ -27,8 +27,9 @@ func (c *PollEvents) Extend() command.Extend {
 
 // Handle runs one poll cycle. The paseo project behind AGENT_PROJECT_NAME is
 // resolved on the first mention that needs a workspace; when that lookup fails
-// the cycle stops with the error, nothing on the relay is acknowledged, and the
-// scheduler retries on the next tick.
+// the cycle stops with the error, the failing event and the rest of the page stay
+// queued, and the scheduler retries on the next tick. Events this page already
+// handled are still acknowledged.
 func (c *PollEvents) Handle(ctx console.Context) error {
 	service, err := agent.NewService()
 	if err != nil {

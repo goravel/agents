@@ -103,7 +103,7 @@ func NewService() (*Service, error) {
 		reactor:        reactor,
 		mention:        normalizeMention(config.GetString("agent.mention")),
 		apiToken:       config.GetString("agent.api_token"),
-		projects:       newProjectResolver(paseoBin, name),
+		projects:       sharedProjectResolver(paseoBin, name),
 		eventsURL:      strings.TrimRight(config.GetString("agent.base_url"), "/"),
 		allowedSenders: senders,
 		now:            time.Now,
@@ -244,11 +244,11 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 	if title == "" {
 		title = ev.defaultTitle()
 	}
-	if title == "" {
-		title = fallbackTitle(agent, repository)
-	}
 	if repository == "" {
 		repository = ev.Repository
+	}
+	if title == "" {
+		title = fallbackTitle(agent, repository)
 	}
 
 	project, err := s.projects.Project(ctx)

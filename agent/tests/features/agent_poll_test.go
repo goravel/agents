@@ -164,10 +164,11 @@ type pollObservation struct {
 // pollEnv is everything one poll cycle runs against: the relay, the mocked
 // process boundary and the project folder the run directories are created in.
 type pollEnv struct {
-	relay      *relay
-	process    *mocksprocess.Process
-	projectDir string
-	lastError  func() string
+	relay       *relay
+	process     *mocksprocess.Process
+	projectName string
+	projectDir  string
+	lastError   func() string
 }
 
 type AgentPollTestSuite struct {
@@ -211,11 +212,15 @@ func (s *AgentPollTestSuite) setupPoll(page string) pollEnv {
 	projectDir, err := filepath.EvalSymlinks(s.T().TempDir())
 	s.Require().NoError(err)
 
+	// The resolver is cached for the process, so each test names its own project:
+	// a shared name would reuse another test's cached folder and skip its lookup.
+	projectName := strings.NewReplacer("/", "-", "_", "-").Replace(s.T().Name())
+
 	originalConfig := facades.Config().Get("agent")
 	facades.Config().Add("agent", map[string]any{
 		"base_url":        srv.URL + "/webhooks/events",
 		"api_token":       "test-token",
-		"project_name":    "tmp",
+		"project_name":    projectName,
 		"allowed_senders": "bowen",
 		"models": map[string]string{
 			constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
@@ -258,10 +263,11 @@ func (s *AgentPollTestSuite) setupPoll(page string) pollEnv {
 	})
 
 	return pollEnv{
-		relay:      r,
-		process:    processMock,
-		projectDir: projectDir,
-		lastError:  recorder.lastError,
+		relay:       r,
+		process:     processMock,
+		projectName: projectName,
+		projectDir:  projectDir,
+		lastError:   recorder.lastError,
 	}
 }
 
@@ -283,7 +289,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 	lookup.EXPECT().Failed().Return(false).Once()
 	lookup.EXPECT().
 		Output().
-		Return(`[{"projectId":"prj_tmp","name":"tmp","kind":"non_git","path":"` + env.projectDir + `"}]`).
+		Return(`[{"projectId":"prj_tmp","name":"` + env.projectName + `","kind":"non_git","path":"` + env.projectDir + `"}]`).
 		Once()
 
 	// The dispatcher creates the run workspace first and runs the agent inside
@@ -323,7 +329,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 	createResultMock.EXPECT().Failed().Return(false).Once()
 	createResultMock.EXPECT().
 		Output().
-		Return(`{"workspaceId":"wks_0123456789abcdef","project":"tmp","name":"probe","isolation":"local","cwd":"/tmp"}`).
+		Return(`{"workspaceId":"wks_0123456789abcdef","project":"` + env.projectName + `","name":"probe","isolation":"local","cwd":"/tmp"}`).
 		Once()
 
 	env.process.EXPECT().WithContext(testifymock.Anything).Return(env.process).Once()
@@ -530,7 +536,7 @@ func (s *AgentPollTestSuite) TestPollStopsOnUnknownProject() {
 
 	err := facades.Artisan().Call("poll-events")
 
-	s.Require().ErrorContains(err, `agent: AGENT_PROJECT_NAME="tmp": no paseo project with that name`)
+	s.Require().ErrorContains(err, `agent: AGENT_PROJECT_NAME="`+env.projectName+`": no paseo project with that name`)
 	s.Require().Empty(env.relay.acknowledged(), "the mention stays queued for the next tick")
 	// Neither `paseo workspace create` nor `paseo run` ever started.
 	env.process.AssertNotCalled(s.T(), "Path", testifymock.Anything)

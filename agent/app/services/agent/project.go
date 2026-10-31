@@ -48,10 +48,29 @@ func newProjectResolver(bin, name string) *projectResolver {
 	return &projectResolver{bin: bin, name: name}
 }
 
-// resolvedProject returns a resolver already holding an answer, so a test can
-// dispatch without arming `paseo project ls`.
-func resolvedProject(project Project) *projectResolver {
-	return &projectResolver{resolved: true, project: project}
+// sharedProjectResolvers holds the process's resolvers. `schedule:run` runs
+// poll-events in-process on every tick, so a resolver owned by the tick's service
+// would pay the lookup again on each one.
+var (
+	sharedProjectResolversMu sync.Mutex
+	sharedProjectResolvers   = map[string]*projectResolver{}
+)
+
+// sharedProjectResolver returns the one resolver for bin and name in this
+// process, so every in-process tick reuses the same cache.
+func sharedProjectResolver(bin, name string) *projectResolver {
+	sharedProjectResolversMu.Lock()
+	defer sharedProjectResolversMu.Unlock()
+
+	key := bin + "\x00" + name
+	if resolver, ok := sharedProjectResolvers[key]; ok {
+		return resolver
+	}
+
+	resolver := newProjectResolver(bin, name)
+	sharedProjectResolvers[key] = resolver
+
+	return resolver
 }
 
 // Project returns the resolved project, or a projectError naming
@@ -110,8 +129,8 @@ func resolveProject(ctx context.Context, bin, name string) (Project, error) {
 		if project.Name != name {
 			continue
 		}
-		if project.Path == "" {
-			return Project{}, fmt.Errorf("agent: AGENT_PROJECT_NAME=%q: that paseo project has no path", name)
+		if project.ProjectID == "" || project.Path == "" {
+			return Project{}, fmt.Errorf("agent: AGENT_PROJECT_NAME=%q: that paseo project has no id or path", name)
 		}
 
 		return Project{ID: project.ProjectID, Path: project.Path}, nil

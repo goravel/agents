@@ -18,6 +18,12 @@ func projectArgs() []any {
 	return append(scrubbedEnvArgs(), paseoBin, "project", "ls", "--json")
 }
 
+// resolvedProject returns a resolver already holding an answer, so a test can
+// dispatch without arming `paseo project ls`.
+func resolvedProject(project Project) *projectResolver {
+	return &projectResolver{resolved: true, project: project}
+}
+
 // expectProjectLookup arms the shared process mock for one project lookup and
 // returns the result whose expectations the caller sets.
 func expectProjectLookup(t *testing.T, processMock *mocksprocess.Process) *mocksprocess.Result {
@@ -94,7 +100,17 @@ func TestResolveProject(t *testing.T) {
 				result.EXPECT().Failed().Return(false).Once()
 				result.EXPECT().Output().Return(`[{"projectId":"prj_tmp","name":"tmp","path":""}]`).Once()
 			},
-			wantErr: `agent: AGENT_PROJECT_NAME="tmp": that paseo project has no path`,
+			wantErr: `agent: AGENT_PROJECT_NAME="tmp": that paseo project has no id or path`,
+		},
+		{
+			// A blank id would cache a project every later dispatch rejects, so it
+			// is refused here as configuration instead.
+			name: "project without an id",
+			lookup: func(result *mocksprocess.Result) {
+				result.EXPECT().Failed().Return(false).Once()
+				result.EXPECT().Output().Return(`[{"projectId":"","name":"tmp","path":"/tmp"}]`).Once()
+			},
+			wantErr: `agent: AGENT_PROJECT_NAME="tmp": that paseo project has no id or path`,
 		},
 	}
 
@@ -180,6 +196,17 @@ func TestProjectResolverDoesNotCacheFailure(t *testing.T) {
 	require.Equal(t, Project{ID: "prj_tmp", Path: "/tmp"}, project)
 
 	processMock.AssertExpectations(t)
+}
+
+func TestSharedProjectResolverIsReused(t *testing.T) {
+	first := sharedProjectResolver(paseoBin, "shared-test")
+	second := sharedProjectResolver(paseoBin, "shared-test")
+
+	require.Same(t, first, second)
+
+	// Another name gets its own resolver, so one project's cache cannot answer
+	// a lookup for a different one.
+	require.NotSame(t, first, sharedProjectResolver(paseoBin, "shared-test-other"))
 }
 
 func TestResolvedProjectSkipsLookup(t *testing.T) {

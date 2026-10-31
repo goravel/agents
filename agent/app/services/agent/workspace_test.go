@@ -11,7 +11,7 @@ import (
 
 func TestRunDir(t *testing.T) {
 	t0 := time.Date(2026, time.October, 18, 14, 32, 5, 0, time.UTC)
-	ts := t0.UTC().Format(checkoutTimeLayout)
+	ts := t0.UTC().Format(runTimeLayout)
 
 	require.Equal(t, filepath.Join("/tmp", "goravel-goravel-"+ts), runDir("/tmp", "goravel/goravel", t0))
 	require.Equal(t, "/srv/code/goravel-framework-"+ts, runDir("/srv/code", "goravel/framework", t0))
@@ -30,15 +30,15 @@ func TestPrepareRunDir(t *testing.T) {
 	require.ErrorContains(t, prepareRunDir(filepath.Join(blocker, "run")), "create run directory")
 }
 
-func TestCheckoutNameFlattensRepository(t *testing.T) {
+func TestRunDirNameFlattensRepository(t *testing.T) {
 	t0 := time.Date(2026, time.October, 18, 14, 32, 5, 0, time.UTC)
-	ts := t0.UTC().Format(checkoutTimeLayout)
+	ts := t0.UTC().Format(runTimeLayout)
 
-	require.Equal(t, "goravel-goravel-"+ts, checkoutName("goravel/goravel", t0))
+	require.Equal(t, "goravel-goravel-"+ts, runDirName("goravel/goravel", t0))
 
 	// Flattening removes the separator, so a hostile repository value cannot
 	// escape the project folder.
-	flattened := checkoutName("../evil", t0)
+	flattened := runDirName("../evil", t0)
 	require.Equal(t, "..-evil-"+ts, flattened)
 	require.NotContains(t, flattened, "/")
 	require.NotContains(t, flattened, string(filepath.Separator))

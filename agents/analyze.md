@@ -42,23 +42,32 @@ repository out when this session started, so the session's working directory is 
 
 ```bash
 WORKTREE_DIR=$(pwd)
+git -C "$WORKTREE_DIR" rev-parse --show-toplevel >/dev/null 2>&1 || {
+  echo "workspace not prepared: paseo's setup did not check this repository out"; exit 1
+}
 if [ "$(git -C "$WORKTREE_DIR" rev-parse --is-shallow-repository)" = true ]; then
   git -C "$WORKTREE_DIR" fetch --unshallow --no-tags origin >/dev/null 2>&1 || true
 fi
 git -C "$WORKTREE_DIR" fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || true
 ```
 
-- Keep it all: this flow removes nothing. paseo owns the checkout, and a later run reuses it.
-- Keep the PR number from the `PR:` line as `PR_NUM`, then resolve the base branch and read the diff,
-  because the refresh above made every `origin/*` branch resolve:
+- A printed message → report it and stop. Never clone the repository yourself: paseo's setup owns the
+  checkout, and every run gets its own directory under the project folder.
+- Keep the PR number from the `PR:` line as `PR_NUM`, then move `HEAD` onto the pull request's head branch
+  and read the diff. `gh pr checkout` is what fetches `refs/pull/<n>/head`, so the diff is the pull
+  request's own change, not the base branch against itself:
 
 ```bash
 PR_NUM=<number>
+gh pr checkout "$PR_NUM"
 BASE_BRANCH=$(gh pr view "$PR_NUM" --json baseRefName --jq '.baseRefName')
+git -C "$WORKTREE_DIR" symbolic-ref --quiet --short HEAD
 git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD --stat
 git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD
 ```
 
+- That `symbolic-ref` must print a branch name: an empty one means `HEAD` is detached, so report it and
+  stop rather than analyzing the wrong tree.
 - Context, read-only — the body and the issue feed the usage block and the Laravel comparison:
 
 ```bash
@@ -109,7 +118,7 @@ section carries no body.
 
 Shape:
 
-- `runDir` gained `root` → 1 caller → pass `project.Path`, `workspace.go:24`
+- `runDir` gained `root` → 1 caller → pass `project.Path`, `workspace.go:19`
 
 ## 4. Answer 2 — how to use it
 

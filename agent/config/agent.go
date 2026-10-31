@@ -17,8 +17,9 @@ func init() {
 		// Name of the paseo project every run workspace is created in; its folder
 		// holds the per-run directories paseo's setup checks the repository out
 		// into. The id is resolved lazily with `paseo project ls --json` on the
-		// first mention that needs a workspace. Blank is a configuration error.
-		"project_name": config.Env("AGENT_PROJECT_NAME", "tmp"),
+		// first mention that needs a workspace. There is no default: a blank value
+		// is a configuration error the poller refuses to start with.
+		"project_name": config.Env("AGENT_PROJECT_NAME", ""),
 
 		// Comma-separated GitHub senders allowed to trigger agent runs. Required:
 		// the poller refuses to run when this is empty.
