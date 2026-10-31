@@ -110,7 +110,7 @@ section carries no body.
 
 Shape:
 
-- `Checkouter.Ensure` gained `dir` → 2 callers → pass `runDir(...)`, `workspace.go:91`
+- `Client.Fetch` gained a `ctx` argument → 2 callers → pass the caller's context, `file.go:42`
 
 ## 4. Answer 2 — how to use it
 

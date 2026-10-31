@@ -20,7 +20,7 @@ func TestPollEventsHandle(t *testing.T) {
 	configMock := factory.Config()
 	configMock.EXPECT().GetString("agent.base_url").Return("http://relay.test/webhooks/events").Once()
 	configMock.EXPECT().GetString("agent.api_token").Return("token").Once()
-	configMock.EXPECT().GetString("agent.workspace").Return("/tmp/ws").Once()
+	configMock.EXPECT().GetString("agent.project_name").Return("tmp").Once()
 	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen").Once()
 	configMock.EXPECT().Get("agent.models").Return(map[string]string{
 		constants.AgentShip:    "opencode-go/deepseek-v4.1-flash#high",
@@ -61,5 +61,29 @@ func TestPollEventsHandleRejectsEmptySenders(t *testing.T) {
 	command := &PollEvents{}
 	require.EqualError(t, command.Handle(nil), "agent: AGENT_ALLOWED_SENDERS must not be empty")
 
+	configMock.AssertExpectations(t)
+}
+
+func TestPollEventsHandleRejectsBlankProjectName(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+
+	configMock := factory.Config()
+	configMock.EXPECT().GetString("agent.allowed_senders").Return("bowen").Once()
+	configMock.EXPECT().Get("agent.models").Return(map[string]string{
+		constants.AgentShip:    "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentReview:  "opencode-go/deepseek-v4.1-flash#high",
+		constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high",
+	}).Once()
+	configMock.EXPECT().GetString("agent.project_name").Return("").Once()
+
+	// The blank name is rejected before any relay request, so the client is
+	// never touched.
+	httpMock := factory.Http()
+
+	command := &PollEvents{}
+	require.EqualError(t, command.Handle(nil), "agent: AGENT_PROJECT_NAME must name a paseo project")
+
+	httpMock.AssertNotCalled(t, "Get", testifymock.Anything)
 	configMock.AssertExpectations(t)
 }

@@ -25,14 +25,16 @@ func (c *PollEvents) Extend() command.Extend {
 	return command.Extend{}
 }
 
-// Handle runs one poll cycle.
+// Handle runs one poll cycle. The paseo project behind AGENT_PROJECT_NAME is
+// resolved on the first mention that needs a workspace; when that lookup or a
+// workspace create fails, the cycle stops with the error and no event of the page
+// is acknowledged: the whole page stays queued and the scheduler retries on the
+// next tick. A failed `paseo run` only spends the event's retry budget.
 func (c *PollEvents) Handle(ctx console.Context) error {
 	service, err := agent.NewService()
 	if err != nil {
 		return err
 	}
 
-	service.Poll(ctx)
-
-	return nil
+	return service.Poll(ctx)
 }

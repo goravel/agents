@@ -28,16 +28,15 @@ const (
 
 // Service polls the relay for @goravel-agent mentions and dispatches agents.
 //
-// The router, dispatcher, checkouter, retry tracker, handle store and reactor
-// are injected because their policies (agent choice, CLI invocation, checkout,
-// retry cap, dedupe, acknowledgement) are the interesting parts to substitute in
-// tests. The HTTP client and logger are resolved from the global facades on
-// purpose: they are framework singletons and the app facades are the supported
-// way to reach them.
+// The router, dispatcher, retry tracker, handle store and reactor are injected
+// because their policies (agent choice, CLI invocation, retry cap, dedupe,
+// acknowledgement) are the interesting parts to substitute in tests. The paseo
+// project is resolved lazily from configuration. The HTTP client and logger are
+// resolved from the global facades on purpose: they are framework singletons and
+// the app facades are the supported way to reach them.
 type Service struct {
 	router     AgentRouter
 	dispatcher Dispatcher
-	checkouts  Checkouter
 	retry      RetryTracker
 	handles    HandleStore
 
@@ -48,22 +47,26 @@ type Service struct {
 	mention string
 
 	apiToken string
-	// workspaceRoot is the symlink-resolved workspace root.
-	workspaceRoot string
-	eventsURL     string
+	// paseo runs every paseo CLI call and lazily resolves the project every run
+	// workspace is created in (AGENT_PROJECT_NAME). It is the same instance the
+	// dispatcher uses, so the lookup is paid once per process.
+	paseo     *Paseo
+	eventsURL string
 
 	// allowedSenders restricts which GitHub senders may trigger an agent run
 	// (AGENT_ALLOWED_SENDERS). It is validated non-empty in NewService.
 	allowedSenders map[string]struct{}
 
-	// now returns the current time; injected so the per-run checkout name is
+	// now returns the current time; injected so the per-run directory name is
 	// deterministic in tests.
 	now func() time.Time
 }
 
 // NewService wires a Service from application configuration. It fails when
 // AGENT_ALLOWED_SENDERS is empty, since running with no allowlist would let
-// any GitHub sender trigger agent runs.
+// any GitHub sender trigger agent runs, and when AGENT_PROJECT_NAME is blank.
+// It runs no subprocess: the project itself is resolved on the first mention
+// that needs a workspace.
 func NewService() (*Service, error) {
 	config := facades.Config()
 
@@ -77,6 +80,11 @@ func NewService() (*Service, error) {
 		return nil, err
 	}
 
+	name := config.GetString("agent.project_name")
+	if name == "" {
+		return nil, errors.New("agent: AGENT_PROJECT_NAME must name a paseo project")
+	}
+
 	// The empty base URL keeps go-github's default (https://api.github.com/).
 	reactor, err := newGitHubReactor(
 		config.GetString("agent.github_token"),
@@ -87,16 +95,17 @@ func NewService() (*Service, error) {
 		return nil, err
 	}
 
+	paseo := sharedPaseo(paseoBin, name)
+
 	return &Service{
 		router:         newAIRouter(),
-		dispatcher:     newOpencodeDispatcher(models),
-		checkouts:      newGitCheckouter(),
+		dispatcher:     newOpencodeDispatcher(paseo, models),
 		retry:          newCacheRetryTracker(),
 		handles:        newCacheHandleStore(),
 		reactor:        reactor,
 		mention:        normalizeMention(config.GetString("agent.mention")),
 		apiToken:       config.GetString("agent.api_token"),
-		workspaceRoot:  resolveWorkspace(config.GetString("agent.workspace")),
+		paseo:          paseo,
 		eventsURL:      strings.TrimRight(config.GetString("agent.base_url"), "/"),
 		allowedSenders: senders,
 		now:            time.Now,
@@ -111,9 +120,13 @@ func (s *Service) allowed(sender string) bool {
 	return ok
 }
 
-// Poll fetches one page of events, handles every mention, and deletes the
-// events it has drained.
-func (s *Service) Poll(ctx context.Context) {
+// Poll fetches one page of events, handles every mention, and deletes the events
+// it has drained. It returns an error only for a failure that replaying the page
+// cannot fix — a failing paseo project lookup or workspace create — so the caller
+// can surface it. On that error no event is acknowledged: the whole page stays on
+// the relay, is re-read next tick and skipped through the handle store once the
+// failure is fixed.
+func (s *Service) Poll(ctx context.Context) error {
 	response, err := facades.Http().
 		WithContext(ctx).
 		WithQueryParameters(map[string]string{
@@ -125,25 +138,25 @@ func (s *Service) Poll(ctx context.Context) {
 		Get(s.eventsURL)
 	if err != nil {
 		facades.Log().Errorf("agent: fetch events: %v", err)
-		return
+		return nil
 	}
 	if response.Failed() {
 		facades.Log().Errorf("agent: fetch events: status %d", response.Status())
 		// Drain the body so the connection is released.
 		_, _ = response.Body()
-		return
+		return nil
 	}
 
 	body, err := response.Body()
 	if err != nil {
 		facades.Log().Errorf("agent: read events response: %v", err)
-		return
+		return nil
 	}
 
 	env, err := parseEnvelope([]byte(body))
 	if err != nil {
 		facades.Log().Errorf("agent: parse events envelope: %v", err)
-		return
+		return nil
 	}
 
 	toDelete := make([]uint64, 0, len(env.Data))
@@ -188,6 +201,16 @@ func (s *Service) Poll(ctx context.Context) {
 
 		if err := s.handle(ctx, ev, instruction); err != nil {
 			facades.Log().Errorf("agent: handle event %d: %v", ev.ID, err)
+
+			// A failing project lookup or workspace create is not a transient
+			// event failure: it would fail for every event of the page, so nothing
+			// is acknowledged, the whole page stays queued, and the error is
+			// surfaced instead of burning the event's retries.
+			var paseoErr paseoError
+			if errors.As(err, &paseoErr) {
+				return paseoErr
+			}
+
 			if !s.retry.RecordFailure(key) {
 				continue
 			}
@@ -204,36 +227,52 @@ func (s *Service) Poll(ctx context.Context) {
 	}
 
 	s.deleteEvents(ctx, toDelete)
+
+	return nil
 }
 
 // handle routes the instruction to an agent, resolves the target repository and
-// the run title, and runs the agent against its checkout. A routed title wins;
-// when the router returns none, the run is named after the issue or pull request
-// the mention came from.
+// the run title, and dispatches the agent into a fresh run directory under the
+// paseo project. A routed title wins; when the router returns none, the run is
+// named after the issue or pull request the mention came from.
 func (s *Service) handle(ctx context.Context, ev *event, instruction string) error {
 	// The router sees the source repository; the agent sees the target.
 	agent, repository, title, err := s.router.Route(ctx, ev.prompt(instruction, ev.Repository))
 	if err != nil {
 		return err
 	}
-	// A missing AI title still names the run: PR #42 / Issue #123.
+	// A missing AI title still names the run: PR #42 / Issue #123, then
+	// "<agent> in <owner>/<repo>" when the payload carries no number either,
+	// because the dispatcher always creates a titled workspace.
 	if title == "" {
 		title = ev.defaultTitle()
 	}
 	if repository == "" {
 		repository = ev.Repository
 	}
+	if title == "" {
+		title = fallbackTitle(agent, repository)
+	}
 
-	dir := runDir(s.workspaceRoot, repository, s.now())
-	if err := s.checkouts.Ensure(ctx, dir, repository); err != nil {
+	project, err := s.paseo.Project(ctx)
+	if err != nil {
+		return err
+	}
+
+	// The poller only makes the empty run directory: paseo starts the primary
+	// agent there, and the agent's `setup` subagent clones the repository and
+	// creates the run's worktree.
+	dir := runDir(project.Path, repository, s.now())
+	if err := prepareRunDir(dir); err != nil {
 		return err
 	}
 
 	return s.dispatcher.Run(ctx, dispatch.Request{
-		Dir:    dir,
-		Agent:  agent,
-		Prompt: ev.agentPrompt(agent, instruction),
-		Title:  title,
+		Dir:     dir,
+		Project: project.ID,
+		Agent:   agent,
+		Prompt:  ev.agentPrompt(agent, instruction),
+		Title:   title,
 	})
 }
 

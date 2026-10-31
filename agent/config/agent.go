@@ -1,9 +1,6 @@
 package config
 
 import (
-	"os"
-	"path/filepath"
-
 	"goravel/app/constants"
 	"goravel/app/facades"
 )
@@ -17,9 +14,13 @@ func init() {
 		// Token sent as the X-Api-Token header on every relay request.
 		"api_token": config.Env("AGENT_API_TOKEN", ""),
 
-		// Directory holding repository checkouts; repositories are cloned here on
-		// demand. Defaults to a `goravel-agent` directory under the system temp dir.
-		"workspace": config.Env("AGENT_WORKSPACE", filepath.Join(os.TempDir(), "goravel-agent")),
+		// Name of the paseo project every run workspace is created in; its folder
+		// holds the empty per-run directories. The run's `setup` subagent clones
+		// the repository inside one and creates the run's worktree. The id is
+		// resolved lazily with `paseo project ls --json` on the first mention that
+		// needs a workspace. There is no default: a blank value is a configuration
+		// error the poller refuses to start with.
+		"project_name": config.Env("AGENT_PROJECT_NAME", ""),
 
 		// Comma-separated GitHub senders allowed to trigger agent runs. Required:
 		// the poller refuses to run when this is empty.
