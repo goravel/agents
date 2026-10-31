@@ -82,8 +82,7 @@ The review agent supplies one of two data shapes. Apply the template above to wh
   line after `<summary>` and before `</details>`. Omit the whole block when there are no Nits.
 - **Clean sentinel.** Emit exactly `✅ Review clean — no findings.`, followed by the Verdict
   line(s), when the NEW shape has zero findings, or the NEW + ROUND shape has zero findings and
-  every `[ROUND k]` open count is zero. This string keys the implement orchestrator's convergence
-  check.
+  every `[ROUND k]` open count is zero.
 - The anchor line (`file:line` + **Title**) is the merge/dedupe key and is mandatory; the description
   lines and example block are ignored for matching.
 - **Scope.** A finding must be anchored to a line the reviewed diff adds or modifies (a `+` line),

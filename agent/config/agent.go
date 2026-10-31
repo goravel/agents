@@ -40,10 +40,9 @@ func init() {
 		// Model each agent runs with, keyed by mode: `<model>[#<thinking>]`.
 		// Every routable agent needs an entry.
 		"models": map[string]string{
-			constants.AgentShip:      "opencode-go/deepseek-v4.1-flash#high",
-			constants.AgentImplement: "opencode-go/deepseek-v4.1-flash#high",
-			constants.AgentReview:    "opencode-go/deepseek-v4.1-flash#high",
-			constants.AgentAnalyze:   "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentShip:    "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentReview:  "opencode-go/deepseek-v4.1-flash#high",
+			constants.AgentAnalyze: "opencode-go/deepseek-v4.1-flash#high",
 		},
 	})
 }

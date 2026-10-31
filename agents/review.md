@@ -95,7 +95,7 @@ git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD -U0 | rg '^diff --git
 
 ### 4. Emit
 Load the `goravel-review-template` skill once, then:
-- Count per severity per status and give it the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → it emits `✅ Review clean — no findings.` (this string keys the implement orchestrator's convergence check).
+- Count per severity per status and give it the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → it emits `✅ Review clean — no findings.`
 - Tick resolved findings in prior comments whose endpoint is editable (`issues/comments/{id}` or `pulls/comments/{id}`, recorded as `$COMMENT_ENDPOINT` per comment in the tick set): `[ ]` → `[x]` on the anchor line of each resolved finding, matched by file path + Title, rewriting only the anchor line (`^\s*\d+\.\s*\[ \]\s*` + backticked `path:LINE`). Fetch that comment's current body, rewrite the anchor line there, then PATCH it back to the same endpoint:
 
 ```bash

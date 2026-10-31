@@ -19,7 +19,7 @@ const (
 	// gitCloneURL is the SSH remote prefix for clones; resolved by the runner's
 	// existing SSH configuration.
 	gitCloneURL = "git@github.com:"
-	// cloneDepth keeps only the tip commit; enough for review/plan/implement runs.
+	// cloneDepth keeps only the tip commit; enough for review, plan and ship runs.
 	cloneDepth = "1"
 	// cloneTimeout caps a single clone.
 	cloneTimeout = 5 * time.Minute
