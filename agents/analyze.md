@@ -31,7 +31,7 @@ questions about one pull request and emit one short report:
 
 1. Does it break anything for existing users?
 2. How does a user use the new behavior, and what was it before?
-3. Does the code do what Laravel does?
+3. How does it compare with Laravel?
 
 Report style, everywhere: short words, short sentences, one fact per line. Say what the code does, not
 where it sits — a `path:LINE` only where the reader must open the file to act. Cut any line a reviewer
@@ -162,15 +162,14 @@ After: the same call returns it under `data`; read that key.
 return ctx.Response().Json(200, http.Json{"data": user})
 ```
 
-## 5. Answer 3 — Laravel standard
+## 5. Answer 3 — Laravel comparison
 
-Laravel is the model Goravel copies. For each thing this PR changes that a user can call or see, put the
-Goravel code next to the Laravel code and say whether the two agree.
+For each thing this PR changes that a user can call or see, compare the Goravel code with Laravel's and
+say where they agree and where they differ. Neither side is the reference: the reader wants the delta.
 
 Skip this answer — no heading, no verdict, no network call — when the diff changes no exported Go API and
 no user-facing behavior: prompts, docs, CI, comments, tests, or an internal refactor that leaves the
-public surface alone. `No Laravel equivalent` is the other case: the PR is user-facing, but Laravel has
-nothing like it.
+public surface alone.
 
 Scope: the exported Go API and the behavior a user sees — facade and method names, argument order,
 config keys, exception types, defaults, edge behavior. Not internal Go style: file layout, error
@@ -204,40 +203,41 @@ comparison, so a reader can re-run the check.
 
 ### Pick the verdict
 
-Ask these three questions in order, and stop at the first yes. They pick between the three comparison
-verdicts; the last two bullets cover the cases they do not reach.
+Two cases come before the questions: Laravel has no counterpart, or you could not reach it.
+
+- `No Laravel equivalent` — the PR is user-facing and Laravel has no counterpart; the caption names the
+  closest concept.
+- `Not checked` — the docs and the source could not be reached, so that thing is not compared.
+  Goravel-side context cannot stand in for either. Say in one line what you tried.
+
+Otherwise ask two questions in order, and stop at the first yes:
 
 1. Does the result differ — another value, another default, another error, another edge case? → `Deviates`
-2. Does the name or the argument list differ? → `Partially matches`
-3. Neither differs → `Matches`
+2. Does the name, the argument list, or the way a value comes back differ? → `Partially matches`
 
-- `Matches` — same name, same argument list, same result.
-- `Partially matches` — same job, under another name, with a different argument list, or with a value
-  returned another way.
-- `Deviates` — same idea, but the result, a default, or an edge case differs from Laravel.
-- `No Laravel equivalent` — the PR is user-facing and Laravel has no counterpart; name the closest
-  concept in the same line.
-- `Not checked` — the docs and the source could not be reached; Goravel-side context cannot stand in
-  for either. Say in one line what you tried.
+Neither yes → `Matches`.
+
+`Deviates` does not have to be the opposite: any different result, default, error, or edge case counts.
 
 ### Show the comparison
 
-One block per thing the PR touches, in diff order. Each block is a caption line, then two short fences
-on the same example — Goravel first, Laravel second:
+One block per thing the PR touches, in diff order: a caption line, then fences on the same example —
+Goravel first, Laravel second:
 
 ```text
 <Verdict> — <Goravel thing> ↔ <Laravel thing> (laravel/framework@<ref>) — <match or difference>, <reference>
 ```
 
 Rules for every block:
-- Both fences, always, except `No Laravel equivalent` and `Not checked`. For `No Laravel equivalent`:
-  the Goravel fence alone, with the closest concept named in the caption.
-- One to three lines per fence: the call that shows the difference, not the whole function.
+- One to three lines per fence: the call that shows the comparison, not the whole function.
 - Same example on both sides — the same route, the same key, the same call.
+- Both fences, always — Goravel first, Laravel second — except the two cases below.
+- `No Laravel equivalent`: the Goravel fence alone, with `↔ <Laravel thing>` dropped from the caption and
+  the closest concept named there instead.
+- `Not checked`: no fence, no `↔`, no ref — one line saying what failed.
 - Real code only: the Goravel side from the diff, the Laravel side from the page or file you opened.
   Never invent a call to fill a fence.
 - The caption carries the evidence for the verdict: the ref and one reference URL.
-- `Not checked`: no fence, one line saying what failed.
 
 Shape, `Matches` — route registration:
 
@@ -266,18 +266,21 @@ facades.Orm().Query().Model(&models.User{}).Paginate(1, 15, &users, &total)
 $users = User::paginate(15);
 ```
 
-Shape, `Deviates` — page size default:
+Shape, `Deviates` — session store default:
 
-`Deviates` — `PER_PAGE` default `20` ↔ `User::paginate()` (laravel/framework@<ref>) — Laravel shows 15
-rows when no size is passed; this default shows 20, so the same call returns a different page,
-https://laravel.com/docs/pagination
+`Deviates` — `session.default` = `file` ↔ `config('session.driver')` = `database`
+(laravel/framework@<ref>) — same job, different key name and a different default: Laravel keeps sessions
+in the database, Goravel on disk, so the same app stores them in a different place,
+https://laravel.com/docs/session
 
 ```go
-"per_page": config.Env("PER_PAGE", "20"),
+// config/session.go
+"default": "file",
 ```
 
 ```php
-$users = User::paginate(); // 15 rows
+// config/session.php
+'driver' => env('SESSION_DRIVER', 'database'),
 ```
 
 Shape, `No Laravel equivalent` — Docker test database:
@@ -310,16 +313,15 @@ Headings and order are fixed:
 
 ## 1. Breaking changes — <No breaking changes|N found>
 ## 2. How to use it
-## 3. Laravel standard — <Matches|Partially matches|Deviates|No Laravel equivalent|Not checked>
+## 3. Laravel comparison — <Matches|Partially matches|Deviates|No Laravel equivalent|Not checked>
 ```
 
 - §3 is conditional: drop its heading when the skip rule in §5 applies, and end the report at §2.
   Never leave an empty `## 3.` heading.
-- §3 carries one verdict, in the heading: `No Laravel equivalent` and `Not checked` drop out first, then
-  the strongest remaining block wins — `Deviates` over `Partially matches` over `Matches`. Use
-  `No Laravel equivalent` when every block has no counterpart, and `Not checked` only when nothing could
-  be checked. Each block repeats its own verdict, so a reader sees which thing matches and which one
-  does not.
+- §3 carries one verdict, in the heading. Take the strongest verdict the blocks contain — `Deviates` >
+  `Partially matches` > `Matches` > `No Laravel equivalent` — and `Not checked` only when every block is
+  `Not checked`; it never sets the heading while any block is checked. Each block repeats its own verdict,
+  so a reader sees which thing matches and which one does not.
 - Each section uses the shape its rule above shows; add no section, intro, or closing line.
 - No severity, no checkboxes, no round markers — this is not a review. The single exception is the
   `<!-- goravel-agent: analysis -->` marker, which is identity, not a round.
