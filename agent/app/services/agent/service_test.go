@@ -70,7 +70,7 @@ var checkoutTime = time.Date(2026, time.October, 18, 14, 32, 5, 0, time.UTC)
 type testConfig struct {
 	baseURL        string
 	apiToken       string
-	projects       *projectResolver
+	paseo          *Paseo
 	mention        string
 	allowedSenders map[string]struct{}
 	now            func() time.Time
@@ -87,7 +87,7 @@ func newTestService(router AgentRouter, dispatcher Dispatcher, retry RetryTracke
 		reactor:        reactor,
 		mention:        cfg.mention,
 		apiToken:       cfg.apiToken,
-		projects:       cfg.projects,
+		paseo:          cfg.paseo,
 		eventsURL:      strings.TrimRight(cfg.baseURL, "/"),
 		allowedSenders: cfg.allowedSenders,
 		now:            cfg.now,
@@ -99,7 +99,7 @@ func relayConfig(apiToken string) testConfig {
 	return testConfig{
 		baseURL:        relayEventsBaseURL,
 		apiToken:       apiToken,
-		projects:       resolvedProject(Project{ID: "prj_tmp", Path: "/tmp/ws"}),
+		paseo:          resolvedPaseo(Project{ID: "prj_tmp", Path: "/tmp/ws"}),
 		mention:        DefaultMention,
 		allowedSenders: parseSenders("bowen"),
 		now:            func() time.Time { return checkoutTime },
@@ -263,7 +263,7 @@ func TestServicePollKeepsEventWhenRunDirFails(t *testing.T) {
 	require.NoError(t, os.WriteFile(blocker, nil, 0o644))
 
 	cfg := relayConfig("token")
-	cfg.projects = resolvedProject(Project{ID: "prj_tmp", Path: blocker})
+	cfg.paseo = resolvedPaseo(Project{ID: "prj_tmp", Path: blocker})
 
 	service := newTestService(router, dispatcher, retry, handles, reactor, cfg)
 	require.NoError(t, service.Poll(context.Background()))
@@ -689,9 +689,11 @@ func TestNewServiceReadsConfig(t *testing.T) {
 	require.Equal(t, "@bot", service.mention)
 	require.Equal(t, models, service.dispatcher.(*opencodeDispatcher).models)
 	require.IsType(t, &cacheHandleStore{}, service.handles)
-	require.IsType(t, &projectResolver{}, service.projects)
-	require.Equal(t, "tmp", service.projects.name)
-	require.False(t, service.projects.resolved, "NewService must not resolve the project")
+	require.IsType(t, &Paseo{}, service.paseo)
+	require.Equal(t, "tmp", service.paseo.name)
+	require.False(t, service.paseo.resolved, "NewService must not resolve the project")
+	require.Same(t, service.paseo, service.dispatcher.(*opencodeDispatcher).paseo,
+		"the dispatcher must share the service's project cache")
 	require.NotNil(t, service.now)
 	require.IsType(t, &githubReactor{}, service.reactor)
 	require.NotNil(t, service.reactor.(*githubReactor).client)
@@ -1489,7 +1491,7 @@ func TestServicePollResolvesProjectOnFirstDispatch(t *testing.T) {
 	handles.EXPECT().Mark("d-1").Once()
 
 	cfg := relayConfig("token")
-	cfg.projects = newProjectResolver(paseoBin, "tmp")
+	cfg.paseo = newPaseo(paseoBin, "tmp")
 
 	service := newTestService(router, dispatcher, retry, handles, expectReaction(t, "goravel/goravel", reactionCollectionIssue, 24680), cfg)
 	require.NoError(t, service.Poll(context.Background()))
@@ -1551,7 +1553,7 @@ func TestServicePollCachesProjectAcrossMentions(t *testing.T) {
 		Once()
 
 	cfg := relayConfig("token")
-	cfg.projects = newProjectResolver(paseoBin, "tmp")
+	cfg.paseo = newPaseo(paseoBin, "tmp")
 
 	service := newTestService(router, dispatcher, retry, handles, reactor, cfg)
 	require.NoError(t, service.Poll(context.Background()))
@@ -1560,16 +1562,15 @@ func TestServicePollCachesProjectAcrossMentions(t *testing.T) {
 	httpMock.AssertExpectations(t)
 }
 
-// TestServicePollStopsOnProjectError pins the partial acknowledgement: a
-// non-mention ahead of the failing mention is already drained, so it is
-// acknowledged, while the mention keeps its retries and stays on the relay.
-func TestServicePollStopsOnProjectError(t *testing.T) {
+// TestServicePollStopsOnPaseoError pins that a failing project lookup is fatal
+// for the page: the error comes back, no event is acknowledged — not even the
+// non-mention already drained ahead of the mention — and no retry is consumed.
+func TestServicePollStopsOnPaseoError(t *testing.T) {
 	factory := mock.Factory()
 	factory.Log()
 	processMock := factory.Process()
 	httpMock := factory.Http()
 	getResp := mockshttp.NewResponse(t)
-	deleteResp := mockshttp.NewResponse(t)
 
 	result := expectProjectLookup(t, processMock)
 	result.EXPECT().Failed().Return(true).Once()
@@ -1577,7 +1578,7 @@ func TestServicePollStopsOnProjectError(t *testing.T) {
 	result.EXPECT().ErrorOutput().Return("daemon down").Once()
 
 	// Event 1 carries no mention, so the page drains it before event 2 reaches
-	// the project lookup.
+	// the project lookup; it must still be left on the relay.
 	page := `{"data":[
 		{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issues","action":"opened","repository":"goravel/goravel","payload":"{\"number\":5,\"issue\":{\"number\":5,\"body\":\"nothing to see\"}}"},
 		{"id":2,"delivery_id":"d-2","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"number\":123,\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"}
@@ -1585,14 +1586,11 @@ func TestServicePollStopsOnProjectError(t *testing.T) {
 
 	getResp.EXPECT().Failed().Return(false).Once()
 	getResp.EXPECT().Body().Return(page, nil).Once()
-	deleteResp.EXPECT().Body().Return("", nil).Once()
-	deleteResp.EXPECT().Failed().Return(false).Once()
 
-	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Times(2)
+	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Once()
 	httpMock.EXPECT().WithQueryParameters(relayQueryParams).Return(httpMock).Once()
-	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Times(2)
+	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Once()
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
-	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
 
 	router := mocksagent.NewAgentRouter(t)
 	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).
@@ -1600,28 +1598,70 @@ func TestServicePollStopsOnProjectError(t *testing.T) {
 		Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
-	// A failed lookup consumes no retry attempt and marks nothing: the event is
-	// replayed once the project is fixed.
+	// A failed lookup consumes no retry attempt and marks nothing: the page is
+	// re-read once the project is fixed.
 	retry := mocksagent.NewRetryTracker(t)
 	handles := mocksagent.NewHandleStore(t)
 	handles.EXPECT().Has("d-2").Return(false).Once()
 
 	cfg := relayConfig("token")
-	cfg.projects = newProjectResolver(paseoBin, "tmp")
+	cfg.paseo = newPaseo(paseoBin, "tmp")
 
 	service := newTestService(router, dispatcher, retry, handles, expectReaction(t, "goravel/goravel", reactionCollectionIssue, 24680), cfg)
 
 	err := service.Poll(context.Background())
 
-	var projectErr projectError
-	require.ErrorAs(t, err, &projectErr)
+	var paseoErr paseoError
+	require.ErrorAs(t, err, &paseoErr)
 	require.ErrorContains(t, err, `AGENT_PROJECT_NAME="tmp"`)
 	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
 	retry.AssertNotCalled(t, "RecordFailure", testifymock.Anything)
 	handles.AssertNotCalled(t, "Mark", testifymock.Anything)
-	// Only the drained event is acknowledged; the mention stays queued.
-	httpMock.AssertNumberOfCalls(t, "Delete", 1)
-	httpMock.AssertNotCalled(t, "Delete", "http://relay.test/webhooks/events/2", testifymock.Anything)
+	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
+	httpMock.AssertExpectations(t)
+}
+
+// TestServicePollStopsOnWorkspaceCreateError pins the other fatal paseo failure:
+// a wrapped workspace create stops the page the same way, with nothing
+// acknowledged and no retry consumed, while an ordinary run failure keeps its
+// retry budget (TestServicePollKeepsFailedEventWhenRetryNotExceeded).
+func TestServicePollStopsOnWorkspaceCreateError(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+	httpMock := factory.Http()
+	getResp := mockshttp.NewResponse(t)
+
+	getResp.EXPECT().Failed().Return(false).Once()
+	getResp.EXPECT().Body().Return(mentionOnlyEnvelope, nil).Once()
+
+	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Once()
+	httpMock.EXPECT().WithQueryParameters(relayQueryParams).Return(httpMock).Once()
+	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Once()
+	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
+
+	router := mocksagent.NewAgentRouter(t)
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).
+		Return(constants.AgentReview, "goravel/goravel", "", nil).
+		Once()
+
+	createErr := paseoError{err: errors.New("paseo workspace create failed (exit 1): daemon down")}
+	dispatcher := mocksagent.NewDispatcher(t)
+	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(createErr).Once()
+
+	retry := mocksagent.NewRetryTracker(t)
+	handles := mocksagent.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+
+	service := newTestService(router, dispatcher, retry, handles, expectReaction(t, "goravel/goravel", reactionCollectionIssue, 24680), relayConfig("token"))
+
+	err := service.Poll(context.Background())
+
+	var paseoErr paseoError
+	require.ErrorAs(t, err, &paseoErr)
+	require.ErrorContains(t, err, "paseo workspace create failed")
+	retry.AssertNotCalled(t, "RecordFailure", testifymock.Anything)
+	handles.AssertNotCalled(t, "Mark", testifymock.Anything)
+	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
 
@@ -1678,12 +1718,12 @@ func TestServicePollRetriesFailedProjectLookup(t *testing.T) {
 		Once()
 
 	cfg := relayConfig("token")
-	cfg.projects = newProjectResolver(paseoBin, "tmp")
+	cfg.paseo = newPaseo(paseoBin, "tmp")
 
 	service := newTestService(router, dispatcher, retry, handles, reactor, cfg)
 
-	var projectErr projectError
-	require.ErrorAs(t, service.Poll(context.Background()), &projectErr)
+	var paseoErr paseoError
+	require.ErrorAs(t, service.Poll(context.Background()), &paseoErr)
 
 	// A failed lookup is not cached, so the next tick retries and dispatches.
 	require.NoError(t, service.Poll(context.Background()))

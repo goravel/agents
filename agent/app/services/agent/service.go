@@ -47,10 +47,10 @@ type Service struct {
 	mention string
 
 	apiToken string
-	// projects lazily resolves the paseo project every run workspace is created
-	// in (AGENT_PROJECT_NAME). The first mention that needs a workspace pays the
-	// lookup; later mentions reuse it.
-	projects  *projectResolver
+	// paseo runs every paseo CLI call and lazily resolves the project every run
+	// workspace is created in (AGENT_PROJECT_NAME). It is the same instance the
+	// dispatcher uses, so the lookup is paid once per process.
+	paseo     *Paseo
 	eventsURL string
 
 	// allowedSenders restricts which GitHub senders may trigger an agent run
@@ -95,15 +95,17 @@ func NewService() (*Service, error) {
 		return nil, err
 	}
 
+	paseo := sharedPaseo(paseoBin, name)
+
 	return &Service{
 		router:         newAIRouter(),
-		dispatcher:     newOpencodeDispatcher(models),
+		dispatcher:     newOpencodeDispatcher(paseo, models),
 		retry:          newCacheRetryTracker(),
 		handles:        newCacheHandleStore(),
 		reactor:        reactor,
 		mention:        normalizeMention(config.GetString("agent.mention")),
 		apiToken:       config.GetString("agent.api_token"),
-		projects:       sharedProjectResolver(paseoBin, name),
+		paseo:          paseo,
 		eventsURL:      strings.TrimRight(config.GetString("agent.base_url"), "/"),
 		allowedSenders: senders,
 		now:            time.Now,
@@ -119,9 +121,11 @@ func (s *Service) allowed(sender string) bool {
 }
 
 // Poll fetches one page of events, handles every mention, and deletes the events
-// it has drained. It returns an error only for a failure that retrying cannot
-// fix — today, the paseo project lookup — so the caller can surface it and the
-// unhandled events stay on the relay for the next tick.
+// it has drained. It returns an error only for a failure that replaying the page
+// cannot fix — a failing paseo project lookup or workspace create — so the caller
+// can surface it. On that error no event is acknowledged: the whole page stays on
+// the relay, is re-read next tick and skipped through the handle store once the
+// failure is fixed.
 func (s *Service) Poll(ctx context.Context) error {
 	response, err := facades.Http().
 		WithContext(ctx).
@@ -198,14 +202,13 @@ func (s *Service) Poll(ctx context.Context) error {
 		if err := s.handle(ctx, ev, instruction); err != nil {
 			facades.Log().Errorf("agent: handle event %d: %v", ev.ID, err)
 
-			// A bad project is configuration, not a transient event failure:
-			// acknowledge only what this page already handled, keep the rest,
-			// and surface the error instead of burning the event's retries.
-			var projectErr projectError
-			if errors.As(err, &projectErr) {
-				s.deleteEvents(ctx, toDelete)
-
-				return projectErr
+			// A failing project lookup or workspace create is not a transient
+			// event failure: it would fail for every event of the page, so nothing
+			// is acknowledged, the whole page stays queued, and the error is
+			// surfaced instead of burning the event's retries.
+			var paseoErr paseoError
+			if errors.As(err, &paseoErr) {
+				return paseoErr
 			}
 
 			if !s.retry.RecordFailure(key) {
@@ -251,7 +254,7 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 		title = fallbackTitle(agent, repository)
 	}
 
-	project, err := s.projects.Project(ctx)
+	project, err := s.paseo.Project(ctx)
 	if err != nil {
 		return err
 	}

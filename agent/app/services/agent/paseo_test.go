@@ -21,10 +21,10 @@ func projectArgs() []any {
 	return append(scrubbedEnvArgs(), paseoBin, "project", "ls", "--json")
 }
 
-// resolvedProject returns a resolver already holding an answer, so a test can
+// resolvedPaseo returns a client already holding an answer, so a test can
 // dispatch without arming `paseo project ls`.
-func resolvedProject(project Project) *projectResolver {
-	return &projectResolver{resolved: true, project: project}
+func resolvedPaseo(project Project) *Paseo {
+	return &Paseo{resolved: true, project: project}
 }
 
 // expectProjectLookup arms the shared process mock for one project lookup and
@@ -36,7 +36,7 @@ func expectProjectLookup(t *testing.T, processMock *mocksprocess.Process) *mocks
 	result := mocksprocess.NewResult(t)
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
-	processMock.EXPECT().Timeout(projectLookupTimeout).Return(processMock).Once()
+	processMock.EXPECT().Timeout(paseoTimeout).Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
 	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 
@@ -123,7 +123,7 @@ func TestResolveProject(t *testing.T) {
 			result := expectProjectLookup(t, processMock)
 			test.lookup(result)
 
-			got, err := resolveProject(context.Background(), paseoBin, "tmp")
+			got, err := newPaseo(paseoBin, "tmp").resolveProject(context.Background())
 
 			if test.wantErr != "" {
 				require.ErrorContains(t, err, test.wantErr)
@@ -142,14 +142,14 @@ func TestResolveProject(t *testing.T) {
 func TestResolveProjectRejectsBlankName(t *testing.T) {
 	factory := mock.Factory()
 
-	_, err := resolveProject(context.Background(), paseoBin, "")
+	_, err := newPaseo(paseoBin, "").resolveProject(context.Background())
 
 	require.EqualError(t, err, "agent: AGENT_PROJECT_NAME must name a paseo project")
 	// A blank name is answered without paying for a subprocess.
 	factory.App().AssertNotCalled(t, "MakeProcess")
 }
 
-func TestProjectResolverCachesSuccess(t *testing.T) {
+func TestPaseoProjectCachesSuccess(t *testing.T) {
 	processMock := mock.Factory().Process()
 	result := expectProjectLookup(t, processMock)
 	result.EXPECT().Failed().Return(false).Once()
@@ -157,15 +157,15 @@ func TestProjectResolverCachesSuccess(t *testing.T) {
 		Return(`[{"projectId":"prj_tmp","name":"tmp","path":"/tmp"}]`).
 		Once()
 
-	resolver := newProjectResolver(paseoBin, "tmp")
+	paseo := newPaseo(paseoBin, "tmp")
 
-	first, err := resolver.Project(context.Background())
+	first, err := paseo.Project(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, Project{ID: "prj_tmp", Path: "/tmp"}, first)
 
 	// The second call must reuse the answer: the single `.Once()` lookup above
 	// fails the strict mock if it runs again.
-	second, err := resolver.Project(context.Background())
+	second, err := paseo.Project(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, first, second)
 
@@ -173,7 +173,7 @@ func TestProjectResolverCachesSuccess(t *testing.T) {
 	result.AssertExpectations(t)
 }
 
-func TestProjectResolverDoesNotCacheFailure(t *testing.T) {
+func TestPaseoProjectDoesNotCacheFailure(t *testing.T) {
 	processMock := mock.Factory().Process()
 
 	failed := expectProjectLookup(t, processMock)
@@ -187,35 +187,35 @@ func TestProjectResolverDoesNotCacheFailure(t *testing.T) {
 		Return(`[{"projectId":"prj_tmp","name":"tmp","path":"/tmp"}]`).
 		Once()
 
-	resolver := newProjectResolver(paseoBin, "tmp")
+	paseo := newPaseo(paseoBin, "tmp")
 
-	_, err := resolver.Project(context.Background())
-	var projectErr projectError
-	require.ErrorAs(t, err, &projectErr)
+	_, err := paseo.Project(context.Background())
+	var paseoErr paseoError
+	require.ErrorAs(t, err, &paseoErr)
 
 	// A failed lookup is retried on the next mention.
-	project, err := resolver.Project(context.Background())
+	project, err := paseo.Project(context.Background())
 	require.NoError(t, err)
 	require.Equal(t, Project{ID: "prj_tmp", Path: "/tmp"}, project)
 
 	processMock.AssertExpectations(t)
 }
 
-func TestSharedProjectResolverIsReused(t *testing.T) {
-	first := sharedProjectResolver(paseoBin, "shared-test")
-	second := sharedProjectResolver(paseoBin, "shared-test")
+func TestSharedPaseoIsReused(t *testing.T) {
+	first := sharedPaseo(paseoBin, "shared-test")
+	second := sharedPaseo(paseoBin, "shared-test")
 
 	require.Same(t, first, second)
 
-	// Another name gets its own resolver, so one project's cache cannot answer
-	// a lookup for a different one.
-	require.NotSame(t, first, sharedProjectResolver(paseoBin, "shared-test-other"))
+	// Another name gets its own client, so one project's cache cannot answer a
+	// lookup for a different one.
+	require.NotSame(t, first, sharedPaseo(paseoBin, "shared-test-other"))
 }
 
-func TestResolvedProjectSkipsLookup(t *testing.T) {
+func TestResolvedPaseoSkipsLookup(t *testing.T) {
 	factory := mock.Factory()
 
-	project, err := resolvedProject(Project{ID: "prj_tmp", Path: "/tmp/ws"}).Project(context.Background())
+	project, err := resolvedPaseo(Project{ID: "prj_tmp", Path: "/tmp/ws"}).Project(context.Background())
 
 	require.NoError(t, err)
 	require.Equal(t, Project{ID: "prj_tmp", Path: "/tmp/ws"}, project)

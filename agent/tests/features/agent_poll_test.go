@@ -92,9 +92,9 @@ func (r *relay) acknowledged() []string {
 	return append([]string(nil), r.deleted...)
 }
 
-// projectLookupTimeout is the timeout the service applies to its one
-// `paseo project ls`; pinned on purpose so a drift is a deliberate change here.
-const projectLookupTimeout = 30 * time.Second
+// paseoTimeout is the deadline every paseo CLI call carries; pinned on purpose so
+// a drift is a deliberate change here.
+const paseoTimeout = 30 * time.Second
 
 // scrubbedEnv returns the `-i PATH=... HOME=...` arguments the service runs
 // every paseo subprocess with, behind the `env` command name.
@@ -279,7 +279,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 
 	lookup := mocksprocess.NewResult(s.T())
 	env.process.EXPECT().WithContext(testifymock.Anything).Return(env.process).Once()
-	env.process.EXPECT().Timeout(projectLookupTimeout).Return(env.process).Once()
+	env.process.EXPECT().Timeout(paseoTimeout).Return(env.process).Once()
 	env.process.EXPECT().Quietly().Return(env.process).Once()
 	env.process.EXPECT().
 		Run("env", append(scrubbedEnv(), "paseo", "project", "ls", "--json")...).
@@ -296,6 +296,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 	createResultMock := mocksprocess.NewResult(s.T())
 
 	env.process.EXPECT().WithContext(testifymock.Anything).Return(env.process).Once()
+	env.process.EXPECT().Timeout(paseoTimeout).Return(env.process).Once()
 	env.process.EXPECT().
 		Path(testifymock.MatchedBy(func(p string) bool {
 			return strings.HasPrefix(p, env.projectDir)
@@ -332,6 +333,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 		Once()
 
 	env.process.EXPECT().WithContext(testifymock.Anything).Return(env.process).Once()
+	env.process.EXPECT().Timeout(paseoTimeout).Return(env.process).Once()
 	env.process.EXPECT().
 		Path(testifymock.MatchedBy(func(p string) bool {
 			return strings.HasPrefix(p, env.projectDir)
@@ -524,7 +526,7 @@ func (s *AgentPollTestSuite) TestPollStopsOnUnknownProject() {
 
 	lookup := mocksprocess.NewResult(s.T())
 	env.process.EXPECT().WithContext(testifymock.Anything).Return(env.process).Once()
-	env.process.EXPECT().Timeout(projectLookupTimeout).Return(env.process).Once()
+	env.process.EXPECT().Timeout(paseoTimeout).Return(env.process).Once()
 	env.process.EXPECT().Quietly().Return(env.process).Once()
 	env.process.EXPECT().
 		Run("env", append(scrubbedEnv(), "paseo", "project", "ls", "--json")...).

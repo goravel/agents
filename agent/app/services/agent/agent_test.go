@@ -479,6 +479,12 @@ func workspaceArgs(dir, title, project string) []any {
 	return args
 }
 
+// testPaseo returns a client for the dispatcher tests; the project lookup is
+// never armed because the dispatcher does not resolve one.
+func testPaseo() *Paseo {
+	return newPaseo(paseoBin, "tmp")
+}
+
 // expectWorkspaceCreate arms the shared process mock for one
 // `paseo workspace create` call; the caller owns the returned result's
 // expectations so the failure cases can drive it.
@@ -486,6 +492,7 @@ func expectWorkspaceCreate(processMock *mocksprocess.Process, dir, title, projec
 	args := workspaceArgs(dir, title, project)
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
+	processMock.EXPECT().Timeout(paseoTimeout).Return(processMock).Once()
 	processMock.EXPECT().Path(dir).Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
 	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
@@ -505,13 +512,14 @@ func TestOpencodeDispatcherRun(t *testing.T) {
 	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "high", "Review PR 42", workspaceID)
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
+	processMock.EXPECT().Timeout(paseoTimeout).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
 	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 	result.EXPECT().Failed().Return(false).Once()
 
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testPaseo(), testModels())
 	require.NoError(t, dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/goravel",
 		Agent:   "review",
@@ -539,6 +547,7 @@ func TestOpencodeDispatcherRunFailure(t *testing.T) {
 	args := dispatcherArgs(constants.AgentShip, "opencode-go/deepseek-v4.1-flash", "high", "Ship issue 123", workspaceID)
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
+	processMock.EXPECT().Timeout(paseoTimeout).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/framework").Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
@@ -547,7 +556,7 @@ func TestOpencodeDispatcherRunFailure(t *testing.T) {
 	result.EXPECT().ExitCode().Return(2).Once()
 	result.EXPECT().Error().Return(errors.New("boom")).Once()
 
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testPaseo(), testModels())
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/framework",
 		Agent:   "ship",
@@ -557,6 +566,10 @@ func TestOpencodeDispatcherRunFailure(t *testing.T) {
 	})
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "boom")
+	// A failed run keeps the retry budget: only the lookup and the create are
+	// fatal for the page.
+	var paseoErr paseoError
+	require.False(t, errors.As(err, &paseoErr), "a run failure must not be a paseoError")
 
 	processMock.AssertExpectations(t)
 	createResult.AssertExpectations(t)
@@ -577,6 +590,7 @@ func TestOpencodeDispatcherRunStartError(t *testing.T) {
 	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "high", "Review PR 42", workspaceID)
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
+	processMock.EXPECT().Timeout(paseoTimeout).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
@@ -585,7 +599,7 @@ func TestOpencodeDispatcherRunStartError(t *testing.T) {
 	result.EXPECT().ExitCode().Return(-1).Once()
 	result.EXPECT().Error().Return(errors.New("start failed")).Once()
 
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testPaseo(), testModels())
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/goravel",
 		Agent:   "review",
@@ -629,7 +643,7 @@ func TestOpencodeDispatcherWorkspaceCreateFailure(t *testing.T) {
 	).Once()
 
 	// No run expectation: a create failure must abort before `paseo run`.
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testPaseo(), testModels())
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/framework",
 		Agent:   constants.AgentShip,
@@ -644,6 +658,10 @@ func TestOpencodeDispatcherWorkspaceCreateFailure(t *testing.T) {
 	require.NotContains(t, err.Error(), "\n")
 	// The underlying wait error is wrapped, so a caller can still inspect it.
 	require.ErrorIs(t, err, exitErr)
+	// The create is fatal for the page, so the error carries the wrapper Poll
+	// keys on.
+	var paseoErr paseoError
+	require.ErrorAs(t, err, &paseoErr)
 
 	processMock.AssertExpectations(t)
 	createResult.AssertExpectations(t)
@@ -664,7 +682,7 @@ func TestOpencodeDispatcherWorkspaceCreateFailureNoStderr(t *testing.T) {
 	createResult.EXPECT().ErrorOutput().Return("").Once()
 	createResult.EXPECT().Error().Return(exitErr).Once()
 
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testPaseo(), testModels())
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/framework",
 		Agent:   constants.AgentShip,
@@ -690,7 +708,7 @@ func TestOpencodeDispatcherWorkspaceCreateBadJSON(t *testing.T) {
 	createResult.EXPECT().Output().Return("not json").Once()
 
 	// Unreadable output aborts instead of falling back to an untitled run.
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testPaseo(), testModels())
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/framework",
 		Agent:   constants.AgentShip,
@@ -716,7 +734,7 @@ func TestOpencodeDispatcherWorkspaceCreateNoID(t *testing.T) {
 	createResult.EXPECT().Output().Return(`{"name":"x"}`).Once()
 
 	// A JSON reply without an id aborts for the same reason.
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testPaseo(), testModels())
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/framework",
 		Agent:   constants.AgentShip,
@@ -785,9 +803,9 @@ func TestLogDispatch(t *testing.T) {
 
 func TestOpencodeDispatcherDefaults(t *testing.T) {
 	models := testModels()
-	dispatcher := newOpencodeDispatcher(models)
-	require.Equal(t, paseoBin, dispatcher.bin)
-	require.Equal(t, "opencode", dispatcher.provider)
+	paseo := testPaseo()
+	dispatcher := newOpencodeDispatcher(paseo, models)
+	require.Same(t, paseo, dispatcher.paseo)
 	require.Equal(t, models, dispatcher.models)
 }
 
@@ -795,7 +813,7 @@ func TestOpencodeDispatcherRunUnknownMode(t *testing.T) {
 	// No process expectation: an unknown mode fails before the CLI is touched.
 	mock.Factory().Process()
 
-	dispatcher := newOpencodeDispatcher(map[string]string{
+	dispatcher := newOpencodeDispatcher(testPaseo(), map[string]string{
 		constants.AgentShip: "opencode-go/deepseek-v4.1-flash#high",
 	})
 	err := dispatcher.Run(context.Background(), dispatch.Request{
@@ -809,7 +827,7 @@ func TestOpencodeDispatcherRunUnknownMode(t *testing.T) {
 func TestOpencodeDispatcherRunEmptyModels(t *testing.T) {
 	mock.Factory().Process()
 
-	dispatcher := newOpencodeDispatcher(nil)
+	dispatcher := newOpencodeDispatcher(testPaseo(), nil)
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:     "/tmp/ws/goravel/goravel",
 		Agent:   constants.AgentShip,
@@ -823,7 +841,7 @@ func TestOpencodeDispatcherRejectsBlankProject(t *testing.T) {
 	factory := mock.Factory()
 	factory.Log()
 
-	dispatcher := newOpencodeDispatcher(testModels())
+	dispatcher := newOpencodeDispatcher(testPaseo(), testModels())
 	err := dispatcher.Run(context.Background(), dispatch.Request{
 		Dir:    "/tmp/ws/goravel/goravel",
 		Agent:  constants.AgentReview,
@@ -860,13 +878,14 @@ func TestOpencodeDispatcherAlwaysCreatesWorkspace(t *testing.T) {
 			args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "high", test.title, workspaceID)
 
 			processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
+			processMock.EXPECT().Timeout(paseoTimeout).Return(processMock).Once()
 			processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
 			processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 			processMock.EXPECT().Quietly().Return(processMock).Once()
 			processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 			result.EXPECT().Failed().Return(false).Once()
 
-			dispatcher := newOpencodeDispatcher(testModels())
+			dispatcher := newOpencodeDispatcher(testPaseo(), testModels())
 			require.NoError(t, dispatcher.Run(context.Background(), dispatch.Request{
 				Dir:     "/tmp/ws/goravel/goravel",
 				Agent:   constants.AgentReview,
@@ -900,13 +919,14 @@ func TestOpencodeDispatcherRunWithoutThinking(t *testing.T) {
 	args := dispatcherArgs(constants.AgentReview, "opencode-go/deepseek-v4.1-flash", "", "Review PR 42", workspaceID)
 
 	processMock.EXPECT().WithContext(testifymock.Anything).Return(processMock).Once()
+	processMock.EXPECT().Timeout(paseoTimeout).Return(processMock).Once()
 	processMock.EXPECT().Path("/tmp/ws/goravel/goravel").Return(processMock).Once()
 	processMock.EXPECT().DisableBuffering().Return(processMock).Once()
 	processMock.EXPECT().Quietly().Return(processMock).Once()
 	processMock.EXPECT().Run(args[0].(string), args[1:]...).Return(result).Once()
 	result.EXPECT().Failed().Return(false).Once()
 
-	dispatcher := newOpencodeDispatcher(map[string]string{
+	dispatcher := newOpencodeDispatcher(testPaseo(), map[string]string{
 		constants.AgentReview: "opencode-go/deepseek-v4.1-flash",
 	})
 	require.NoError(t, dispatcher.Run(context.Background(), dispatch.Request{
@@ -940,7 +960,7 @@ func TestModelFor(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			dispatcher := newOpencodeDispatcher(map[string]string{constants.AgentReview: test.entry})
+			dispatcher := newOpencodeDispatcher(testPaseo(), map[string]string{constants.AgentReview: test.entry})
 			model, thinking, err := dispatcher.modelFor(constants.AgentReview)
 			if test.wantErr != "" {
 				require.EqualError(t, err, test.wantErr)
