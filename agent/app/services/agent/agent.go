@@ -33,8 +33,8 @@ const (
 	// gitWebURL is the HTTPS base for human-facing GitHub links (pull requests,
 	// issues, comments).
 	gitWebURL = "https://github.com/"
-	// gitCloneURL is the SSH remote prefix routed repository tokens are stripped
-	// down from.
+	// gitCloneURL is the SSH remote the run's setup subagent clones from, and the
+	// prefix routed repository tokens are stripped down from.
 	gitCloneURL = "git@github.com:"
 )
 
@@ -294,21 +294,14 @@ type opencodeDispatcher struct {
 	provider string
 	// models maps a mode to its `<model>[#<thinking>]` entry.
 	models map[string]string
-	// clonePrefix and cloneDepth reach the run's `setup` subagent as
-	// GITHUB_CLONE_PREFIX and CLONE_DEPTH, so it clones like the poller used to.
-	clonePrefix string
-	cloneDepth  string
 }
 
-// newOpencodeDispatcher returns a dispatcher for the mode → model map and the
-// clone settings the setup subagent needs.
-func newOpencodeDispatcher(models map[string]string, clonePrefix, cloneDepth string) *opencodeDispatcher {
+// newOpencodeDispatcher returns a dispatcher for the mode → model map.
+func newOpencodeDispatcher(models map[string]string) *opencodeDispatcher {
 	return &opencodeDispatcher{
-		bin:         paseoBin,
-		provider:    opencodeProvider,
-		models:      models,
-		clonePrefix: clonePrefix,
-		cloneDepth:  cloneDepth,
+		bin:      paseoBin,
+		provider: opencodeProvider,
+		models:   models,
 	}
 }
 
@@ -354,16 +347,6 @@ func agentModels(value any) (map[string]string, error) {
 // exactly what an operator would paste.
 func scrubbedEnv() []string {
 	return []string{"-i", "PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
-}
-
-// runEnv is the environment of the `paseo run` call: the scrubbed base plus the
-// clone settings the run's setup subagent reads. The other paseo calls get the
-// base only — they clone nothing.
-func (d *opencodeDispatcher) runEnv() []string {
-	return append(scrubbedEnv(),
-		"GITHUB_CLONE_PREFIX="+d.clonePrefix,
-		"CLONE_DEPTH="+d.cloneDepth,
-	)
 }
 
 // logDispatch writes the one Debug entry for a dispatch: the directory, then one
@@ -479,6 +462,9 @@ func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) erro
 	// Always set: the workspace and the run must share one title, and the
 	// service guarantees a non-blank one.
 	command = append(command, "--title", req.Title, "--workspace", workspaceID)
+	// The run's setup subagent clones through `--env`, because paseo starts it
+	// with a scrubbed environment; the depth stays unset, so it clones fully.
+	command = append(command, "--env", "GITHUB_CLONE_PREFIX="+gitCloneURL)
 	// `--` keeps the prompt from being read as a flag.
 	command = append(command, "--no-wait", "--", req.Prompt)
 
@@ -490,7 +476,7 @@ func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) erro
 		Path(req.Dir).
 		DisableBuffering().
 		Quietly().
-		Run("env", append(d.runEnv(), command...)...)
+		Run("env", append(scrubbedEnv(), command...)...)
 
 	if result.Failed() {
 		return fmt.Errorf("paseo run failed (exit %d): %w", result.ExitCode(), result.Error())
