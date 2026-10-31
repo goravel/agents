@@ -28,16 +28,15 @@ const (
 
 // Service polls the relay for @goravel-agent mentions and dispatches agents.
 //
-// The router, dispatcher, checkouter, retry tracker, handle store and reactor
-// are injected because their policies (agent choice, CLI invocation, checkout,
-// retry cap, dedupe, acknowledgement) are the interesting parts to substitute in
-// tests. The HTTP client and logger are resolved from the global facades on
-// purpose: they are framework singletons and the app facades are the supported
-// way to reach them.
+// The router, dispatcher, retry tracker, handle store and reactor are injected
+// because their policies (agent choice, CLI invocation, retry cap, dedupe,
+// acknowledgement) are the interesting parts to substitute in tests. The paseo
+// project is resolved lazily from configuration. The HTTP client and logger are
+// resolved from the global facades on purpose: they are framework singletons and
+// the app facades are the supported way to reach them.
 type Service struct {
 	router     AgentRouter
 	dispatcher Dispatcher
-	checkouts  Checkouter
 	retry      RetryTracker
 	handles    HandleStore
 
@@ -48,22 +47,26 @@ type Service struct {
 	mention string
 
 	apiToken string
-	// workspaceRoot is the symlink-resolved workspace root.
-	workspaceRoot string
-	eventsURL     string
+	// projects lazily resolves the paseo project every run workspace is created
+	// in (AGENT_PROJECT_NAME). The first mention that needs a workspace pays the
+	// lookup; later mentions reuse it.
+	projects  *projectResolver
+	eventsURL string
 
 	// allowedSenders restricts which GitHub senders may trigger an agent run
 	// (AGENT_ALLOWED_SENDERS). It is validated non-empty in NewService.
 	allowedSenders map[string]struct{}
 
-	// now returns the current time; injected so the per-run checkout name is
+	// now returns the current time; injected so the per-run directory name is
 	// deterministic in tests.
 	now func() time.Time
 }
 
 // NewService wires a Service from application configuration. It fails when
 // AGENT_ALLOWED_SENDERS is empty, since running with no allowlist would let
-// any GitHub sender trigger agent runs.
+// any GitHub sender trigger agent runs, and when AGENT_PROJECT_NAME is blank.
+// It runs no subprocess: the project itself is resolved on the first mention
+// that needs a workspace.
 func NewService() (*Service, error) {
 	config := facades.Config()
 
@@ -75,6 +78,11 @@ func NewService() (*Service, error) {
 	models, err := agentModels(config.Get("agent.models"))
 	if err != nil {
 		return nil, err
+	}
+
+	name := config.GetString("agent.project_name")
+	if name == "" {
+		return nil, errors.New("agent: AGENT_PROJECT_NAME must name a paseo project")
 	}
 
 	// The empty base URL keeps go-github's default (https://api.github.com/).
@@ -90,13 +98,12 @@ func NewService() (*Service, error) {
 	return &Service{
 		router:         newAIRouter(),
 		dispatcher:     newOpencodeDispatcher(models),
-		checkouts:      newGitCheckouter(),
 		retry:          newCacheRetryTracker(),
 		handles:        newCacheHandleStore(),
 		reactor:        reactor,
 		mention:        normalizeMention(config.GetString("agent.mention")),
 		apiToken:       config.GetString("agent.api_token"),
-		workspaceRoot:  resolveWorkspace(config.GetString("agent.workspace")),
+		projects:       newProjectResolver(paseoBin, name),
 		eventsURL:      strings.TrimRight(config.GetString("agent.base_url"), "/"),
 		allowedSenders: senders,
 		now:            time.Now,
@@ -111,9 +118,11 @@ func (s *Service) allowed(sender string) bool {
 	return ok
 }
 
-// Poll fetches one page of events, handles every mention, and deletes the
-// events it has drained.
-func (s *Service) Poll(ctx context.Context) {
+// Poll fetches one page of events, handles every mention, and deletes the events
+// it has drained. It returns an error only for a failure that retrying cannot
+// fix — today, the paseo project lookup — so the caller can surface it and the
+// unhandled events stay on the relay for the next tick.
+func (s *Service) Poll(ctx context.Context) error {
 	response, err := facades.Http().
 		WithContext(ctx).
 		WithQueryParameters(map[string]string{
@@ -125,25 +134,25 @@ func (s *Service) Poll(ctx context.Context) {
 		Get(s.eventsURL)
 	if err != nil {
 		facades.Log().Errorf("agent: fetch events: %v", err)
-		return
+		return nil
 	}
 	if response.Failed() {
 		facades.Log().Errorf("agent: fetch events: status %d", response.Status())
 		// Drain the body so the connection is released.
 		_, _ = response.Body()
-		return
+		return nil
 	}
 
 	body, err := response.Body()
 	if err != nil {
 		facades.Log().Errorf("agent: read events response: %v", err)
-		return
+		return nil
 	}
 
 	env, err := parseEnvelope([]byte(body))
 	if err != nil {
 		facades.Log().Errorf("agent: parse events envelope: %v", err)
-		return
+		return nil
 	}
 
 	toDelete := make([]uint64, 0, len(env.Data))
@@ -188,6 +197,17 @@ func (s *Service) Poll(ctx context.Context) {
 
 		if err := s.handle(ctx, ev, instruction); err != nil {
 			facades.Log().Errorf("agent: handle event %d: %v", ev.ID, err)
+
+			// A bad project is configuration, not a transient event failure:
+			// acknowledge only what this page already handled, keep the rest,
+			// and surface the error instead of burning the event's retries.
+			var projectErr projectError
+			if errors.As(err, &projectErr) {
+				s.deleteEvents(ctx, toDelete)
+
+				return projectErr
+			}
+
 			if !s.retry.RecordFailure(key) {
 				continue
 			}
@@ -204,36 +224,51 @@ func (s *Service) Poll(ctx context.Context) {
 	}
 
 	s.deleteEvents(ctx, toDelete)
+
+	return nil
 }
 
 // handle routes the instruction to an agent, resolves the target repository and
-// the run title, and runs the agent against its checkout. A routed title wins;
-// when the router returns none, the run is named after the issue or pull request
-// the mention came from.
+// the run title, and dispatches the agent into a fresh run directory under the
+// paseo project. A routed title wins; when the router returns none, the run is
+// named after the issue or pull request the mention came from.
 func (s *Service) handle(ctx context.Context, ev *event, instruction string) error {
 	// The router sees the source repository; the agent sees the target.
 	agent, repository, title, err := s.router.Route(ctx, ev.prompt(instruction, ev.Repository))
 	if err != nil {
 		return err
 	}
-	// A missing AI title still names the run: PR #42 / Issue #123.
+	// A missing AI title still names the run: PR #42 / Issue #123, then
+	// "<agent> in <owner>/<repo>" when the payload carries no number either,
+	// because the dispatcher always creates a titled workspace.
 	if title == "" {
 		title = ev.defaultTitle()
+	}
+	if title == "" {
+		title = fallbackTitle(agent, repository)
 	}
 	if repository == "" {
 		repository = ev.Repository
 	}
 
-	dir := runDir(s.workspaceRoot, repository, s.now())
-	if err := s.checkouts.Ensure(ctx, dir, repository); err != nil {
+	project, err := s.projects.Project(ctx)
+	if err != nil {
+		return err
+	}
+
+	// The run directory must exist before paseo starts an agent in it; paseo's
+	// setup and the primary agent check the repository out inside it.
+	dir := runDir(project.Path, repository, s.now())
+	if err := prepareRunDir(dir); err != nil {
 		return err
 	}
 
 	return s.dispatcher.Run(ctx, dispatch.Request{
-		Dir:    dir,
-		Agent:  agent,
-		Prompt: ev.agentPrompt(agent, instruction),
-		Title:  title,
+		Dir:     dir,
+		Project: project.ID,
+		Agent:   agent,
+		Prompt:  ev.agentPrompt(agent, instruction),
+		Title:   title,
 	})
 }
 

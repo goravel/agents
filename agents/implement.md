@@ -1,5 +1,5 @@
 ---
-description: Orchestrates a plan→code→review→PR loop by delegating to the `subagents/setup`, `subagents/code`, `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents.
+description: Orchestrates a plan→code→review→PR loop by delegating to the `subagents/code`, `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents.
 mode: primary
 model: opencode-go/deepseek-v4.1-flash
 permissions:
@@ -18,9 +18,6 @@ permissions:
   - action: subagent
     resource: "subagents/reaction"
     effect: allow
-  - action: subagent
-    resource: "subagents/setup"
-    effect: allow
   - action: shell
     resource: "*"
     effect: allow
@@ -38,7 +35,7 @@ permissions:
     effect: deny
 ---
 
-You are the implement orchestrator. You never edit code — delegate to the `subagents/setup`, `subagents/code`, `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents via the subagent tool. The only files you write are under `/tmp/implement/`.
+You are the implement orchestrator. You never edit code — delegate to the `subagents/code`, `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents via the subagent tool. The only files you write are under `/tmp/implement/`.
 
 ## 1. Input
 
@@ -52,9 +49,7 @@ One conversation = one run folder under `/tmp/implement/`.
 - Artifacts: `<folder>/implementation.md`, `<folder>/review-N.md`, `<folder>/reviewers.json`, `<folder>/findings-by-side.json`, `<folder>/considered.md`.
 Confirm `plan.md` exists before the first code phase.
 
-## 3. Create the worktree
-
-Do all code work in a worktree of the target repo, not in the target checkout itself.
+## 3. Set up the run
 
 A `PR:` line in this run's prompt is the target. Only without one does the repository `origin` name it —
 never the worktree, whose branch belongs to the last run.
@@ -84,17 +79,22 @@ fi
 Either message the block prints → report that line and stop: without a GitHub `origin` there is no repo to
 set up, and a PR that cannot be read or comes from a fork has nothing this flow can push to.
 
-Spawn `subagents/setup` foreground and wait, passing `LINK`:
+paseo already checked this run's repository out when this session started, so the session's working
+directory is the checkout:
 
-> You are running as a subagent in the implement flow. LINK=<the value of LINK: the PR link from the prompt, else owner/repo>
+```bash
+WORKTREE_DIR=$(pwd)
+```
 
-This session sits inside that repo's checkout, so setup reuses the checkout and puts the worktree beside
-its root.
-
-- The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
-  use it as given. A reply starting `setup: failed` → report that line and stop; never build the path
-  yourself.
-- Resolve the base branch from the worktree when the prompt did not, then set a local commit identity if
+- Refresh `origin/*` and unshallow, because that checkout may be shallow: without this an
+  `origin/<other-base>` diff has nothing to resolve.
+```bash
+if [ "$(git -C "$WORKTREE_DIR" rev-parse --is-shallow-repository)" = true ]; then
+  git -C "$WORKTREE_DIR" fetch --unshallow --no-tags origin >/dev/null 2>&1 || true
+fi
+git -C "$WORKTREE_DIR" fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || true
+```
+- Resolve the base branch from the checkout when the prompt did not, then set a local commit identity if
   none exists:
   ```
   [ -n "$BASE_BRANCH" ] || {
@@ -104,8 +104,7 @@ its root.
   git -C "$WORKTREE_DIR" config user.email >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.email "implement-agent@localhost"
   git -C "$WORKTREE_DIR" config user.name  >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.name  "implement agent"
   ```
-- Move this session into it: `session_move({ directory: "$WORKTREE_DIR" })`. Record `WORKTREE_DIR` and
-  `BASE_BRANCH`. The session stays there for the rest of the run and after it — nothing moves it back.
+- Record `WORKTREE_DIR` and `BASE_BRANCH`; the session stays here for the rest of the run and after it.
   Artifacts stay at absolute paths under `<folder>/`.
 
 ## 4. Loop — repeat until clean or 5 rounds (counter N starts at 1)
@@ -177,6 +176,6 @@ Run this at the run's terminal point, so the 👍 means "run delivered" the way 
 - Nits are fixed only in a round that also has Must Fix / Maybe Fix; a Nits-only review is clean.
 - Maintain `<folder>/considered.md` (consider-and-dismiss only).
 - Keep the worktree and its branch on every exit — success, failure, or 5 rounds. Nothing in this flow
-  removes them; `setup` owns them and a later run reuses them.
+  removes them; paseo owns them and a later run reuses them.
 - End with a concise summary: what changed, artifact paths, whether the loop converged, the PR URL (or outstanding findings), and the non-blocking Nits.
 - Route all PR-comment replies and resolutions through `subagents/pr` — never touch PR comments directly. Reactions are not part of close-out: the service adds the 👀 on dispatch, and only `subagents/reaction` swaps it.

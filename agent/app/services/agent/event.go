@@ -96,8 +96,8 @@ func (e *event) target() int {
 // defaultTitle names the run after the issue or pull request the mention came
 // from, used when the router returns no title. A pull request yields `PR #42`,
 // an issue `Issue #123`. It returns "" when the payload carries no number, so
-// the dispatcher omits --title and paseo names the run; a payload that fails to
-// decode also degrades to "".
+// the service falls back to fallbackTitle; a payload that fails to decode also
+// degrades to "".
 func (e *event) defaultTitle() string {
 	number := e.target()
 	if number == 0 {
@@ -110,6 +110,18 @@ func (e *event) defaultTitle() string {
 	}
 
 	return label + " #" + strconv.Itoa(number)
+}
+
+// fallbackTitle names a run the router and the event both left untitled, so the
+// dispatcher always has a title for the paseo workspace: "<agent> in
+// <owner>/<repo>", capped at titleLimit runes.
+func fallbackTitle(agentName, repository string) string {
+	title := agentName + " in " + repository
+	if runes := []rune(title); len(runes) > titleLimit {
+		return string(runes[:titleLimit])
+	}
+
+	return title
 }
 
 // payload decodes the event's JSON payload, caching both the result and the

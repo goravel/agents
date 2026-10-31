@@ -29,6 +29,13 @@ const (
 	// noRepository is the sentinel the router puts on the repository line when
 	// the mention names no usable repository.
 	noRepository = "-"
+
+	// gitWebURL is the HTTPS base for human-facing GitHub links (pull requests,
+	// issues, comments).
+	gitWebURL = "https://github.com/"
+	// gitCloneURL is the SSH remote prefix routed repository tokens are stripped
+	// down from.
+	gitCloneURL = "git@github.com:"
 )
 
 // AgentRouter chooses which agent should handle an instruction, which
@@ -158,9 +165,9 @@ func parseAgent(token string) (string, error) {
 }
 
 // repositoryURLPrefixes are the GitHub URL prefixes stripped from a routed
-// repository token so only a bare owner/name reaches the checkout. They reuse
-// the workspace's clone and web bases so the strip list cannot drift from the
-// checkout.
+// repository token so only a bare owner/name reaches the dispatch. They reuse
+// the web and clone bases so the strip list cannot drift from the links and
+// remotes they name.
 var repositoryURLPrefixes = []string{
 	gitWebURL,
 	"http://github.com/",
@@ -277,7 +284,7 @@ const (
 	// stderrLimit bounds the agent stderr kept for the error message.
 	stderrLimit = 64 * 1024
 	// workspaceIsolation is the workspace kind paseo creates for a run: the
-	// per-run checkout already exists, so the workspace must point at it rather
+	// per-run directory already exists, so the workspace must point at it rather
 	// than mint a new worktree.
 	workspaceIsolation = "local"
 )
@@ -346,9 +353,9 @@ func scrubbedEnv() []string {
 // logDispatch writes the one Debug entry for a dispatch: the directory, then one
 // `command:` line per paseo command in the order they ran, quoted by
 // shellCommand so the whole block pastes into a shell unchanged. A nil command
-// is skipped, so an untitled dispatch logs just the run. reason explains why a
-// command never produced its successor: it is only set by a failed workspace
-// create, whose run command was never built.
+// is skipped, so a failed create logs just itself. reason explains why a command
+// never produced its successor: it is only set by a failed workspace create,
+// whose run command was never built.
 func logDispatch(dir string, reason error, commands ...[]string) {
 	var b strings.Builder
 	b.WriteString("\ndirectory: ")
@@ -375,10 +382,15 @@ func logDispatch(dir string, reason error, commands ...[]string) {
 // The JSON branch is read for the id: with --json paseo prints only
 // {"workspaceId":"wks_…","project":…,"name":…,"isolation":"local","cwd":…}.
 func (d *opencodeDispatcher) createWorkspace(ctx context.Context, req dispatch.Request) (string, []string, error) {
+	if req.Project == "" {
+		return "", nil, errors.New("agent: a paseo project is required to create a run workspace")
+	}
+
 	command := []string{
 		d.bin, "workspace", "create",
 		"--isolation", workspaceIsolation,
 		"--path", req.Dir,
+		"--project", req.Project,
 		"--title", req.Title,
 		"--json",
 	}
@@ -420,32 +432,23 @@ func (d *opencodeDispatcher) createWorkspace(ctx context.Context, req dispatch.R
 }
 
 // Run executes `paseo run --provider <provider> --mode <mode> --model <model>
-// [--thinking <level>] [--title <title>] [--workspace <id>] --no-wait --
-// <prompt>` in the request's directory with a scrubbed environment. A titled run
-// first creates the workspace it will live in with that same title, so the paseo
-// session is named after the run instead of after the checkout's branch; an
-// untitled run keeps the single call and lets paseo name everything itself.
+// [--thinking <level>] --title <title> --workspace <id> --no-wait -- <prompt>` in
+// the request's directory with a scrubbed environment. It first creates the
+// workspace it will live in with that same title and in the request's project, so
+// the paseo session is named after the run instead of after the checkout's
+// branch.
 func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) error {
 	model, thinking, err := d.modelFor(req.Agent)
 	if err != nil {
 		return err
 	}
 
-	// createCommand stays nil for an untitled run: there is no workspace call to
-	// log, and paseo names the workspace from the checkout.
-	var (
-		workspaceID   string
-		createCommand []string
-	)
-	if req.Title != "" {
-		workspaceID, createCommand, err = d.createWorkspace(ctx, req)
-		if err != nil {
-			// The dispatch stops here, so this is the only entry this run gets:
-			// it logs the create that failed, because the run command was never
-			// built. One entry per dispatch, never two.
-			logDispatch(req.Dir, err, createCommand)
-			return err
-		}
+	workspaceID, createCommand, err := d.createWorkspace(ctx, req)
+	if err != nil {
+		// The dispatch stops here, so this is the only entry this run gets: it
+		// logs the create that failed, because the run command was never built.
+		logDispatch(req.Dir, err, createCommand)
+		return err
 	}
 
 	command := []string{
@@ -457,17 +460,13 @@ func (d *opencodeDispatcher) Run(ctx context.Context, req dispatch.Request) erro
 	if thinking != "" {
 		command = append(command, "--thinking", thinking)
 	}
-	if req.Title != "" {
-		command = append(command, "--title", req.Title)
-	}
-	if workspaceID != "" {
-		command = append(command, "--workspace", workspaceID)
-	}
+	// Always set: the workspace and the run must share one title, and the
+	// service guarantees a non-blank one.
+	command = append(command, "--title", req.Title, "--workspace", workspaceID)
 	// `--` keeps the prompt from being read as a flag.
 	command = append(command, "--no-wait", "--", req.Prompt)
 
-	// One entry for the whole sequence: the create (nil, and therefore skipped,
-	// for an untitled run) and the run it enabled.
+	// One entry for the whole sequence: the create and the run it enabled.
 	logDispatch(req.Dir, nil, createCommand, command)
 
 	result := facades.Process().
