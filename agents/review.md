@@ -44,8 +44,8 @@ foreground and wait. Pass the `PR:` line verbatim as the link and keep its numbe
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build a path or a
   branch yourself.
-- Keep it all: this flow removes nothing. `setup` owns the checkout and the worktree, and both belong to
-  this run.
+- Keep it all: this flow removes nothing. `setup` owns the checkout and the worktree, and a later run
+  reuses them.
 - Resolve the base branch and read the diff. `setup` refreshed every `origin/*` branch, so
   `origin/$BASE_BRANCH` resolves:
 

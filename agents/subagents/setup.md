@@ -34,17 +34,15 @@ the work in the worktree.
   pull request link is the repository the PR lives in, not its head: `gh -R <owner/repo>` reads the PR and
   `origin` stays the base repository.
 - **The workspace root is always `pwd`.** No input moves it and an environment `WORKSPACE_DIR` is ignored.
-  The run starts here in its own empty directory, so setup clones the link into `<pwd>/<owner>-<repo>` and
-  returns the worktree `<pwd>/<owner>-<repo>-<TS>`. An existing `<pwd>/<owner>-<repo>` is reused when its
-  `origin` matches. When `pwd` already sits inside a checkout of the link, that checkout — resolved to its
-  toplevel — is reused in place and the worktree is its sibling `<toplevel>-<TS>`.
-- **`GITHUB_CLONE_PREFIX`** and **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs. The agent
-  app passes both (`git@github.com:` and `1` by default; set `AGENT_CLONE_PREFIX`/`AGENT_CLONE_DEPTH` to
-  override). Started outside the app, the script falls back to `https://github.com/` and a full clone.
+  You start inside the run's own checkout of the link, so that checkout — resolved to its
+  toplevel — is reused in place and the worktree is its sibling `<toplevel>-<TS>`. When `pwd` is not inside
+  a matching checkout, the checkout is `<pwd>/<owner>-<repo>` — reused when its `origin` matches, cloned
+  when it is absent — and the worktree is that directory's sibling `<owner>-<repo>-<TS>`.
+- **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
+  **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
-From an empty `/tmp`, a `goravel/goravel` link gives `/tmp/goravel-goravel` and its `-<TS>` sibling.
-Started inside a checkout of that repo, it gives the worktree `/tmp/goravel-goravel-<TS>` and creates
-nothing else.
+From `/tmp`, a `goravel/goravel` link gives `/tmp/goravel-goravel` and its `-<TS>` sibling. Started inside
+a checkout of that repo, it gives the worktree `/tmp/goravel-goravel-<TS>` and creates nothing else.
 
 ## Run
 
@@ -104,8 +102,8 @@ same_repo() {
 }
 
 REPO_DIR="$WORKSPACE_DIR/$SAFE"
-# When pwd already sits inside a checkout of the link, keep that checkout in place and never clone a
-# copy inside it. The toplevel is resolved so a session below the root still reuses it.
+# Start inside the run's own checkout: reuse that checkout in place, never clone a copy
+# inside it. The toplevel is resolved so a session below the root still reuses it.
 if TOPLEVEL=$(git -C "$WORKSPACE_DIR" rev-parse --show-toplevel 2>/dev/null) \
   && PWD_ORIGIN=$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null) \
   && same_repo "$(remote_repo "$PWD_ORIGIN")" "$REPO"; then

@@ -86,10 +86,6 @@ Spawn `subagents/setup` foreground and wait, passing `LINK`:
 
 > You are running as a subagent in the ship flow. LINK=<the value of LINK: the PR link from the prompt, else owner/repo>
 
-This session starts in this run's own, still empty directory, so setup clones the repository there and
-returns the worktree path. When the session already sits inside a checkout of the link, setup reuses that
-checkout in place and puts the worktree beside its root.
-
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build the path
   yourself.

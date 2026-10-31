@@ -48,8 +48,8 @@ foreground and wait; pass the `PR:` line verbatim as the link and keep its numbe
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build a path or a
   branch yourself.
-- Keep it all: this flow removes nothing. `setup` owns the checkout and the worktree, and both belong to
-  this run.
+- Keep it all: this flow removes nothing. `setup` owns the checkout and the worktree, and a later run
+  reuses them.
 - Resolve the base branch and read the diff. `setup` refreshed every `origin/*` branch, so
   `origin/$BASE_BRANCH` resolves:
 
@@ -110,7 +110,7 @@ section carries no body.
 
 Shape:
 
-- `runDir` gained `root` → 1 caller → pass `project.Path`, `workspace.go:20`
+- `Client.Fetch` gained a `ctx` argument → 2 callers → pass the caller's context, `file.go:42`
 
 ## 4. Answer 2 — how to use it
 
