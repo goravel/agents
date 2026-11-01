@@ -26,13 +26,17 @@ the work in the worktree.
   | shape | example | branch |
   |---|---|---|
   | pull request | `https://github.com/goravel/goravel/pull/42` | the PR's own branch: `headRefName`, or `pr-42-<TS>` when it comes from a fork |
-  | issue | `https://github.com/goravel/goravel/issues/42` | `issue-42-<TS>` at the default branch |
-  | repository | `https://github.com/goravel/goravel`, `…/goravel.git`, `…/goravel/`, `git@github.com:goravel/goravel.git`, `goravel/goravel` | `task-<TS>` at the default branch |
+  | issue | `https://github.com/goravel/goravel/issues/42` | `issue-42-<TS>`, or the named branch |
+  | repository | `https://github.com/goravel/goravel`, `…/goravel.git`, `…/goravel/`, `git@github.com:goravel/goravel.git`, `goravel/goravel` | `master`, or the named branch |
 
   A `#issuecomment-…` or `#discussion_r…` suffix is fine. The input carries exactly one `LINK=<link>`; a
   bare `owner/repo` is accepted only as that whole value. The `owner/repo` of a
   pull request link is the repository the PR lives in, not its head: `gh -R <owner/repo>` reads the PR and
   `origin` stays the base repository.
+- **The branch is named only when the user named one.** The input carries at most one `BRANCH=<name>`;
+  blank means the prompt named no branch, so a repository link works on `master`. A pull request link
+  always keeps its own branch and ignores `BRANCH`; an issue link uses it instead of `issue-<n>-<TS>` —
+  which costs the `Closes #<n>` line, so name such a branch `<type>/<n>-<description>` to keep it.
 - **The workspace root is always `pwd`.** No input moves it and an environment `WORKSPACE_DIR` is ignored.
   You start inside the run's own checkout of the link, so that checkout — resolved to its
   toplevel — is reused in place and the worktree is its sibling `<toplevel>-<TS>`. When `pwd` is not inside
@@ -46,12 +50,14 @@ a checkout of that repo, it gives the worktree `/tmp/goravel-goravel-<TS>` and c
 
 ## Run
 
-If the link holds a single quote or a newline, do not fill the block: reply `setup: failed — unsafe link`
-and stop. A single quote would end the `LINK='…'` word early and run the remainder as shell; a newline is
-invalid. Otherwise fill `LINK` and run the whole block once — it handles all three link kinds.
+If the link or the branch holds a single quote or a newline, do not fill the block: reply
+`setup: failed — unsafe link` and stop. A single quote would end the `LINK='…'` or `BRANCH='…'` word early
+and run the remainder as shell; a newline is invalid. Otherwise fill `LINK`, fill `BRANCH` with the named
+branch or blank, and run the whole block once — it handles all three link kinds.
 
 ```bash
 LINK='<the pull request, issue, or repository link>'
+BRANCH='<the branch the user named, or blank>'
 
 CLONE_PREFIX="${GITHUB_CLONE_PREFIX:-https://github.com/}"
 CLONE_DEPTH="${CLONE_DEPTH:-}"
@@ -89,6 +95,26 @@ for PART in "$OWNER" "$NAME"; do
   case "$PART" in *[A-Za-z0-9]*) : ;; *) setup_fail "unsupported link: $LINK" ;; esac
 done
 
+# A pull request names its own branch, so a named branch never overrides it. Any other link accepts one.
+if [ "$KIND" = pull ] || [ -z "$BRANCH" ]; then
+  BRANCH=
+else
+  # The name reaches git as a branch, so a leading dash would be read as an option.
+  case "$BRANCH" in -*) setup_fail "unusable branch name: $BRANCH" ;; esac
+  git check-ref-format --branch "$BRANCH" >/dev/null 2>&1 \
+    || setup_fail "unusable branch name: $BRANCH"
+fi
+
+# A named branch, or a bare repository's mainline, is known this early so the reuse fast-forward below can
+# leave the branch this run attaches where the caller left it. Only an issue link is left to resolve.
+if [ -n "$BRANCH" ]; then
+  BASE_BRANCH="$BRANCH"
+elif [ "$KIND" = repo ]; then
+  # A bare repository names no branch: the run works on master itself. Fixed, not looked up — a
+  # repository without origin/master fails below instead of silently picking another branch.
+  BASE_BRANCH=master
+fi
+
 # The workspace is always the current directory; an inherited WORKSPACE_DIR is overwritten.
 WORKSPACE_DIR=$(pwd)
 
@@ -121,7 +147,9 @@ if [ -e "$REPO_DIR" ]; then
     : # offline: the last fetched refs still give a usable worktree
   elif [ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ]; then
     : # uncommitted work in the checkout: never merge under it
-  elif CUR=$(git -C "$REPO_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null); then
+  # The branch this run attaches starts where the caller left it, so it is never fast-forwarded here.
+  elif CUR=$(git -C "$REPO_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null) \
+    && [ "$CUR" != "$BASE_BRANCH" ]; then
     git -C "$REPO_DIR" merge --ff-only "origin/$CUR" >/dev/null 2>&1 || true
   fi
 else
@@ -141,7 +169,9 @@ fi
 # branch so an `origin/<base>...HEAD` diff resolves, moving no local branch.
 git -C "$REPO_DIR" fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || true
 
-if [ "$KIND" != pull ]; then
+# A named branch and a bare repository's mainline are settled above; an issue link alone is left, and it
+# resolves the default branch of the checkout it has just fetched.
+if [ "$KIND" != pull ] && [ -z "$BASE_BRANCH" ]; then
   BASE_BRANCH=$(git -C "$REPO_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
   [ -z "$BASE_BRANCH" ] && BASE_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null)
   [ -n "$BASE_BRANCH" ] || setup_fail "cannot resolve the default branch of $REPO"
@@ -165,24 +195,25 @@ if [ "$KIND" = pull ]; then
 fi
 
 branch_name() {
+  if [ -n "$BRANCH" ]; then printf '%s' "$BRANCH"; return 0; fi
   case "$KIND" in
     pull) if [ -n "$HEAD_BRANCH" ]; then printf '%s' "$HEAD_BRANCH"; else printf 'pr-%s-%s' "$NUM" "$1"; fi ;;
     issues) printf 'issue-%s-%s' "$NUM" "$1" ;;
-    *) printf 'task-%s' "$1" ;;
+    *) printf '%s' "$BASE_BRANCH" ;;
   esac
 }
 
 git -C "$REPO_DIR" worktree prune
 TRIES=0
 TS=$(date +%Y%m%d-%H%M%S)
-BRANCH=$(branch_name "$TS")
+WT_BRANCH=$(branch_name "$TS")
 WT_DIR="$REPO_DIR-$TS"
 while [ -e "$WT_DIR" ]; do
   TRIES=$((TRIES + 1))
   [ "$TRIES" -ge 5 ] && setup_fail "worktree path $WT_DIR already exists"
   sleep 1
   TS=$(date +%Y%m%d-%H%M%S)
-  BRANCH=$(branch_name "$TS")
+  WT_BRANCH=$(branch_name "$TS")
   WT_DIR="$REPO_DIR-$TS"
 done
 if [ "$KIND" = pull ]; then
@@ -191,27 +222,40 @@ if [ "$KIND" = pull ]; then
   HEAD_REF="refs/pr/$NUM/head"
   git -C "$REPO_DIR" fetch --no-tags origin "+refs/pull/$NUM/head:${HEAD_REF}" >/dev/null 2>&1 \
     || setup_fail "fetch PR #$NUM of $REPO failed"
-  if git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$BRANCH"; then
+  if git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$WT_BRANCH"; then
     # The branch is already here — a re-run on the same PR. It is kept only when the PR head contains it:
     # an ahead-only branch carries commits the PR lacks, and this run's push would slip them into the PR.
     # Then --force lets it be checked out beside an earlier run's worktree that still holds it, and the
     # fast-forward carries it to the PR head. Nothing is moved back and nothing is removed.
-    git -C "$REPO_DIR" merge-base --is-ancestor "refs/heads/$BRANCH" "$HEAD_REF" \
-      || setup_fail "local branch $BRANCH has diverged from PR #$NUM"
-    git -C "$REPO_DIR" worktree add --force "$WT_DIR" "$BRANCH" >/dev/null 2>&1 \
+    git -C "$REPO_DIR" merge-base --is-ancestor "refs/heads/$WT_BRANCH" "$HEAD_REF" \
+      || setup_fail "local branch $WT_BRANCH has diverged from PR #$NUM"
+    git -C "$REPO_DIR" worktree add --force "$WT_DIR" "$WT_BRANCH" >/dev/null 2>&1 \
       || setup_fail "worktree add $WT_DIR failed"
     git -C "$WT_DIR" merge --ff-only "$HEAD_REF" >/dev/null 2>&1 \
-      || setup_fail "local branch $BRANCH has diverged from PR #$NUM"
+      || setup_fail "local branch $WT_BRANCH has diverged from PR #$NUM"
   else
-    git -C "$REPO_DIR" worktree add "$WT_DIR" -b "$BRANCH" "$HEAD_REF" >/dev/null 2>&1 \
+    git -C "$REPO_DIR" worktree add "$WT_DIR" -b "$WT_BRANCH" "$HEAD_REF" >/dev/null 2>&1 \
       || setup_fail "worktree add $WT_DIR failed"
   fi
 else
   BASE_REF="origin/$BASE_BRANCH"
-  git -C "$REPO_DIR" rev-parse --verify --quiet "$BASE_REF" >/dev/null \
-    || setup_fail "missing $BASE_REF in $REPO_DIR"
-  git -C "$REPO_DIR" worktree add "$WT_DIR" -b "$BRANCH" "$BASE_REF" >/dev/null 2>&1 \
-    || setup_fail "worktree add $WT_DIR failed"
+  if ! git -C "$REPO_DIR" rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
+    # A named branch that exists only here is still attachable: its commits are the caller's. A bare
+    # repository link has no such fallback — its mainline has to come from origin.
+    if [ -z "$BRANCH" ] || ! git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$BASE_BRANCH"; then
+      setup_fail "missing $BASE_REF in $REPO_DIR"
+    fi
+  fi
+  if git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$WT_BRANCH"; then
+    # The branch is already here — a re-run, or the caller's own checkout holds it with commits this run
+    # must keep. It is attached as it stands: nothing is fast-forwarded, compared to the base, or rewritten.
+    # --force is what lets it be checked out beside the checkout that already holds it.
+    git -C "$REPO_DIR" worktree add --force "$WT_DIR" "$WT_BRANCH" >/dev/null 2>&1 \
+      || setup_fail "worktree add $WT_DIR failed"
+  else
+    git -C "$REPO_DIR" worktree add "$WT_DIR" -b "$WT_BRANCH" "$BASE_REF" >/dev/null 2>&1 \
+      || setup_fail "worktree add $WT_DIR failed"
+  fi
 fi
 
 git -C "$WT_DIR" rev-parse --verify --quiet HEAD >/dev/null || setup_fail "worktree $WT_DIR is not usable"
@@ -231,14 +275,16 @@ script did not return.
   worktrees hold work a later run may rely on.
 - Reusing the checkout — the toplevel of `pwd` when it tracks the link, otherwise `<pwd>/<owner>-<repo>`:
   verify it is a git checkout, verify `origin` flattens to the same `owner/repo`, fetch, then fast-forward
-  only when the tree is clean. A dirty tree, a detached HEAD, local commits or a failed fetch leaves it
-  untouched — the worktree is then built from the `origin/<base>` the last fetch left behind (issue and
-  repository links), and if that ref is missing the run fails rather than falling back to the local branch.
+  only when the tree is clean and the branch is not the one this run will attach. A dirty tree, a detached
+  HEAD, local commits or a failed fetch leaves it untouched — the worktree is then built from the
+  `origin/<base>` the last fetch left behind, and if that ref is missing the run fails rather than falling
+  back to another branch. The one exception is a named `BRANCH` that already exists locally: those commits
+  are the caller's, so it is attached as it stands without needing `origin/<branch>`.
 - A pull request starts at its head, never at the checkout's local branch: `refs/pull/<n>/head` is mirrored
   to `refs/pr/<n>/head`, and the worktree's branch is created from it — or, when the branch is already here,
   kept only if the PR head contains it and then fast-forwarded to it. A branch carrying commits the PR head
   lacks fails the run rather than having them pushed into the PR. Issue and repository links start from
-  `origin/<base>`.
+  `origin/<base>` when their branch has to be created, and keep a branch that already exists as it stands.
 - Every `origin/*` branch is refreshed before the worktree is added, because a pull request can target a
   base other than the default branch and a single-branch clone tracks only one: without it an
   `origin/<base>...HEAD` diff has nothing to resolve. The refresh writes remote-tracking refs and moves no
@@ -246,10 +292,26 @@ script did not return.
 - A same-repository pull request keeps its own branch name, `headRefName`, so the run's push updates that
   pull request: the branch is created when the checkout lacks it and reused with a fast-forward when it
   has it, so a re-run on the same PR lands on the same branch. A fork PR keeps `pr-<n>-<TS>` — committing
-  there cannot update it, and the write flows refuse one. Issue and repository links keep
-  `issue-<n>-<TS>` and `task-<TS>`. Every link's worktree directory is still `<repo>-<TS>` (local time
-  `YYYYMMDD-HHMMSS`), so a re-run never collides on the path: if it exists, wait a second and retake it,
-  up to five times, never deleting or reusing an existing one.
+  there cannot update it, and the write flows refuse one. An issue link keeps `issue-<n>-<TS>` at the
+  default branch. A repository link where the user named no branch lands on `master`: the local `master`
+  is created from `origin/master` when absent, and attached exactly as it stands when it is already here,
+  so a re-run keeps its commits and nothing is moved or rewritten. Those commits are never pushed: they
+  stay on the local `master`, and the next repository-link run attaches that same `master` and inherits
+  them. `master` is fixed for that link kind — a repository with no `origin/master` fails instead of
+  falling back to another branch. A named `BRANCH` replaces that branch for an issue or repository link,
+  built from `origin/<branch>` or, when only the local branch exists, attached as it stands.
+- Only a pull request branch is compared against its base. A `master` or named branch is never
+  fast-forwarded, checked for ancestry, or reset: commits it already carries belong to the caller and
+  stay. That is why the pull-request rule above does not apply to them.
+- The shared checkout and the run may hold the same `master` — or the named branch — at once, because the
+  checkout is a cache that keeps its default branch. The checkout shares that branch, so the reuse
+  fast-forward is skipped for it: moving it first would start the run somewhere the caller did not leave
+  the branch. Every other branch the checkout might hold is still fast-forwarded best-effort. Nothing in
+  the run reads the checkout's working tree, but never commit in it: its tree still holds the older
+  commit, so a `git commit -a` there reverts the run's phase commits.
+- Every link's worktree directory is still `<repo>-<TS>` (local time `YYYYMMDD-HHMMSS`), so a re-run never
+  collides on the path: if it exists, wait a second and retake it, up to five times, never deleting or
+  reusing an existing one.
 - `gh` answers two things: the branch, base, and cross-repository flag of a pull request link (`gh pr view
   -R <owner/repo> --json headRefName,baseRefName,isCrossRepository`), and the default branch when
   `origin/HEAD` is missing. A PR link needs it — without it there is no branch to check out, so the run
