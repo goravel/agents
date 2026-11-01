@@ -105,7 +105,8 @@ facades.Route().Middleware(middleware.Jwt()).Get("users", userController.Index)
    - Only two branch shapes carry an issue: `issue-<n>-<TS>` (a run started from an issue link) and a head
      branch shaped `<type>/<n>-<description>`, `<n>` 1–5 digits at the start of the last segment:
      `feat/1234-description` → `1234`.
-   - Never read digits out of `task-<TS>` or `pr-<n>-<TS>`: there they are a timestamp and a pull request.
+   - Never read digits out of `pr-<n>-<TS>`: there they are a pull request. A `master` branch carries no
+     digits, and `feat/<short-description>` carries none by design.
    - Found → `closing_line = Closes https://github.com/goravel/goravel/issues/<number>`; otherwise omit it.
 
 3. **Detect existing PR**
