@@ -90,6 +90,10 @@ Spawn `subagents/setup` foreground and wait, passing `LINK` and, when the reques
   the worktree, whose branch belongs to the last run. Blank leaves the run on `master`, so the phase
   commits sit on the mainline and `goravel-pr` opens the pull request from a real `feat/…` branch instead
   of a timestamped `task-…` one.
+- A named `BRANCH` is the branch this run commits on, and `goravel-pr` pushes it as it is — only a default
+  branch (`master` / `main`) gets a `feat/…` work branch. The pull request still targets `BASE_BRANCH`, the
+  detected default, so `BRANCH=release-2.0` deliberately opens a `release-2.0 → master` pull request. Say
+  so when the change belongs on that branch rather than the default.
 
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build the path
