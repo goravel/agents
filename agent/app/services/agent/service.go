@@ -56,10 +56,6 @@ type Service struct {
 	// allowedSenders restricts which GitHub senders may trigger an agent run
 	// (AGENT_ALLOWED_SENDERS). It is validated non-empty in NewService.
 	allowedSenders map[string]struct{}
-
-	// now returns the current time; injected so the per-run directory name is
-	// deterministic in tests.
-	now func() time.Time
 }
 
 // NewService wires a Service from application configuration. It fails when
@@ -108,7 +104,6 @@ func NewService() (*Service, error) {
 		paseo:          paseo,
 		eventsURL:      strings.TrimRight(config.GetString("agent.base_url"), "/"),
 		allowedSenders: senders,
-		now:            time.Now,
 	}, nil
 }
 
@@ -232,8 +227,8 @@ func (s *Service) Poll(ctx context.Context) error {
 }
 
 // handle routes the instruction to an agent, resolves the target repository and
-// the run title, and dispatches the agent into a fresh run directory under the
-// paseo project. A routed title wins; when the router returns none, the run is
+// the run title, and dispatches the agent into a workspace on the paseo
+// project's folder. A routed title wins; when the router returns none, the run is
 // named after the issue or pull request the mention came from.
 func (s *Service) handle(ctx context.Context, ev *event, instruction string) error {
 	// The router sees the source repository; the agent sees the target.
@@ -259,16 +254,10 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 		return err
 	}
 
-	// The poller only makes the empty run directory: paseo starts the primary
-	// agent there, and the agent's `setup` subagent clones the repository and
-	// creates the run's worktree.
-	dir := runDir(project.Path, repository, s.now())
-	if err := prepareRunDir(dir); err != nil {
-		return err
-	}
-
+	// The project's folder is where the run starts: it holds no checkout, and
+	// the run's `setup` subagent clones the repository and creates the worktree.
 	return s.dispatcher.Run(ctx, dispatch.Request{
-		Dir:     dir,
+		Dir:     project.Path,
 		Project: project.ID,
 		Agent:   agent,
 		Prompt:  ev.agentPrompt(agent, instruction),

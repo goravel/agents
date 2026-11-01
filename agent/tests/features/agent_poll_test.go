@@ -144,13 +144,14 @@ func pullRequestPage(body string) string {
 }
 
 // pollObservation is what one poll cycle observed at the process boundary: the
-// run directory the paseo workspace was created for, the paseo project it was
-// created in, the paseo run started inside it, and the acknowledged event ids.
+// folder the paseo workspace was created on, the paseo project it was created
+// in, the cwd the paseo run used, and the acknowledged event ids.
 type pollObservation struct {
-	runDir         string
+	projectDir     string
+	workspacePath  string
 	project        string
 	workspaceID    string
-	workspaceDir   string
+	runPath        string
 	workspaceTitle string
 	mode           string
 	model          string
@@ -162,7 +163,7 @@ type pollObservation struct {
 }
 
 // pollEnv is everything one poll cycle runs against: the relay, the mocked
-// process boundary and the project folder the run directories are created in.
+// process boundary and the paseo project's folder.
 type pollEnv struct {
 	relay       *relay
 	process     *mocksprocess.Process
@@ -207,8 +208,8 @@ func (s *AgentPollTestSuite) setupPoll(page string) pollEnv {
 
 	s.Require().True(facades.Cache().Flush())
 
-	// The project lookup points paseo at this directory, so the real
-	// prepareRunDir stays inside the test's temp dir.
+	// The project lookup points paseo at this directory, so the workspace path
+	// the service passes is this test's temp dir — nothing is created inside it.
 	projectDir, err := filepath.EvalSymlinks(s.T().TempDir())
 	s.Require().NoError(err)
 
@@ -298,9 +299,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 	env.process.EXPECT().WithContext(testifymock.Anything).Return(env.process).Once()
 	env.process.EXPECT().Timeout(paseoTimeout).Return(env.process).Once()
 	env.process.EXPECT().
-		Path(testifymock.MatchedBy(func(p string) bool {
-			return strings.HasPrefix(p, env.projectDir)
-		})).
+		Path(env.projectDir).
 		Return(env.process).
 		Once()
 	env.process.EXPECT().Quietly().Return(env.process).Once()
@@ -310,7 +309,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 			"HOME="+os.Getenv("HOME"),
 			"paseo", "workspace", "create",
 			"--isolation", "local",
-			"--path", testifymock.MatchedBy(func(p string) bool { return strings.HasPrefix(p, env.projectDir) }),
+			"--path", env.projectDir,
 			"--project", "prj_tmp",
 			"--title", testifymock.MatchedBy(func(title string) bool { return title != "" }),
 			"--json").
@@ -318,11 +317,12 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 			// args = [-i, PATH…, HOME…, paseo, workspace, create, --isolation,
 			//         local, --path, <dir>, --project, <id>, --title, <title>,
 			//         --json].
-			observation.runDir = args[9]
+			observation.workspacePath = args[9]
 			observation.project = args[11]
 			observation.workspaceTitle = args[13]
-			s.Require().DirExists(observation.runDir)
-			s.Require().Equal(env.projectDir, filepath.Dir(observation.runDir))
+			// The workspace points at the project's folder, and nothing creates a
+			// per-run directory inside it.
+			s.Require().Equal(env.projectDir, observation.workspacePath)
 		}).
 		Return(createResultMock).
 		Once()
@@ -335,10 +335,8 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 	env.process.EXPECT().WithContext(testifymock.Anything).Return(env.process).Once()
 	env.process.EXPECT().Timeout(paseoTimeout).Return(env.process).Once()
 	env.process.EXPECT().
-		Path(testifymock.MatchedBy(func(p string) bool {
-			return strings.HasPrefix(p, env.projectDir)
-		})).
-		Run(func(p string) { observation.workspaceDir = p }).
+		Path(env.projectDir).
+		Run(func(p string) { observation.runPath = p }).
 		Return(env.process).
 		Once()
 	env.process.EXPECT().DisableBuffering().Return(env.process).Once()
@@ -359,8 +357,8 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 			"--env", "GITHUB_CLONE_PREFIX=git@github.com:",
 			"--no-wait", "--",
 			testifymock.MatchedBy(func(prompt string) bool {
-				// The prompt omits the Repository line: the run directory
-				// implies the repository.
+				// The prompt carries no Repository line: the router's choice
+				// shapes only the title.
 				return !strings.HasPrefix(prompt, "Repository: ")
 			})).
 		Run(func(_ string, args ...string) {
@@ -380,6 +378,7 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 
 	s.Require().NoError(facades.Artisan().Call("poll-events"))
 
+	observation.projectDir = env.projectDir
 	observation.acknowledged = env.relay.acknowledged()
 	observation.lastError = env.lastError()
 
@@ -389,9 +388,9 @@ func (s *AgentPollTestSuite) pollOnce(page string) pollObservation {
 // TestPollShipsIssueMention covers a `@goravel-agent ship this issue in
 // goravel/framework` comment on an issue in goravel/goravel. The router is live,
 // so this asserts the poller's observable outcome of the router's decision: the
-// ship agent and a run directory for the routed goravel/framework repository
-// (not the comment's own repository), plus the issue and comment links and the
-// instruction.
+// ship agent and a workspace on the project folder (not a per-run directory for
+// the routed goravel/framework repository), plus the issue and comment links and
+// the instruction.
 func (s *AgentPollTestSuite) TestPollShipsIssueMention() {
 	got := s.pollOnce(shipIssuePage)
 
@@ -405,11 +404,11 @@ func (s *AgentPollTestSuite) TestPollShipsIssueMention() {
 	s.Require().NotEmpty(got.title)
 	s.Require().NotContains(got.title, "\n")
 	s.Require().LessOrEqual(len([]rune(got.title)), 60)
-	s.Require().True(strings.HasPrefix(filepath.Base(got.runDir), "goravel-framework-"))
 	s.Require().Equal("prj_tmp", got.project)
 	s.Require().Equal("wks_0123456789abcdef", got.workspaceID)
 	s.Require().Equal(got.title, got.workspaceTitle, "workspace title must match the run title")
-	s.Require().Equal(got.runDir, got.workspaceDir, "workspace must point at the per-run directory")
+	s.Require().Equal(got.projectDir, got.workspacePath, "workspace must point at the project folder")
+	s.Require().Equal(got.projectDir, got.runPath, "the run must start in the project folder")
 	s.Require().Contains(got.prompt, "Issue: https://github.com/goravel/goravel/issues/123")
 	s.Require().Contains(got.prompt, "comment: https://github.com/goravel/goravel/issues/123#issuecomment-24680")
 	s.Require().Contains(got.prompt, "Instruction: ship this issue in goravel/framework")
@@ -420,7 +419,7 @@ func (s *AgentPollTestSuite) TestPollShipsIssueMention() {
 
 // TestPollReviewsPullRequest covers a `@goravel-agent review` comment on a pull
 // request in goravel/framework. The router is live, so this asserts the poller's
-// observable outcome: the review agent and a run directory for goravel/framework,
+// observable outcome: the review agent and a workspace on the project folder,
 // plus the PR and comment links and the instruction.
 func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
 	got := s.pollOnce(reviewPullRequestPage)
@@ -435,11 +434,11 @@ func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
 	s.Require().NotEmpty(got.title)
 	s.Require().NotContains(got.title, "\n")
 	s.Require().LessOrEqual(len([]rune(got.title)), 60)
-	s.Require().True(strings.HasPrefix(filepath.Base(got.runDir), "goravel-framework-"))
 	s.Require().Equal("prj_tmp", got.project)
 	s.Require().Equal("wks_0123456789abcdef", got.workspaceID)
 	s.Require().Equal(got.title, got.workspaceTitle, "workspace title must match the run title")
-	s.Require().Equal(got.runDir, got.workspaceDir, "workspace must point at the per-run directory")
+	s.Require().Equal(got.projectDir, got.workspacePath, "workspace must point at the project folder")
+	s.Require().Equal(got.projectDir, got.runPath, "the run must start in the project folder")
 	s.Require().Contains(got.prompt, "PR: https://github.com/goravel/framework/pull/42")
 	s.Require().Contains(got.prompt, "comment: https://github.com/goravel/framework/pull/42#issuecomment-98765")
 	s.Require().Contains(got.prompt, "Instruction: review\ncomment the review result to the pr")
@@ -450,8 +449,8 @@ func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
 // TestPollAnalyzesPullRequest covers a `@goravel-agent analyze this pull request`
 // comment on a pull request in goravel/framework. The router is live, so this
 // asserts the poller's observable outcome: paseo runs --mode analyze against a
-// run directory for goravel/framework, with the PR link the analyze prompt needs
-// and the same post-to-PR line the review agent gets.
+// workspace on the project folder, with the PR link the analyze prompt needs and
+// the same post-to-PR line the review agent gets.
 func (s *AgentPollTestSuite) TestPollAnalyzesPullRequest() {
 	got := s.pollOnce(analyzePullRequestPage)
 
@@ -465,7 +464,8 @@ func (s *AgentPollTestSuite) TestPollAnalyzesPullRequest() {
 	s.Require().NotEmpty(got.title)
 	s.Require().Equal(got.title, got.workspaceTitle, "workspace title must match the run title")
 	s.Require().Equal("prj_tmp", got.project)
-	s.Require().Equal(got.runDir, got.workspaceDir, "workspace must point at the per-run directory")
+	s.Require().Equal(got.projectDir, got.workspacePath, "workspace must point at the project folder")
+	s.Require().Equal(got.projectDir, got.runPath, "the run must start in the project folder")
 	s.Require().Contains(got.prompt, "PR: https://github.com/goravel/framework/pull/42")
 	s.Require().Contains(got.prompt, "comment: https://github.com/goravel/framework/pull/42#issuecomment-98765")
 	s.Require().Contains(got.prompt, "Instruction: analyze this pull request\ncomment the review result to the pr")

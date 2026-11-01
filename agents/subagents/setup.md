@@ -38,10 +38,11 @@ the work in the worktree.
   always keeps its own branch and ignores `BRANCH`; an issue link uses it instead of `issue-<n>-<TS>` —
   which costs the `Closes #<n>` line, so name such a branch `<type>/<n>-<description>` to keep it.
 - **The workspace root is always `pwd`.** No input moves it and an environment `WORKSPACE_DIR` is ignored.
-  You start inside the run's own checkout of the link, so that checkout — resolved to its
-  toplevel — is reused in place and the worktree is its sibling `<toplevel>-<TS>`. When `pwd` is not inside
-  a matching checkout, the checkout is `<pwd>/<owner>-<repo>` — reused when its `origin` matches, cloned
-  when it is absent — and the worktree is that directory's sibling `<owner>-<repo>-<TS>`.
+  You start in the paseo project's folder, which holds no checkout, so the checkout is
+  `<pwd>/<owner>-<repo>` — reused when its `origin` matches, cloned when it is absent — and the worktree
+  is that directory's sibling `<owner>-<repo>-<TS>`. Only when `pwd` is itself inside a matching checkout
+  is that checkout — resolved to its toplevel — reused in place, with the worktree as its sibling
+  `<toplevel>-<TS>`.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 

@@ -6,7 +6,6 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 	"sync"
 	"time"
@@ -21,14 +20,14 @@ const (
 	// paseoBin is the CLI that dispatches runs.
 	paseoBin = "paseo"
 	// workspaceIsolation is the workspace kind paseo creates for a run: the
-	// per-run directory already exists, so the workspace must point at it rather
-	// than mint a new worktree.
+	// project's folder already exists and holds no checkout, so the workspace
+	// points at it rather than minting a worktree; the run's `setup` subagent
+	// clones the repository inside it.
 	workspaceIsolation = "local"
 )
 
 // Project is the paseo project every run workspace is created in: the id
-// `paseo workspace create --project` needs, and the folder its run directories
-// live in.
+// `paseo workspace create --project` needs, and the folder every run starts in.
 type Project struct {
 	ID   string
 	Path string
@@ -159,7 +158,9 @@ func (p *Paseo) resolveProject(ctx context.Context) (Project, error) {
 // command comes back even on failure, so the caller can log what did not work.
 // The JSON branch is read for the id: with --json paseo prints only
 // {"workspaceId":"wks_…","project":…,"name":…,"isolation":"local","cwd":…}. A
-// failure is a paseoError: every event of the page would hit it again.
+// failure is a paseoError: every event of the page would hit it again. dir is
+// the paseo project's folder: the workspace points at it and `paseo run` starts
+// the agent there.
 func (p *Paseo) CreateWorkspace(ctx context.Context, dir, projectID, title string) (string, []string, error) {
 	if projectID == "" {
 		return "", nil, paseoError{err: errors.New("agent: a paseo project is required to create a run workspace")}
@@ -262,48 +263,6 @@ func (p *Paseo) Run(ctx context.Context, request RunRequest) ([]string, error) {
 	}
 
 	return command, nil
-}
-
-// runTimeLayout timestamps each run directory. Milliseconds keep two mentions
-// handled in the same second from sharing one directory.
-const runTimeLayout = "20060102-150405.000"
-
-// runDir resolves the per-run directory for a repository under the resolved
-// paseo project folder. Each run gets its own uniquely named directory
-// (<root>/<owner>-<repo>-<timestamp>) so two runs never share one. It starts
-// empty: the run's `setup` subagent clones the repository and creates the
-// worktree the run then works inside.
-func runDir(root, repository string, now time.Time) string {
-	return filepath.Join(root, runDirName(repository, now))
-}
-
-// runDirName flattens owner/name into a filesystem-safe basename and appends the
-// run timestamp. Flattening also removes any path separators, so a hostile
-// repository value cannot escape the project folder.
-func runDirName(repository string, now time.Time) string {
-	var b strings.Builder
-	for _, r := range repository {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') ||
-			r == '.' || r == '_' || r == '-' {
-			b.WriteRune(r)
-		} else {
-			b.WriteByte('-')
-		}
-	}
-
-	return strings.Trim(b.String(), "-") + "-" + now.UTC().Format(runTimeLayout)
-}
-
-// prepareRunDir creates the directory the paseo workspace points at. paseo
-// records a local workspace for a path it does not create, and `paseo run`
-// starts the agent with that path as its working directory, so the directory
-// must exist first. No clone happens here.
-func prepareRunDir(dir string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return fmt.Errorf("create run directory %s: %w", dir, err)
-	}
-
-	return nil
 }
 
 // scrubbedEnv is the `env -i PATH=... HOME=...` prefix that strips secrets from
