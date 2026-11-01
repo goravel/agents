@@ -5,12 +5,12 @@
 // in-package tests import those mocks, so that import would be a cycle.
 package dispatch
 
-// Request is one agent invocation: which directory to run in, which paseo
+// Request is one agent invocation: the directory to run in, which paseo
 // project the workspace belongs to, which agent, the prompt, and the run title.
 type Request struct {
-	// Dir is this run's own, still empty directory: paseo starts the primary
-	// agent there, and the agent's `setup` subagent clones the repository and
-	// creates the run's worktree.
+	// Dir is the paseo project's folder: the workspace points at it and paseo
+	// starts the primary agent there. It holds no checkout; the run's `setup`
+	// subagent clones the repository inside it and creates the run's worktree.
 	Dir string
 	// Project is the paseo project id the run workspace is created in. Required:
 	// the dispatcher refuses a run without one, because `--project` is always

@@ -14,12 +14,14 @@ func init() {
 		// Token sent as the X-Api-Token header on every relay request.
 		"api_token": config.Env("AGENT_API_TOKEN", ""),
 
-		// Name of the paseo project every run workspace is created in; its folder
-		// holds the empty per-run directories. The run's `setup` subagent clones
-		// the repository inside one and creates the run's worktree. The id is
-		// resolved lazily with `paseo project ls --json` on the first mention that
-		// needs a workspace. There is no default: a blank value is a configuration
-		// error the poller refuses to start with.
+		// Name of the paseo project every run workspace is created in: the
+		// workspace points at the project's folder, so every run starts there and
+		// the run's `setup` subagent clones the repository inside that folder and
+		// creates the run's worktree. Runs of one repository share that checkout,
+		// so the folder must be private to the agent's user. The id is resolved
+		// lazily with `paseo project ls --json` on the first mention that needs a
+		// workspace. There is no default: a blank value is a configuration error
+		// the poller refuses to start with.
 		"project_name": config.Env("AGENT_PROJECT_NAME", ""),
 
 		// Comma-separated GitHub senders allowed to trigger agent runs. Required:

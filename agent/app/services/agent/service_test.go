@@ -5,8 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"os"
-	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -63,9 +61,6 @@ var relayQueryParams = map[string]string{
 	"limit":    "10",
 }
 
-// checkoutTime pins the injected clock so the per-run checkout name is stable.
-var checkoutTime = time.Date(2026, time.October, 18, 14, 32, 5, 0, time.UTC)
-
 // testConfig groups the relay-facing settings used to build a test Service.
 type testConfig struct {
 	baseURL        string
@@ -73,7 +68,6 @@ type testConfig struct {
 	paseo          *Paseo
 	mention        string
 	allowedSenders map[string]struct{}
-	now            func() time.Time
 }
 
 // newTestService wires a Service from explicit dependencies, mirroring NewService
@@ -90,7 +84,6 @@ func newTestService(router AgentRouter, dispatcher Dispatcher, retry RetryTracke
 		paseo:          cfg.paseo,
 		eventsURL:      strings.TrimRight(cfg.baseURL, "/"),
 		allowedSenders: cfg.allowedSenders,
-		now:            cfg.now,
 	}
 }
 
@@ -102,7 +95,6 @@ func relayConfig(apiToken string) testConfig {
 		paseo:          resolvedPaseo(Project{ID: "prj_tmp", Path: "/tmp/ws"}),
 		mention:        DefaultMention,
 		allowedSenders: parseSenders("bowen"),
-		now:            func() time.Time { return checkoutTime },
 	}
 }
 
@@ -203,7 +195,7 @@ func TestServicePollDispatchesMentionsAndDeletes(t *testing.T) {
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
-			return req.Dir == runDir("/tmp/ws", "goravel/goravel", checkoutTime) &&
+			return req.Dir == "/tmp/ws" &&
 				req.Project == "prj_tmp" &&
 				req.Agent == constants.AgentReview &&
 				req.Title == "Review issue 123" &&
@@ -225,52 +217,6 @@ func TestServicePollDispatchesMentionsAndDeletes(t *testing.T) {
 	service := newTestService(router, dispatcher, retry, handles, reactor, relayConfig("token"))
 	require.NoError(t, service.Poll(context.Background()))
 
-	httpMock.AssertExpectations(t)
-}
-
-// TestServicePollKeepsEventWhenRunDirFails pins that a run directory that cannot
-// be created is an ordinary event failure: the event stays for a retry and
-// nothing is dispatched.
-func TestServicePollKeepsEventWhenRunDirFails(t *testing.T) {
-	factory := mock.Factory()
-	factory.Log()
-	httpMock := factory.Http()
-	getResp := mockshttp.NewResponse(t)
-
-	getResp.EXPECT().Failed().Return(false).Once()
-	getResp.EXPECT().Body().Return(mentionOnlyEnvelope, nil).Once()
-
-	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Once()
-	httpMock.EXPECT().WithQueryParameters(relayQueryParams).Return(httpMock).Once()
-	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Once()
-	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
-
-	router := mocksagent.NewAgentRouter(t)
-	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/goravel", "", nil).Once()
-
-	dispatcher := mocksagent.NewDispatcher(t)
-
-	retry := mocksagent.NewRetryTracker(t)
-	retry.EXPECT().RecordFailure("d-1").Return(false).Once()
-
-	handles := mocksagent.NewHandleStore(t)
-	handles.EXPECT().Has("d-1").Return(false).Once()
-
-	reactor := expectReaction(t, "goravel/goravel", reactionCollectionIssue, 24680)
-
-	// A regular file where the project folder should be makes prepareRunDir fail.
-	blocker := filepath.Join(t.TempDir(), "file")
-	require.NoError(t, os.WriteFile(blocker, nil, 0o644))
-
-	cfg := relayConfig("token")
-	cfg.paseo = resolvedPaseo(Project{ID: "prj_tmp", Path: blocker})
-
-	service := newTestService(router, dispatcher, retry, handles, reactor, cfg)
-	require.NoError(t, service.Poll(context.Background()))
-
-	dispatcher.AssertNotCalled(t, "Run", testifymock.Anything, testifymock.Anything)
-	handles.AssertNotCalled(t, "Mark", testifymock.Anything)
-	httpMock.AssertNotCalled(t, "Delete", testifymock.Anything, testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
 
@@ -694,7 +640,6 @@ func TestNewServiceReadsConfig(t *testing.T) {
 	require.False(t, service.paseo.resolved, "NewService must not resolve the project")
 	require.Same(t, service.paseo, service.dispatcher.(*opencodeDispatcher).paseo,
 		"the dispatcher must share the service's project cache")
-	require.NotNil(t, service.now)
 	require.IsType(t, &githubReactor{}, service.reactor)
 	require.NotNil(t, service.reactor.(*githubReactor).client)
 	require.True(t, service.allowed("bowen"))
@@ -1069,7 +1014,7 @@ func TestServicePollUsesRoutedRepository(t *testing.T) {
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
-			return req.Dir == runDir("/tmp/ws", "goravel/framework", checkoutTime) &&
+			return req.Dir == "/tmp/ws" &&
 				req.Project == "prj_tmp" &&
 				req.Agent == constants.AgentShip &&
 				req.Title == "Issue #123" &&
@@ -1125,7 +1070,7 @@ func TestServicePollFallsBackToAgentTitle(t *testing.T) {
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
-			return req.Dir == runDir("/tmp/ws", "goravel/goravel", checkoutTime) &&
+			return req.Dir == "/tmp/ws" &&
 				req.Project == "prj_tmp" &&
 				req.Title == "review in goravel/goravel"
 		})).
@@ -1174,7 +1119,7 @@ func TestServicePollFallsBackToSourceRepository(t *testing.T) {
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
-			return req.Dir == runDir("/tmp/ws", "goravel/goravel", checkoutTime) &&
+			return req.Dir == "/tmp/ws" &&
 				req.Agent == constants.AgentReview &&
 				!strings.Contains(req.Prompt, "Repository:")
 		})).
@@ -1319,7 +1264,7 @@ func TestServicePollReactsToReviewComment(t *testing.T) {
 	dispatcher := mocksagent.NewDispatcher(t)
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
-			return req.Dir == runDir("/tmp/ws", "goravel/framework", checkoutTime) &&
+			return req.Dir == "/tmp/ws" &&
 				req.Project == "prj_tmp" &&
 				req.Agent == constants.AgentReview &&
 				req.Title == "PR #123"
@@ -1478,7 +1423,7 @@ func TestServicePollResolvesProjectOnFirstDispatch(t *testing.T) {
 	dispatcher.EXPECT().
 		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
 			return req.Project == "prj_tmp" &&
-				req.Dir == runDir("/tmp/ws", "goravel/goravel", checkoutTime)
+				req.Dir == "/tmp/ws"
 		})).
 		Return(nil).
 		Once()

@@ -38,10 +38,12 @@ the work in the worktree.
   always keeps its own branch and ignores `BRANCH`; an issue link uses it instead of `issue-<n>-<TS>` —
   which costs the `Closes #<n>` line, so name such a branch `<type>/<n>-<description>` to keep it.
 - **The workspace root is always `pwd`.** No input moves it and an environment `WORKSPACE_DIR` is ignored.
-  You start inside the run's own checkout of the link, so that checkout — resolved to its
-  toplevel — is reused in place and the worktree is its sibling `<toplevel>-<TS>`. When `pwd` is not inside
-  a matching checkout, the checkout is `<pwd>/<owner>-<repo>` — reused when its `origin` matches, cloned
-  when it is absent — and the worktree is that directory's sibling `<owner>-<repo>-<TS>`.
+  You start in the paseo project's folder, which holds no checkout, so the checkout is
+  `<pwd>/<owner>-<repo>` — reused when its `origin` matches, cloned when it is absent — and the worktree
+  is that directory's sibling `<owner>-<repo>-<TS>`. Only when `pwd` is itself inside a matching checkout
+  is that checkout — resolved to its toplevel — reused in place, with the worktree as its sibling
+  `<toplevel>-<TS>`. **That checkout is shared by every run of the repository**, so a concurrent run may
+  be creating it: the script waits for that clone and reuses it instead of failing.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
@@ -136,7 +138,21 @@ if TOPLEVEL=$(git -C "$WORKSPACE_DIR" rev-parse --show-toplevel 2>/dev/null) \
   REPO_DIR="$TOPLEVEL"
 fi
 
-if [ -e "$REPO_DIR" ]; then
+# Every run of a repository shares this checkout, so only one run may create it: the run whose mkdir
+# succeeds clones it, and a run that loses the race waits for that clone and then reuses it.
+CLAIMED=
+if mkdir "$REPO_DIR" 2>/dev/null; then
+  CLAIMED=1
+else
+  [ -e "$REPO_DIR" ] || setup_fail "cannot claim $REPO_DIR"
+  WAITS=0
+  while ! git -C "$REPO_DIR" rev-parse --verify HEAD >/dev/null 2>&1 && [ "$WAITS" -lt 30 ]; do
+    WAITS=$((WAITS + 1))
+    sleep 1
+  done
+fi
+
+if [ -z "$CLAIMED" ]; then
   { [ -d "$REPO_DIR/.git" ] || [ -f "$REPO_DIR/.git" ]; } \
     || setup_fail "$REPO_DIR exists but is not a git checkout"
   REMOTE=$(git -C "$REPO_DIR" remote get-url origin 2>/dev/null) \
@@ -153,7 +169,6 @@ if [ -e "$REPO_DIR" ]; then
     git -C "$REPO_DIR" merge --ff-only "origin/$CUR" >/dev/null 2>&1 || true
   fi
 else
-  mkdir "$REPO_DIR" 2>/dev/null || setup_fail "cannot claim $REPO_DIR"
   if [ -n "$CLONE_DEPTH" ]; then
     git clone --depth "$CLONE_DEPTH" "$CLONE_PREFIX$REPO.git" "$REPO_DIR" >/dev/null 2>&1
   else
