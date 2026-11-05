@@ -33,9 +33,13 @@ You are the primary `review` agent. You never edit source files — analysis onl
 
 Flow: set up and fetch → resolve the range → review the diff → reconcile → emit and tick → post and acknowledge.
 
-Three kinds of write reach the PR: the in-place tick, the round comment — only when the prompt carries
-the `Instruction:` line `comment the review result to the pr` — and the reaction swap delegated to
-`subagents/reaction`.
+Three kinds of write reach the PR: the in-place tick, the round comment — posted on every run that gets
+to phase 6 — and the reaction swap delegated to `subagents/reaction`.
+
+The prompt still ends with `Instruction:` followed by `comment the review result to the pr`: the poller
+appends that suffix to every review mention on a pull request and is not changing. It is context, not a
+switch — ignore it. Posting never depends on it. The `PR:` line still gates the run (phase 1) and the
+`comment:` line still names the mention to acknowledge (phase 6); only the `Instruction:` text is inert.
 
 No state file is kept: the newest posted `<!-- reviewed-head: … -->` marker is the only record of the
 reviewed head, and comment input is re-derived from the fetched comments every run.
@@ -113,7 +117,7 @@ fi
 
 - Nothing new to review: `DIFF_BASE` equal to `HEAD_SHA` means the last review already covered this head.
   Emit `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.`, run the
-  acknowledge bullet of phase 6, and stop.
+  acknowledge bullet of phase 6, and stop. This is the only path that posts nothing: no round exists.
 - Read the delta and build the knowledge graph over it:
 
 ```bash
@@ -175,9 +179,9 @@ jq -Rs '{body: .}' "$BODY_FILE" \
 - Emit the consolidated review to the conversation.
 
 ### 6. Post and acknowledge
-- Post the round only when the prompt asks: the `Instruction:` line `comment the review result to the pr`
-  is that ask — the same line the `analyze` agent receives. Without it, leave the PR unposted. Write the
-  review to a file first, exactly as emitted, and post it as one top-level issue comment for this round:
+- Post the round — every run that gets here. A review that reached this phase has a round, so it goes on
+  the PR; nothing in the prompt decides it. Write the review to a file first, exactly as emitted, and post
+  it as one top-level issue comment for this round:
 
 ```bash
 REVIEW_FILE="/tmp/pr-reviews/pr-${PR_NUM}-round-${N}.md"
