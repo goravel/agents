@@ -155,7 +155,7 @@ Delegate the round review to the `subagents/review-diff` agent.
 - One `review-diff` session per conversation: round 1 spawns it foreground with `agent: "subagents/review-diff"`; later rounds resume its `sessionID`.
 - Round 1 prompt:
   > You are running as a subagent in the ship flow. Review the phase delta and nothing else. WORKTREE_DIR=<WT>; DIFF_BASE=<PHASE_BASE>; PHASE=<N>; FOLDER=<folder>; LANGUAGES=<detected from `git -C "$WT" diff "$PHASE_BASE"..HEAD --name-only`>; CONSIDERED=<folder>/considered.md; PRIOR=<folder>/findings-by-side.json (absent in round 1). Write <folder>/review-N.md and <folder>/findings-by-side.json. Do not touch the PR or the worktree.
-- Later rounds: resume with the new `PHASE_BASE`. Do not spawn `subagents/go-review` from here — `review-diff` owns the fan-out and reuses its own worker sessions.
+- Later rounds: resume with the new `PHASE_BASE`. Do not spawn `subagents/review-go` from here — `review-diff` owns the fan-out and reuses its own worker sessions.
 
 ### 5.3 Decide
 
