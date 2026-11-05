@@ -87,9 +87,9 @@ The review agent supplies one of two data shapes. Apply the template above to wh
   or reorder them — not when ticking, not when re-emitting.
 - **Reviewed line.** One plain line under the markers: `<short base>..<short head> — <COMMITS> new commits`
   for an incremental round, `everything up to <short head> — <FILES> files` for a full round.
-- **Carried findings.** In an incremental round a prior open finding outside those lines, in a file the
-  delta still has, is not resolved and not re-listed; it keeps its count on its `[ROUND k]` line.
-  `Resolved: <N>` counts only findings the reviewed range fixed.
+- **Carried findings.** In an incremental round a prior open finding in a file the delta still has,
+  outside the lines it added or modified, is not resolved and not re-listed; it keeps its count on its
+  `[ROUND k]` line. `Resolved: <N>` counts only findings the reviewed range fixed.
 - **Folded Nits (both shapes).** Always wrap the entire `### Nits` block in `<details>` /
   `<summary>Nits (<N>)</summary>`: keep every numbered anchor line byte-for-byte and leave a blank
   line after `<summary>` and before `</details>`. Omit the whole block when there are no Nits.
