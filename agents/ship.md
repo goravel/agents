@@ -87,9 +87,10 @@ Spawn `subagents/setup` foreground and wait, passing `LINK` and, when the reques
 > You are running as a subagent in the ship flow. LINK=<the value of LINK: the PR link from the prompt, else owner/repo> BRANCH=<the branch the user named in the request, else blank>
 
 - `BRANCH` stays blank unless the user's own words name a branch — never guess one from `origin` or from
-  the worktree, whose branch belongs to the last run. Blank starts the run on a fresh `run-<TS>` branch
-  from `origin/master`; the shared checkout's `master` is never moved, and `goravel-pr` pushes `run-<TS>`
-  as the pull request head.
+  the worktree, whose branch belongs to the last run. For a repository link, blank starts the run on a
+  fresh `run-<TS>` branch from `origin/master`; a pull request keeps its own branch and an issue link gets
+  `issue-<n>-<TS>`. The shared checkout's `master` is never moved, and `goravel-pr` pushes `run-<TS>` as
+  the pull request head.
 - A named `BRANCH` is the branch this run commits on, and `goravel-pr` pushes it as it is — only a default
   branch (`master` / `main`) gets a `feat/…` work branch. The pull request still targets `BASE_BRANCH`, the
   detected default, so `BRANCH=release-2.0` deliberately opens a `release-2.0 → master` pull request. Say

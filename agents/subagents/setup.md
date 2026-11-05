@@ -46,7 +46,8 @@ the work in the worktree.
 - **The worktree root is always `/tmp`.** Every run's worktree is `/tmp/<owner>-<repo>-<TS>` (local time
   `YYYYMMDD-HHMMSS`), never beside the checkout and never inside the project folder: all of the run's
   changes, commits and branches live there. On macOS `/tmp` resolves to `/private/tmp`, so the returned
-  path may show either.
+  path may show either. `/tmp` is OS-managed, so a long-idle run's uncommitted files may be cleaned, and
+  the predictable path is held by whichever process creates it first.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
@@ -111,8 +112,7 @@ else
     || setup_fail "unusable branch name: $BRANCH"
 fi
 
-# A named branch, or a bare repository's mainline, is known this early so the checkout's fast-forward can
-# skip the branch this run attaches. Only an issue link is left to resolve.
+# A named branch, or a bare repository's mainline, is settled here; only an issue link is left to resolve.
 if [ -n "$BRANCH" ]; then
   BASE_BRANCH="$BRANCH"
 elif [ "$KIND" = repo ]; then
@@ -227,15 +227,15 @@ TS=$(date +%Y%m%d-%H%M%S)
 WT_BRANCH=$(branch_name "$TS")
 WT_DIR="$WORKTREE_ROOT/$SAFE-$TS"
 
-# Keep the shared checkout on its own branch's tip. The run never attaches this branch (it gets
-# its own), so moving it here cannot disturb the run. A dirty checkout, a detached HEAD, a
-# branch with no upstream, a branch another worktree still holds, or a failed fetch leaves it
-# where it is; the worktree below is still created from the freshest origin refs, never from
-# this checkout's branch.
+# Keep the shared checkout on its own branch's tip. The run normally gets its own branch, so moving
+# this one cannot disturb it; the one case where a named BRANCH is this branch is refused by the guard
+# below. A dirty checkout, a detached HEAD, a branch with no upstream, a branch another worktree still
+# holds, or a failed fetch leaves it where it is; the worktree below is still created from the freshest
+# origin refs, never from this checkout's branch.
 CUR=$(git -C "$REPO_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null)
 if [ -n "$CUR" ]; then
   HELD=$(git -C "$REPO_DIR" worktree list --porcelain 2>/dev/null | grep -Fxc "branch refs/heads/$CUR")
-  if [ "$CUR" = "$WT_BRANCH" ] && [ "$REPO_DIR" != "$TOPLEVEL" ]; then
+  if [ -n "$BRANCH" ] && [ "$CUR" = "$WT_BRANCH" ]; then
     setup_fail "branch $WT_BRANCH is the shared checkout's branch; omit BRANCH so the run gets its own"
   fi
   if [ "$CUR" != "$WT_BRANCH" ] && [ "$HELD" -le 1 ] \
@@ -338,13 +338,15 @@ script did not return.
   `feat/…` branch. `master` is fixed for that link kind — a repository with no `origin/master` fails
   instead of falling back to another branch. A named `BRANCH` replaces that branch for an issue or
   repository link, built from `origin/<branch>` or, when only the local branch exists, attached as it
-  stands; naming the checkout's own branch fails, because a run must not move it.
+  stands; naming the checkout's own branch fails, because a run must not move it. Nothing deletes a
+  `run-<TS>` branch, so they accumulate in the shared checkout by design.
 - Only a pull request branch is compared against its base. A `master` or named branch is never
   fast-forwarded, checked for ancestry, or reset: commits it already carries belong to the caller and
   stay. That is why the pull-request rule above does not apply to them.
-- The shared checkout is a cache, not workspace: no run writes a file there, commits there, or checks out
-  its branch. The fast-forward is skipped when the run attaches the branch the cache also holds — only
-  possible when `pwd` is that checkout — and the worktree still lives in `/tmp`.
+- The shared checkout is a cache, not workspace: a repository or issue run never checks out its branch —
+  naming that branch as `BRANCH` fails — and no run commits there, so its tree cannot go stale under a
+  run's commits. A pull request keeps its own head branch, even when that is the cache's. Every worktree
+  lives in `/tmp`.
 - Every link's worktree directory is `/tmp/<owner>-<repo>-<TS>` (local time `YYYYMMDD-HHMMSS`), so a re-run
   never collides on the path: if it exists, wait a second and retake it, up to five times, never deleting
   or reusing an existing one.
