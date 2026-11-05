@@ -46,11 +46,10 @@ foreground and wait. Pass the `PR:` line verbatim as the link and keep its numbe
   branch yourself.
 - Keep it all: this flow removes nothing. `setup` owns the checkout and the worktree, and a later run
   reuses them.
-- Resolve the head, the base branch, the repository and the bot login, and fetch the conversation and PR
-  body (read-only; every list call uses `--paginate`):
+- Resolve the head, the base branch and the bot login, and fetch the conversation and PR body
+  (read-only; every list call uses `--paginate`):
 
 ```bash
-REPO=$(git -C "$WORKTREE_DIR" remote get-url origin | sed -E 's#/+$##; s#\.git$##' | awk -F'[:/]' '{print $(NF-1)"/"$NF}')
 HEAD_SHA=$(git -C "$WORKTREE_DIR" rev-parse HEAD)
 META=$(gh pr view "$PR_NUM" --json headRefOid,baseRefName --jq '[.headRefOid, .baseRefName] | @tsv')
 PR_HEAD=$(printf '%s\n' "$META" | cut -f1)
@@ -73,10 +72,10 @@ gh api --paginate "repos/{owner}/{repo}/pulls/${PR_NUM}/reviews" \
   - **Prior automated reviews** — any body containing the `🤖 Automated review` banner. Group into rounds: bodies sharing a `<!-- round: N -->` marker are one round (use the oldest comment's `html_url`); marker-less bodies are each their own round, numbered chronologically above every marker (oldest = `1 + max(marker)`, or 1 if none). Record each editable comment's endpoint (`issues/comments/{id}` or `pulls/comments/{id}`; review bodies are not editable), `id`, `html_url`, body, and timestamp — this is the **tick set**.
   - **Review input** — every other comment (bot or human) plus the PR body.
   - **Last reviewed head** — a prior automated review written by `$BOT_LOGIN` may carry
-    `<!-- reviewed-head: <sha> -->`; that marker is the commit the review covered. Read `reviewed_head`
-    and `reviewed_at` from `/tmp/pr-reviews/pr-${PR_NUM}-state.json` when that file's `repo` equals
-    `$REPO`. `LAST_REVIEWED` is the newer of the state file's head and the marker of the newest such
-    review by timestamp — compare `reviewed_at` with the comment's `created_at`. Still nothing → empty.
+    `<!-- reviewed-head: <sha> -->`; that marker is the commit the review covered. From the bodies fetched
+    above, `LAST_REVIEWED` is the marker of the newest such review by timestamp — an issue or inline
+    comment's `created_at`, a review body's `submitted_at`; several markers → the newest one. No automated
+    review by `$BOT_LOGIN`, no marker, or an unreadable value → empty, and the range below stays full.
 - For inline comments, `line` is null on outdated diffs (and a reply's `line` can be null too) — fall back to `original_line`.
 
 - Resolve the review range. The last reviewed head is reused only when it is a full 40-character SHA this
@@ -174,18 +173,9 @@ mkdir -p /tmp/pr-reviews
 gh pr comment "$PR_NUM" --body-file "$REVIEW_FILE"
 ```
 
-- Record the reviewed head after the post and before the reaction, once the review reached the user —
-  posted, or emitted when the prompt asked for no post. The posted body is what the next run reads; this
-  file is the same fact for a run that posted nothing:
-
-```bash
-STATE_FILE="/tmp/pr-reviews/pr-${PR_NUM}-state.json"
-jq -n --arg repo "$REPO" --arg head "$HEAD_SHA" --arg at "$(date -u +%Y-%m-%dT%H:%M:%SZ)" --argjson round "$N" \
-  '{repo: $repo, reviewed_head: $head, reviewed_at: $at, round: $round}' > "$STATE_FILE"
-```
-
-  Never write it before the review is out, and never after a failed post: a run that dies, or whose post
-  fails, must leave the head unreviewed so the next run covers those commits.
+  That posted body is the only record of the reviewed head — the `<!-- reviewed-head: … -->` marker it
+  carries is what the next run reads. Post only once the review is final, and never post a body missing
+  its markers. A run that posts nothing leaves no record: the next run covers the whole range again.
 - Acknowledge the mention last, once the review is emitted, so the 👍 means "review delivered". Take the link from the `comment: https://...` line in your prompt — no such line → do not spawn. With one, spawn `subagents/reaction` foreground and wait:
 
   > You are running as a subagent in the review flow. COMMENT_URL=<the comment link found in the prompt>
@@ -193,8 +183,9 @@ jq -n --arg repo "$REPO" --arg head "$HEAD_SHA" --arg at "$(date -u +%Y-%m-%dT%H
   Pass the comment link only — never the `PR:` link from the same prompt. Best-effort: never fail or delay the review over it, and never mention the spawn or its result in the review output.
 
 ## Output
-Three writes: the in-place tick, the round posted in step 4 when the prompt carries
-`comment the review result to the pr` (one top-level issue comment per round, so the next run can read
-its `<!-- reviewed-head: … -->` marker), and the reaction swap delegated to `subagents/reaction`.
+At most three writes to the PR: the in-place tick, the round posted in step 4 when the prompt carries
+`comment the review result to the pr` (one top-level issue comment per round, whose
+`<!-- reviewed-head: … -->` marker is the only record the next run reads), and the reaction swap
+delegated to `subagents/reaction`. Nothing is kept on disk between runs.
 The `Instruction:` line is the only trigger for that post; without it, leave the PR unposted.
 NEVER use `gh pr review`.
