@@ -1375,6 +1375,101 @@ func TestServicePollDispatchesReviewMention(t *testing.T) {
 	httpMock.AssertExpectations(t)
 }
 
+// TestServicePollContinuesWhenReviewReactionFails pins the same best-effort
+// contract for a review: a failed GraphQL reaction is logged, not retried, and
+// the run still dispatches and is acknowledged.
+func TestServicePollContinuesWhenReviewReactionFails(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+	httpMock := factory.Http()
+	getResp := mockshttp.NewResponse(t)
+	deleteResp := mockshttp.NewResponse(t)
+
+	getResp.EXPECT().Failed().Return(false).Once()
+	getResp.EXPECT().Body().Return(reviewMentionEnvelope, nil).Once()
+	deleteResp.EXPECT().Body().Return("", nil).Once()
+	deleteResp.EXPECT().Failed().Return(false).Once()
+
+	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Times(2)
+	httpMock.EXPECT().WithQueryParameters(relayQueryParams).Return(httpMock).Once()
+	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Times(2)
+	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
+	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
+
+	router := mocksagent.NewAgentRouter(t)
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/example", "", nil).Once()
+
+	dispatcher := mocksagent.NewDispatcher(t)
+	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
+
+	retry := mocksagent.NewRetryTracker(t)
+	// A reaction failure must not consume a retry attempt.
+	retry.EXPECT().Reset("d-1").Once()
+
+	handles := mocksagent.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	handles.EXPECT().Mark("d-1").Once()
+
+	reactor := mocksagent.NewReactor(t)
+	reactor.EXPECT().
+		ReactToReview(testifymock.Anything, "goravel/example", "MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=").
+		Return(errors.New("gh down")).
+		Once()
+
+	service := newTestService(router, dispatcher, retry, handles, reactor, relayConfig("token"))
+	require.NoError(t, service.Poll(context.Background()))
+
+	retry.AssertNotCalled(t, "RecordFailure", testifymock.Anything)
+	handles.AssertNumberOfCalls(t, "Mark", 1)
+	httpMock.AssertExpectations(t)
+}
+
+// TestServicePollDoesNotReactToReviewWithoutNodeID pins that a review body with
+// no GraphQL node id has no reaction subject: nothing is sent, and the run still
+// dispatches.
+func TestServicePollDoesNotReactToReviewWithoutNodeID(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+	httpMock := factory.Http()
+	getResp := mockshttp.NewResponse(t)
+	deleteResp := mockshttp.NewResponse(t)
+
+	envelope := `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"pull_request_review","action":"submitted","repository":"goravel/example","payload":"{\"pull_request\":{\"number\":170},\"review\":{\"id\":5778727749,\"body\":\"@goravel-agent solve the comments\"}}"}],"total":1,"page":1,"limit":10}`
+
+	getResp.EXPECT().Failed().Return(false).Once()
+	getResp.EXPECT().Body().Return(envelope, nil).Once()
+	deleteResp.EXPECT().Body().Return("", nil).Once()
+	deleteResp.EXPECT().Failed().Return(false).Once()
+
+	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Times(2)
+	httpMock.EXPECT().WithQueryParameters(relayQueryParams).Return(httpMock).Once()
+	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Times(2)
+	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
+	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
+
+	router := mocksagent.NewAgentRouter(t)
+	router.EXPECT().Route(testifymock.Anything, testifymock.Anything).Return(constants.AgentReview, "goravel/example", "", nil).Once()
+
+	dispatcher := mocksagent.NewDispatcher(t)
+	dispatcher.EXPECT().Run(testifymock.Anything, testifymock.Anything).Return(nil).Once()
+
+	retry := mocksagent.NewRetryTracker(t)
+	retry.EXPECT().Reset("d-1").Once()
+
+	handles := mocksagent.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	handles.EXPECT().Mark("d-1").Once()
+
+	reactor := mocksagent.NewReactor(t)
+
+	service := newTestService(router, dispatcher, retry, handles, reactor, relayConfig("token"))
+	require.NoError(t, service.Poll(context.Background()))
+
+	reactor.AssertNotCalled(t, "ReactToReview", testifymock.Anything, testifymock.Anything, testifymock.Anything)
+	reactor.AssertNotCalled(t, "React", testifymock.Anything, testifymock.Anything, testifymock.Anything, testifymock.Anything)
+	httpMock.AssertExpectations(t)
+}
+
 // TestServicePollContinuesWhenReactionFails pins that a failed reaction is only
 // logged: the run still dispatches, the event is marked handled, and it is
 // deleted.

@@ -152,6 +152,8 @@ func (r *githubReactor) ReactToReview(ctx context.Context, repository, nodeID st
 		return fmt.Errorf("react to review in %q: no node id", repository)
 	}
 
+	prefix := fmt.Sprintf("react to %s review %s", repository, nodeID)
+
 	body, err := json.Marshal(graphqlRequest{
 		Query: addReactionMutation,
 		Variables: map[string]any{
@@ -160,18 +162,18 @@ func (r *githubReactor) ReactToReview(ctx context.Context, repository, nodeID st
 		},
 	})
 	if err != nil {
-		return fmt.Errorf("react to %s review %s: %w", repository, nodeID, err)
+		return fmt.Errorf("%s: %w", prefix, err)
 	}
 
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, r.graphqlURL, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("react to %s review %s: %w", repository, nodeID, err)
+		return fmt.Errorf("%s: %w", prefix, err)
 	}
 	request.Header.Set("Content-Type", "application/json")
 
 	response, err := r.client.Client().Do(request)
 	if err != nil {
-		return fmt.Errorf("react to %s review %s: %w", repository, nodeID, err)
+		return fmt.Errorf("%s: %w", prefix, err)
 	}
 	defer func() { _ = response.Body.Close() }()
 
@@ -179,14 +181,13 @@ func (r *githubReactor) ReactToReview(ctx context.Context, repository, nodeID st
 	// so the body is decoded, not only the status read.
 	var result graphqlResponse
 	if err := json.NewDecoder(response.Body).Decode(&result); err != nil {
-		return fmt.Errorf("react to %s review %s: decode response (status %d): %w",
-			repository, nodeID, response.StatusCode, err)
+		return fmt.Errorf("%s: decode response (status %d): %w", prefix, response.StatusCode, err)
 	}
 	if response.StatusCode < 200 || response.StatusCode > 299 {
-		return fmt.Errorf("react to %s review %s: status %d", repository, nodeID, response.StatusCode)
+		return fmt.Errorf("%s: status %d", prefix, response.StatusCode)
 	}
 	if len(result.Errors) > 0 {
-		return fmt.Errorf("react to %s review %s: %s", repository, nodeID, result.Errors[0].Message)
+		return fmt.Errorf("%s: %s", prefix, result.Errors[0].Message)
 	}
 
 	return nil
@@ -199,15 +200,9 @@ type graphqlRequest struct {
 }
 
 // graphqlResponse is the part of an addReaction reply the reactor reads: the
-// reaction content on success, and the errors GitHub returns for a rejection.
+// errors GitHub returns for a rejection. Success is a 2xx with no errors, which
+// is also what a replayed reaction answers.
 type graphqlResponse struct {
-	Data struct {
-		AddReaction *struct {
-			Reaction struct {
-				Content string `json:"content"`
-			} `json:"reaction"`
-		} `json:"addReaction"`
-	} `json:"data"`
 	Errors []struct {
 		Message string `json:"message"`
 	} `json:"errors"`

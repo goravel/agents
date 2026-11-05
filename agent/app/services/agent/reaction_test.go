@@ -14,10 +14,11 @@ import (
 
 // recordedRequest is one request captured by the test GitHub server.
 type recordedRequest struct {
-	method string
-	path   string
-	auth   string
-	body   string
+	method      string
+	path        string
+	auth        string
+	contentType string
+	body        string
 }
 
 // reactionRecorder collects the requests sent to the test GitHub server.
@@ -48,10 +49,11 @@ func newReactionServer(t *testing.T, status int, body string) (*reactionRecorder
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		requestBody, _ := io.ReadAll(req.Body)
 		recorder.add(recordedRequest{
-			method: req.Method,
-			path:   req.URL.Path,
-			auth:   req.Header.Get("Authorization"),
-			body:   string(requestBody),
+			method:      req.Method,
+			path:        req.URL.Path,
+			auth:        req.Header.Get("Authorization"),
+			contentType: req.Header.Get("Content-Type"),
+			body:        string(requestBody),
 		})
 
 		w.Header().Set("Content-Type", "application/json")
@@ -212,17 +214,27 @@ func TestGitHubReactorReactsToReview(t *testing.T) {
 	require.Equal(t, http.MethodPost, requests[0].method)
 	require.Equal(t, "/graphql", requests[0].path)
 	require.Equal(t, "Bearer test-token", requests[0].auth)
+	require.Equal(t, "application/json", requests[0].contentType)
 
 	var request struct {
 		Query     string         `json:"query"`
 		Variables map[string]any `json:"variables"`
 	}
 	require.NoError(t, json.Unmarshal([]byte(requests[0].body), &request))
-	require.Contains(t, request.Query, "addReaction")
+	require.Equal(t, addReactionMutation, request.Query)
 	require.Equal(t, map[string]any{
 		"subjectId": "MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=",
 		"content":   "EYES",
 	}, request.Variables)
+}
+
+// TestNewGitHubReactorDefaultsGraphQLURL pins the production endpoint: an empty
+// GraphQL URL must fall back to GitHub's public one, or every review reaction
+// would post nowhere while the injected-URL tests stay green.
+func TestNewGitHubReactorDefaultsGraphQLURL(t *testing.T) {
+	reactor, err := newGitHubReactor("token", nil, "", "")
+	require.NoError(t, err)
+	require.Equal(t, defaultGraphQLURL, reactor.graphqlURL)
 }
 
 // TestGitHubReactorReviewErrors pins that both failure shapes surface: a GraphQL

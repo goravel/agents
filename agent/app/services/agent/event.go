@@ -388,19 +388,24 @@ func (e *event) issueLink(payload *githubPayload) string {
 	return ""
 }
 
-// commentLink returns the URL of the text that carried the mention: the
-// triggering comment, or the review body, which GitHub anchors with
-// #pullrequestreview-<id>. It returns "" when the event carries neither.
+// commentLink returns the URL of the text that carried the mention: the review
+// body on a review event, otherwise the triggering comment. GitHub anchors a
+// review with #pullrequestreview-<id>, a comment with #issuecomment-<id>. It
+// returns "" when the event carries neither.
 func (e *event) commentLink(payload *githubPayload) string {
+	if e.Event == eventPullRequestReview {
+		if payload.Review.HTMLURL != "" {
+			return payload.Review.HTMLURL
+		}
+		if payload.Review.ID != 0 && e.target() != 0 {
+			return gitWebURL + e.Repository + "/pull/" + strconv.Itoa(e.target()) +
+				"#pullrequestreview-" + strconv.FormatInt(payload.Review.ID, 10)
+		}
+
+		return ""
+	}
 	if payload.Comment.HTMLURL != "" {
 		return payload.Comment.HTMLURL
-	}
-	if payload.Review.HTMLURL != "" {
-		return payload.Review.HTMLURL
-	}
-	if payload.Review.ID != 0 && e.target() != 0 {
-		return gitWebURL + e.Repository + "/pull/" + strconv.Itoa(e.target()) +
-			"#pullrequestreview-" + strconv.FormatInt(payload.Review.ID, 10)
 	}
 	if payload.Comment.ID == 0 {
 		return ""
@@ -436,10 +441,14 @@ func (e *event) reaction() (collection string, commentID int64, ok bool) {
 }
 
 // reviewNodeID returns the GraphQL node id of the review body that carried the
-// mention, or "" when the event carries no review. A review is Reactable through
+// mention, or "" when the event is not a review. A review is Reactable through
 // GraphQL only, so the node id is the subject the eyes reaction is added to;
-// every other event has a comment instead.
+// every other event reacts through a comment when one is present.
 func (e *event) reviewNodeID() string {
+	if e.Event != eventPullRequestReview {
+		return ""
+	}
+
 	payload, _ := e.payload()
 
 	return payload.Review.NodeID

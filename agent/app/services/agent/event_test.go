@@ -361,6 +361,10 @@ func TestEventReviewNodeID(t *testing.T) {
 			event: event{Event: "issue_comment", Payload: `{"comment":{"id":24680,"body":"@goravel-agent review"}}`},
 		},
 		{
+			name:  "review object on another event",
+			event: event{Event: eventPullRequestReviewComment, Payload: `{"comment":{"id":98765,"body":"@goravel-agent review"},"review":{"id":5778727749,"node_id":"MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA="}}`},
+		},
+		{
 			name:  "invalid payload",
 			event: event{Event: eventPullRequestReview, Payload: "not json"},
 		},
@@ -487,6 +491,26 @@ func TestEventPromptReview(t *testing.T) {
 			require.Equal(t, want, event.prompt("solve the comments", "goravel/example"))
 		})
 	}
+}
+
+// TestEventPromptIgnoresReviewOnOtherEvents pins that review fields are read only
+// on a review event: an inline review comment keeps its own #discussion_r link
+// even when the payload carries a review object.
+func TestEventPromptIgnoresReviewOnOtherEvents(t *testing.T) {
+	event := &event{
+		Event:      eventPullRequestReviewComment,
+		Repository: "goravel/example",
+		Payload: `{"pull_request":{"number":170,"html_url":"https://github.com/goravel/example/pull/170"},` +
+			`"comment":{"id":98765,"html_url":"https://github.com/goravel/example/pull/170#discussion_r98765",` +
+			`"body":"@goravel-agent review"},"review":{"id":5778727749,` +
+			`"html_url":"https://github.com/goravel/example/pull/170#pullrequestreview-5778727749"}}`,
+	}
+
+	want := "Repository: goravel/example\n" +
+		"PR: https://github.com/goravel/example/pull/170\n" +
+		"comment: https://github.com/goravel/example/pull/170#discussion_r98765\n" +
+		"Instruction: review"
+	require.Equal(t, want, event.prompt("review", "goravel/example"))
 }
 
 func TestEventPromptWithoutComment(t *testing.T) {

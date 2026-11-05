@@ -36,6 +36,8 @@ Run this once. Fill `COMMENT_URL` with the link from the input; leave the rest a
 
 ```bash
 COMMENT_URL='<the url>'
+COMMENT_ID=""
+REVIEW_ID=""
 FRAGMENT=${COMMENT_URL##*#}
 case "$FRAGMENT" in
   issuecomment-*)      KIND=comment; COLLECTION=issues/comments; COMMENT_ID=${FRAGMENT#issuecomment-} ;;
@@ -52,16 +54,20 @@ case "$REVIEW_ID"  in ''|*[!0-9]*) [ "$KIND" = review  ] && KIND="";; esac
 if [ "$KIND" = review ]; then
   # Resolve the review's GraphQL node id from its REST representation.
   NODE_ID=$(gh api "repos/$REPO/pulls/$PR_NUM/reviews/$REVIEW_ID" --jq .node_id 2>/dev/null)
-  [ -n "$NODE_ID" ] || { echo "reaction: failed — resolve $REPO/pull/$PR_NUM#pullrequestreview-$REVIEW_ID"; exit 0; }
-  # removeReaction is best-effort: a review with no 👀 (reactions disabled, or a human started the
-  # run) makes it fail, and the +1 still has to land.
-  gh api graphql \
-    -f query='mutation($id: ID!) { removeReaction(input: {subjectId: $id, content: EYES}) { clientMutationId } }' \
-    -f id="$NODE_ID" >/dev/null 2>&1
+  [ -n "$NODE_ID" ] || { echo "reaction: failed — $REPO/pull/$PR_NUM#pullrequestreview-$REVIEW_ID (no node id)"; exit 0; }
+  # removeReaction is best-effort — a review with no 👀 (reactions disabled, or a human started the
+  # run) makes it fail — but its status still decides the line, as on the comment path.
+  if gh api graphql \
+      -f query='mutation($id: ID!) { removeReaction(input: {subjectId: $id, content: EYES}) { clientMutationId } }' \
+      -f id="$NODE_ID" >/dev/null 2>&1; then
+    OUTCOME="swapped eyes→+1 (review $REVIEW_ID)"
+  else
+    OUTCOME="+1 posted (no eyes, review $REVIEW_ID)"
+  fi
   if gh api graphql \
       -f query='mutation($id: ID!) { addReaction(input: {subjectId: $id, content: THUMBS_UP}) { reaction { content } } }' \
       -f id="$NODE_ID" >/dev/null 2>&1; then
-    echo "reaction: swapped eyes→+1 (review $REVIEW_ID)"
+    echo "reaction: $OUTCOME"
   else
     echo "reaction: failed — $REPO/pull/$PR_NUM#pullrequestreview-$REVIEW_ID"
   fi
