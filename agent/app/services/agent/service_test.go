@@ -48,6 +48,10 @@ const (
 	// zeroNumberEnvelope is a mention whose payload carries no issue or pull
 	// request number, so the run has no fallback title.
 	zeroNumberEnvelope = `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"issue_comment","action":"created","repository":"goravel/goravel","payload":"{\"comment\":{\"id\":24680,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":10}`
+
+	// reviewMentionEnvelope is one submitted review body mentioning the handle:
+	// the shape of an "@goravel-agent solve the comments" review.
+	reviewMentionEnvelope = `{"data":[{"id":1,"delivery_id":"d-1","sender":"bowen","event":"pull_request_review","action":"submitted","repository":"goravel/example","payload":"{\"pull_request\":{\"number\":170,\"html_url\":\"https://github.com/goravel/example/pull/170\"},\"review\":{\"id\":5778727749,\"node_id\":\"MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=\",\"html_url\":\"https://github.com/goravel/example/pull/170#pullrequestreview-5778727749\",\"body\":\"@goravel-agent solve the comments\"}}"}],"total":1,"page":1,"limit":10}`
 )
 
 // relayQueryParams pins the relay request query. The limit is the literal wire
@@ -137,6 +141,25 @@ func expectReactionError(t *testing.T, repository, collection string, commentID 
 			return ok && time.Until(deadline) <= reactTimeout
 		}), repository, collection, commentID).
 		Return(err).
+		Once()
+
+	return reactor
+}
+
+// expectReviewReaction returns a reactor preset to expect exactly one successful
+// eyes reaction on a review body, addressed by its GraphQL node id. It pins the
+// same reactTimeout bound as a comment reaction.
+func expectReviewReaction(t *testing.T, repository, nodeID string) *mocksagent.Reactor {
+	t.Helper()
+
+	reactor := mocksagent.NewReactor(t)
+	reactor.EXPECT().
+		ReactToReview(testifymock.MatchedBy(func(ctx context.Context) bool {
+			deadline, ok := ctx.Deadline()
+
+			return ok && time.Until(deadline) <= reactTimeout
+		}), repository, nodeID).
+		Return(nil).
 		Once()
 
 	return reactor
@@ -957,26 +980,31 @@ func TestServicePollDeletesEventWithInvalidPayload(t *testing.T) {
 	httpMock.AssertExpectations(t)
 }
 
-func TestServicePollSkipsNonActionableAction(t *testing.T) {
+func TestServicePollSkipsNonActionableEvents(t *testing.T) {
 	factory := mock.Factory()
 	factory.Log()
 	httpMock := factory.Http()
 	getResp := mockshttp.NewResponse(t)
 	deleteResp := mockshttp.NewResponse(t)
 
-	// A mention in the issue body repeated by a `labeled` action must not dispatch.
-	env := `{"data":[{"id":1,"delivery_id":"d-1","event":"issues","action":"labeled","repository":"goravel/goravel","payload":"{\"number\":123,\"issue\":{\"number\":123,\"body\":\"@goravel-agent review\"}}"}],"total":1,"page":1,"limit":10}`
+	// A mention in the issue body repeated by a `labeled` action must not dispatch,
+	// and neither may a review body repeated by `edited`.
+	env := `{"data":[
+		{"id":1,"delivery_id":"d-1","event":"issues","action":"labeled","repository":"goravel/goravel","payload":"{\"number\":123,\"issue\":{\"number\":123,\"body\":\"@goravel-agent review\"}}"},
+		{"id":2,"delivery_id":"d-2","event":"pull_request_review","action":"edited","repository":"goravel/example","payload":"{\"pull_request\":{\"number\":170},\"review\":{\"id\":5778727749,\"body\":\"@goravel-agent solve the comments\"}}"}
+	],"total":2,"page":1,"limit":10}`
 
 	getResp.EXPECT().Failed().Return(false).Once()
 	getResp.EXPECT().Body().Return(env, nil).Once()
-	deleteResp.EXPECT().Body().Return("", nil).Once()
-	deleteResp.EXPECT().Failed().Return(false).Once()
+	deleteResp.EXPECT().Body().Return("", nil).Times(2)
+	deleteResp.EXPECT().Failed().Return(false).Times(2)
 
-	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Times(2)
+	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Times(3)
 	httpMock.EXPECT().WithQueryParameters(relayQueryParams).Return(httpMock).Once()
-	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Times(2)
+	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Times(3)
 	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
 	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
+	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/2", nil).Return(deleteResp, nil).Once()
 
 	dispatcher := mocksagent.NewDispatcher(t)
 
@@ -1285,6 +1313,65 @@ func TestServicePollReactsToReviewComment(t *testing.T) {
 	require.NoError(t, service.Poll(context.Background()))
 
 	reactor.AssertNumberOfCalls(t, "React", 1)
+	httpMock.AssertExpectations(t)
+}
+
+// TestServicePollDispatchesReviewMention is the end-to-end assertion that a
+// submitted review body is no longer dropped: it reaches the router with the PR
+// and review links, dispatches the routed agent titled PR #170, is marked
+// handled, and gets the eyes reaction on the review's node id.
+func TestServicePollDispatchesReviewMention(t *testing.T) {
+	factory := mock.Factory()
+	factory.Log()
+	httpMock := factory.Http()
+	getResp := mockshttp.NewResponse(t)
+	deleteResp := mockshttp.NewResponse(t)
+
+	getResp.EXPECT().Failed().Return(false).Once()
+	getResp.EXPECT().Body().Return(reviewMentionEnvelope, nil).Once()
+	deleteResp.EXPECT().Body().Return("", nil).Once()
+	deleteResp.EXPECT().Failed().Return(false).Once()
+
+	httpMock.EXPECT().WithContext(testifymock.Anything).Return(httpMock).Times(2)
+	httpMock.EXPECT().WithQueryParameters(relayQueryParams).Return(httpMock).Once()
+	httpMock.EXPECT().WithHeader(apiTokenHeader, "token").Return(httpMock).Times(2)
+	httpMock.EXPECT().Get(relayEventsBaseURL).Return(getResp, nil).Once()
+	httpMock.EXPECT().Delete("http://relay.test/webhooks/events/1", nil).Return(deleteResp, nil).Once()
+
+	router := mocksagent.NewAgentRouter(t)
+	router.EXPECT().Route(testifymock.Anything, testifymock.MatchedBy(func(p string) bool {
+		return strings.Contains(p, "PR: https://github.com/goravel/example/pull/170") &&
+			strings.Contains(p, "comment: https://github.com/goravel/example/pull/170#pullrequestreview-5778727749") &&
+			strings.Contains(p, "Instruction: solve the comments")
+	})).Return(constants.AgentShip, "goravel/example", "", nil).Once()
+
+	dispatcher := mocksagent.NewDispatcher(t)
+	dispatcher.EXPECT().
+		Run(testifymock.Anything, testifymock.MatchedBy(func(req dispatch.Request) bool {
+			return req.Dir == "/tmp/ws" &&
+				req.Project == "prj_tmp" &&
+				req.Agent == constants.AgentShip &&
+				req.Title == "PR #170" &&
+				!strings.Contains(req.Prompt, "Repository:") &&
+				strings.Contains(req.Prompt, "Instruction: solve the comments")
+		})).
+		Return(nil).
+		Once()
+
+	retry := mocksagent.NewRetryTracker(t)
+	retry.EXPECT().Reset("d-1").Once()
+
+	handles := mocksagent.NewHandleStore(t)
+	handles.EXPECT().Has("d-1").Return(false).Once()
+	handles.EXPECT().Mark("d-1").Once()
+
+	// The review body is acknowledged on its GraphQL node id, not a REST comment.
+	reactor := expectReviewReaction(t, "goravel/example", "MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=")
+
+	service := newTestService(router, dispatcher, retry, handles, reactor, relayConfig("token"))
+	require.NoError(t, service.Poll(context.Background()))
+
+	reactor.AssertNotCalled(t, "React", testifymock.Anything, testifymock.Anything, testifymock.Anything, testifymock.Anything)
 	httpMock.AssertExpectations(t)
 }
 

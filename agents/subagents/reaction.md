@@ -20,12 +20,14 @@ You run after delivery, so the 👍 means "delivered".
 
 ## Input
 
-The input carries `COMMENT_URL=<url>`. Two shapes count:
+The input carries `COMMENT_URL=<url>`. Three shapes count:
 
 - `https://github.com/<owner>/<repo>/{pull|issues}/<number>#issuecomment-<id>` → `issues/comments`
 - `https://github.com/<owner>/<repo>/pull/<number>#discussion_r<id>` → `pulls/comments`
+- `https://github.com/<owner>/<repo>/pull/<number>#pullrequestreview-<id>` → the review body, through
+  GraphQL: a pull request review is Reactable there only, so REST has no reaction endpoint for it.
 
-No link, a link that matches neither shape, or a link that names no `owner/repo` → return
+No link, a link that matches none of the shapes, or a link that names no `owner/repo` → return
 `reaction: skipped — no comment link` and stop. Never ask for one.
 
 ## Swap
@@ -36,13 +38,35 @@ Run this once. Fill `COMMENT_URL` with the link from the input; leave the rest a
 COMMENT_URL='<the url>'
 FRAGMENT=${COMMENT_URL##*#}
 case "$FRAGMENT" in
-  issuecomment-*) COLLECTION=issues/comments; COMMENT_ID=${FRAGMENT#issuecomment-} ;;
-  discussion_r*)  COLLECTION=pulls/comments;  COMMENT_ID=${FRAGMENT#discussion_r} ;;
-  *)              COLLECTION=""; COMMENT_ID="" ;;
+  issuecomment-*)      KIND=comment; COLLECTION=issues/comments; COMMENT_ID=${FRAGMENT#issuecomment-} ;;
+  discussion_r*)       KIND=comment; COLLECTION=pulls/comments;  COMMENT_ID=${FRAGMENT#discussion_r} ;;
+  pullrequestreview-*) KIND=review;  REVIEW_ID=${FRAGMENT#pullrequestreview-} ;;
+  *)                   KIND=""; COLLECTION=""; COMMENT_ID="" ;;
 esac
 REPO=$(printf '%s' "$COMMENT_URL" | sed -nE 's#.*https://github\.com/([^/]+/[^/]+)/(pull|issues)/[0-9]+.*#\1#p')
-case "$COMMENT_ID" in ''|*[!0-9]*) COLLECTION="";; esac
-[ -n "$COLLECTION" ] && [ -n "$REPO" ] || { echo "reaction: skipped — no comment link"; exit 0; }
+PR_NUM=$(printf '%s' "$COMMENT_URL" | sed -nE 's#.*https://github\.com/[^/]+/[^/]+/(pull|issues)/([0-9]+).*#\2#p')
+case "$COMMENT_ID" in ''|*[!0-9]*) [ "$KIND" = comment ] && KIND="";; esac
+case "$REVIEW_ID"  in ''|*[!0-9]*) [ "$KIND" = review  ] && KIND="";; esac
+[ -n "$KIND" ] && [ -n "$REPO" ] || { echo "reaction: skipped — no comment link"; exit 0; }
+
+if [ "$KIND" = review ]; then
+  # Resolve the review's GraphQL node id from its REST representation.
+  NODE_ID=$(gh api "repos/$REPO/pulls/$PR_NUM/reviews/$REVIEW_ID" --jq .node_id 2>/dev/null)
+  [ -n "$NODE_ID" ] || { echo "reaction: failed — resolve $REPO/pull/$PR_NUM#pullrequestreview-$REVIEW_ID"; exit 0; }
+  # removeReaction is best-effort: a review with no 👀 (reactions disabled, or a human started the
+  # run) makes it fail, and the +1 still has to land.
+  gh api graphql \
+    -f query='mutation($id: ID!) { removeReaction(input: {subjectId: $id, content: EYES}) { clientMutationId } }' \
+    -f id="$NODE_ID" >/dev/null 2>&1
+  if gh api graphql \
+      -f query='mutation($id: ID!) { addReaction(input: {subjectId: $id, content: THUMBS_UP}) { reaction { content } } }' \
+      -f id="$NODE_ID" >/dev/null 2>&1; then
+    echo "reaction: swapped eyes→+1 (review $REVIEW_ID)"
+  else
+    echo "reaction: failed — $REPO/pull/$PR_NUM#pullrequestreview-$REVIEW_ID"
+  fi
+  exit 0
+fi
 
 LIST_ERROR=""
 IDS=$(gh api --paginate "repos/$REPO/$COLLECTION/$COMMENT_ID/reactions" \
@@ -79,7 +103,10 @@ fi
   from the one the mention was posted in, and the link names the repository the 👀 was added to.
 - A rejected DELETE is ignored and the POST still runs; a rejected list still posts and ends with
   the failed line; an empty reaction list is not an error.
+- A review link has no REST reaction endpoint: resolve `node_id` from
+  `repos/$REPO/pulls/$PR_NUM/reviews/$REVIEW_ID` and use `addReaction`/`removeReaction`, never a
+  `.../reactions` REST call. A review that resolves to no node id ends with the failed line.
 - Always POST `+1`, even when nothing was deleted (reactions disabled, or a human started the run).
 - Never fail the run: any rejected call ends with the one `reaction: failed — ...` line.
-- Nothing else happens in this run. No retry against another id, no comment shape beyond the two
+- Nothing else happens in this run. No retry against another id, no comment shape beyond the three
   above, no writes.

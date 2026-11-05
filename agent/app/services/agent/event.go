@@ -26,6 +26,12 @@ const (
 	// eventPullRequestReviewComment is the GitHub event for an inline review
 	// comment; its comment is addressed through the pull request collection.
 	eventPullRequestReviewComment = "pull_request_review_comment"
+	// eventPullRequestReview is the GitHub event for a published review body;
+	// its text lives under `review`, not `comment`.
+	eventPullRequestReview = "pull_request_review"
+	// eventActionSubmitted publishes a review body; edited and dismissed repeat
+	// the same body without a new mention.
+	eventActionSubmitted = "submitted"
 )
 
 // envelope is the relay's paginated response wrapper.
@@ -58,12 +64,18 @@ type event struct {
 }
 
 // actionable reports whether the event introduced the mention. GitHub repeats
-// the issue/PR body on every lifecycle event (labeled, closed, synchronize, …),
-// each with its own delivery id, so only the create/open actions are acted on.
+// the issue/PR body on every lifecycle event (labeled, closed, synchronize, …)
+// and repeats a review body on edited/dismissed, each with its own delivery id,
+// so only the actions that publish new text are acted on: create, open, and a
+// submitted pull request review.
 func (e *event) actionable() bool {
 	switch e.Action {
 	case eventActionCreated, eventActionOpened:
 		return true
+	case eventActionSubmitted:
+		// "submitted" belongs to the review event only; keeping the check here
+		// stops the gate widening to any other event that reuses the action.
+		return e.Event == eventPullRequestReview
 	default:
 		return false
 	}
@@ -75,7 +87,7 @@ func (e *event) actionable() bool {
 func (e *event) instruction(mention string) (string, bool) {
 	payload, _ := e.payload()
 
-	return mentionInstruction(payload, mention)
+	return mentionInstruction(e.body(payload), mention)
 }
 
 // target returns the issue or pull request number the event refers to, falling
@@ -161,6 +173,12 @@ type githubPayload struct {
 		Body    string `json:"body"`
 		HTMLURL string `json:"html_url"`
 	} `json:"pull_request"`
+	Review struct {
+		ID      int64  `json:"id"`
+		NodeID  string `json:"node_id"`
+		Body    string `json:"body"`
+		HTMLURL string `json:"html_url"`
+	} `json:"review"`
 }
 
 // parseEnvelope decodes the relay's {data,total,page,limit} response body.
@@ -173,9 +191,15 @@ func parseEnvelope(body []byte) (envelope, error) {
 	return env, nil
 }
 
-// commentText returns the first non-empty body found in the payload:
-// comment.body -> issue.body -> pull_request.body.
-func commentText(payload *githubPayload) string {
+// body returns the text that introduced the mention. A reviewed pull request
+// repeats its description under pull_request.body, so a review event reads only
+// review.body: falling through would start a run on a mention in the description
+// of every reviewed pull request. Every other event reads comment.body ->
+// issue.body -> pull_request.body.
+func (e *event) body(payload *githubPayload) string {
+	if e.Event == eventPullRequestReview {
+		return payload.Review.Body
+	}
 	if payload.Comment.Body != "" {
 		return payload.Comment.Body
 	}
@@ -193,12 +217,11 @@ func commentText(payload *githubPayload) string {
 // mentions while `@Goravel-Agent, please review` is. The hyphen inside the
 // handle is literal: `@goravel_agent` and `@goravel agent` are not mentions.
 // All slicing stays on the original text.
-func mentionInstruction(payload *githubPayload, mention string) (string, bool) {
+func mentionInstruction(text, mention string) (string, bool) {
 	if mention == "" {
 		return "", false
 	}
 
-	text := commentText(payload)
 	handleLen := len(mention)
 
 	for i := 0; i+handleLen <= len(text); i++ {
@@ -365,10 +388,19 @@ func (e *event) issueLink(payload *githubPayload) string {
 	return ""
 }
 
-// commentLink returns the triggering comment URL, or "" when there is none.
+// commentLink returns the URL of the text that carried the mention: the
+// triggering comment, or the review body, which GitHub anchors with
+// #pullrequestreview-<id>. It returns "" when the event carries neither.
 func (e *event) commentLink(payload *githubPayload) string {
 	if payload.Comment.HTMLURL != "" {
 		return payload.Comment.HTMLURL
+	}
+	if payload.Review.HTMLURL != "" {
+		return payload.Review.HTMLURL
+	}
+	if payload.Review.ID != 0 && e.target() != 0 {
+		return gitWebURL + e.Repository + "/pull/" + strconv.Itoa(e.target()) +
+			"#pullrequestreview-" + strconv.FormatInt(payload.Review.ID, 10)
 	}
 	if payload.Comment.ID == 0 {
 		return ""
@@ -385,8 +417,10 @@ func (e *event) commentLink(payload *githubPayload) string {
 
 // reaction reports which comment the eyes reaction belongs to. A comment
 // mention carries the comment under `comment`; an issue or pull request body
-// mention has no comment to react to, so ok is false. Inline review comments
-// live under the pull request collection, conversation comments under issues.
+// mention has no comment to react to, so ok is false. A review body mention has
+// no comment either — its reaction subject is the review node id, see
+// reviewNodeID. Inline review comments live under the pull request collection,
+// conversation comments under issues.
 func (e *event) reaction() (collection string, commentID int64, ok bool) {
 	payload, _ := e.payload()
 	if payload.Comment.ID == 0 {
@@ -399,4 +433,14 @@ func (e *event) reaction() (collection string, commentID int64, ok bool) {
 	}
 
 	return collection, payload.Comment.ID, true
+}
+
+// reviewNodeID returns the GraphQL node id of the review body that carried the
+// mention, or "" when the event carries no review. A review is Reactable through
+// GraphQL only, so the node id is the subject the eyes reaction is added to;
+// every other event has a comment instead.
+func (e *event) reviewNodeID() string {
+	payload, _ := e.payload()
+
+	return payload.Review.NodeID
 }

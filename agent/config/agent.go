@@ -33,11 +33,12 @@ func init() {
 		// the leading `@` is normalized.
 		"mention": config.Env("AGENT_MENTION", ""),
 
-		// GitHub token used to add the 👀 reaction to a mention comment. A
-		// fine-grained token needs `issues: write` for issue and pull request
-		// conversation comments and `pull-requests: write` for inline review
-		// comments; a classic token needs `repo`. Blank disables reactions; the
-		// poller still runs agents.
+		// GitHub token used to add the 👀 reaction to a mention. A fine-grained
+		// token needs `issues: write` for issue and pull request conversation
+		// comments and `pull-requests: write` for inline review comments and
+		// review bodies (a review is reacted through GitHub's GraphQL API, the
+		// only API where a pull request review is reactable). A classic token
+		// needs `repo`. Blank disables reactions; the poller still runs agents.
 		"github_token": config.Env("GITHUB_TOKEN", ""),
 
 		// Model each agent runs with, keyed by mode: `<model>[#<thinking>]`.
