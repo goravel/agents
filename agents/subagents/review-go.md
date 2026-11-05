@@ -48,10 +48,12 @@ never re-verify or re-raise another SIDE's findings.
 ## Workflow
 
 1. **Resolve working context.**
-   - Both `WORKTREE_DIR=<path>` and `DIFF_BASE=<sha>` given → phase mode: use `workdir="$WORKTREE_DIR"`
+   - Both `WORKTREE_DIR=<path>` and `DIFF_BASE=<sha>` given → delta mode: use `workdir="$WORKTREE_DIR"`
      for every bash call, `repo_root="$WORKTREE_DIR"` for every graph call, and read files under
      `$WORKTREE_DIR`. Set `base="$DIFF_BASE"`. Diff scope:
      `git -C "$WORKTREE_DIR" diff "$DIFF_BASE"..HEAD --name-only`.
+     The delta is the commits a ship run just committed or the commits a PR gained since its last review;
+     either way the range is `"$DIFF_BASE"..HEAD` and the pre-change tree is `"$DIFF_BASE"`.
      If this session is resumed for a later phase, review ONLY the new delta (the range given by
      the new `DIFF_BASE`), not the earlier phases.
    - Both `WORKTREE_DIR=<path>` and `BASE_BRANCH=<branch>` given → PR/worktree mode: use
@@ -129,7 +131,7 @@ never re-verify or re-raise another SIDE's findings.
    Read the diff file-by-file; trace callers and callees with `query_graph` as relevant to your SIDE. Use
    exact `file:line`. Drop any finding you cannot justify with a line reference. For a finding on a
    MODIFIED line, confirm it against the pre-change file and DROP it if the flagged code is unchanged:
-   `git show HEAD:<file>` for the working tree, `git show "$DIFF_BASE":<file>` in phase mode, or
+   `git show HEAD:<file>` for the working tree, `git show "$DIFF_BASE":<file>` in delta mode, or
    `git show origin/${BASE_BRANCH}:<file>` in worktree/PR mode (HEAD is the PR tip, not the baseline).
    Then apply the Scope rule and drop the rest silently.
 
