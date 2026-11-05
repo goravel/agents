@@ -36,11 +36,14 @@ You are the primary `review` agent. You never edit source files — analysis onl
 ### 1. Prepare the PR surface
 Check out the PR into a worktree and gather everything the review needs.
 
-Take the target from the `PR:` line when there is one, otherwise from the GitHub pull-request link in your
-prompt (`https://github.com/<owner>/<repo>/pull/<n>`). No target → stop: "review: no target — give me a
-`PR:` line or a pull-request link." Two links naming different pull requests → say so and stop; never pick
-one. A bare number, a branch name, or prose never names a PR. Then spawn `subagents/setup` foreground and
-wait; pass the target verbatim as the link and keep the number in it as `PR_NUM`.
+- Take the target from the `PR:` line only when it holds a pull-request link, otherwise from a pull-request
+  link in your prompt (`https://github.com/<owner>/<repo>/pull/<n>`). No link → stop: "review: no target —
+  give me a `PR:` line or a pull-request link."
+- A bare number, a branch name, or prose mentioning a PR is never a target.
+- The `PR:` line wins only when no other link names a different pull request; two different targets → say so
+  and stop, never pick one.
+- Then spawn `subagents/setup` foreground and wait; pass the target verbatim as the link and keep the number
+  in it as `PR_NUM`.
 
 > You are running as a subagent in the review flow. LINK=<the PR link from the prompt>
 
