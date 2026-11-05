@@ -36,10 +36,9 @@ Flow: set up and fetch → resolve the range → review the diff → reconcile �
 Three kinds of write reach the PR: the in-place tick, the round comment — posted on every run that
 reaches phase 6's post bullet — and the reaction swap delegated to `subagents/reaction`.
 
-The prompt still ends with `Instruction:` followed by `comment the review result to the pr`: the poller
-appends that suffix to every review mention on a pull request and is not changing. It is context, not a
-switch — ignore it. Posting never depends on it. The `PR:` line still gates the run (phase 1) and the
-`comment:` line still names the mention to acknowledge (phase 6); only the `Instruction:` text is inert.
+`Instruction:` lines are free-form user context — never a flag, never parsed to decide anything, and
+posting does not depend on them. The `PR:` line gates the run (phase 1) and the `comment:` line names the
+mention to acknowledge (phase 6).
 
 No state file is kept: the newest posted `<!-- reviewed-head: … -->` marker is the only record of the
 reviewed head, and comment input is re-derived from the fetched comments every run.
