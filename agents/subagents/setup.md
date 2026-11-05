@@ -344,9 +344,10 @@ script did not return.
   fast-forwarded, checked for ancestry, or reset: commits it already carries belong to the caller and
   stay. That is why the pull-request rule above does not apply to them.
 - The shared checkout is a cache, not workspace: a repository or issue run never checks out its branch —
-  naming that branch as `BRANCH` fails — and no run commits there, so its tree cannot go stale under a
-  run's commits. A pull request keeps its own head branch, even when that is the cache's. Every worktree
-  lives in `/tmp`.
+  naming that branch as `BRANCH` fails — and no run commits there. A pull request keeps its own head
+  branch, even when that is the cache's; that run's commits then leave the checkout's working tree stale,
+  so its fast-forward is skipped while the tree is dirty. Never commit in the checkout — a `commit -a`
+  there reverts the run's phase commits. Every worktree lives in `/tmp`.
 - Every link's worktree directory is `/tmp/<owner>-<repo>-<TS>` (local time `YYYYMMDD-HHMMSS`), so a re-run
   never collides on the path: if it exists, wait a second and retake it, up to five times, never deleting
   or reusing an existing one.
