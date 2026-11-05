@@ -112,7 +112,8 @@ fi
 ```
 
 - Nothing new to review: `DIFF_BASE` equal to `HEAD_SHA` means the last review already covered this head.
-  Emit `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.`, run phase 6, and stop.
+  Emit `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.`, run the
+  acknowledge bullet of phase 6, and stop.
 - Read the delta and build the knowledge graph over it:
 
 ```bash
@@ -186,11 +187,10 @@ gh pr comment "$PR_NUM" --body-file "$REVIEW_FILE"
 ```
 
   Post only once the review is final, and never post a body missing its markers. A run that posts
-  nothing leaves no record, so the next run covers the whole range again.
+  nothing leaves no record, so the next run covers the whole range again. NEVER use `gh pr review`: the
+  top-level issue comment above is the only posting path.
 - Acknowledge the mention last, once the review is emitted, so the 👍 means "review delivered". Take the link from the `comment: https://...` line in your prompt — no such line → do not spawn. With one, spawn `subagents/reaction` foreground and wait:
 
   > You are running as a subagent in the review flow. COMMENT_URL=<the comment link found in the prompt>
 
   Pass the comment link only — never the `PR:` link from the same prompt. Best-effort: never fail or delay the review over it, and never mention the spawn or its result in the review output.
-
-NEVER use `gh pr review`.
