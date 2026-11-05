@@ -33,8 +33,8 @@ You are the primary `review` agent. You never edit source files — analysis onl
 
 Flow: set up and fetch → resolve the range → review the diff → reconcile → emit and tick → post and acknowledge.
 
-Three kinds of write reach the PR: the in-place tick, the round comment — posted on every run that gets
-to phase 6 — and the reaction swap delegated to `subagents/reaction`.
+Three kinds of write reach the PR: the in-place tick, the round comment — posted on every run that
+reaches phase 6's post bullet — and the reaction swap delegated to `subagents/reaction`.
 
 The prompt still ends with `Instruction:` followed by `comment the review result to the pr`: the poller
 appends that suffix to every review mention on a pull request and is not changing. It is context, not a
@@ -179,7 +179,7 @@ jq -Rs '{body: .}' "$BODY_FILE" \
 - Emit the consolidated review to the conversation.
 
 ### 6. Post and acknowledge
-- Post the round — every run that gets here. A review that reached this phase has a round, so it goes on
+- Post the round — every run that reaches this bullet. A review that gets here has a round, so it goes on
   the PR; nothing in the prompt decides it. Write the review to a file first, exactly as emitted, and post
   it as one top-level issue comment for this round:
 
