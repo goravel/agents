@@ -52,8 +52,7 @@ never re-verify or re-raise another SIDE's findings.
      for every bash call, `repo_root="$WORKTREE_DIR"` for every graph call, and read files under
      `$WORKTREE_DIR`. Set `base="$DIFF_BASE"`. Diff scope:
      `git -C "$WORKTREE_DIR" diff "$DIFF_BASE"..HEAD --name-only`.
-     The delta is the commits a ship run just committed or the commits a PR gained since its last review;
-     either way the range is `"$DIFF_BASE"..HEAD` and the pre-change tree is `"$DIFF_BASE"`.
+     The delta is the commits a ship run just committed or the commits a PR gained since its last review.
      If this session is resumed for a later phase, review ONLY the new delta (the range given by
      the new `DIFF_BASE`), not the earlier phases.
    - Both `WORKTREE_DIR=<path>` and `BASE_BRANCH=<branch>` given → PR/worktree mode: use

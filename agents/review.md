@@ -47,7 +47,7 @@ foreground and wait. Pass the `PR:` line verbatim as the link and keep its numbe
 - Keep it all: this flow removes nothing. `setup` owns the checkout and the worktree, and a later run
   reuses them.
 - Resolve the head, the base branch, the repository and the bot login, and fetch the conversation and PR
-  body (read-only; every `gh api` call `--paginate`):
+  body (read-only; every list call uses `--paginate`):
 
 ```bash
 REPO=$(git -C "$WORKTREE_DIR" remote get-url origin | sed -E 's#/+$##; s#\.git$##' | awk -F'[:/]' '{print $(NF-1)"/"$NF}')
@@ -73,10 +73,10 @@ gh api --paginate "repos/{owner}/{repo}/pulls/${PR_NUM}/reviews" \
   - **Prior automated reviews** — any body containing the `🤖 Automated review` banner. Group into rounds: bodies sharing a `<!-- round: N -->` marker are one round (use the oldest comment's `html_url`); marker-less bodies are each their own round, numbered chronologically above every marker (oldest = `1 + max(marker)`, or 1 if none). Record each editable comment's endpoint (`issues/comments/{id}` or `pulls/comments/{id}`; review bodies are not editable), `id`, `html_url`, body, and timestamp — this is the **tick set**.
   - **Review input** — every other comment (bot or human) plus the PR body.
   - **Last reviewed head** — a prior automated review written by `$BOT_LOGIN` may carry
-    `<!-- reviewed-head: <sha> -->`; that marker is the commit the review covered. `LAST_REVIEWED` is the
-    marker in the newest such review by timestamp. No marker → fall back to `reviewed_head` in
-    `/tmp/pr-reviews/pr-${PR_NUM}-state.json`, and only when that file's `repo` equals `$REPO`. Still
-    nothing → empty.
+    `<!-- reviewed-head: <sha> -->`; that marker is the commit the review covered. Read `reviewed_head`
+    and `reviewed_at` from `/tmp/pr-reviews/pr-${PR_NUM}-state.json` when that file's `repo` equals
+    `$REPO`. `LAST_REVIEWED` is the newer of the state file's head and the marker of the newest such
+    review by timestamp — compare `reviewed_at` with the comment's `created_at`. Still nothing → empty.
 - For inline comments, `line` is null on outdated diffs (and a reply's `line` can be null too) — fall back to `original_line`.
 
 - Resolve the review range. The last reviewed head is reused only when it is a full 40-character SHA this
@@ -133,13 +133,13 @@ git -C "$WORKTREE_DIR" diff "$DIFF_RANGE" -U0 | rg '^diff --git |^@@'
 ### 3. Reconcile with prior rounds and comments
 - Build each prior round's finding set from its anchor lines, keyed by file path + Title (ignore line number, checkbox state, description lines, and example blocks).
 - Against the **unfiltered set** from step 2. On an incremental review (`DIFF_BASE` set) only a prior
-  finding whose `path:LINE` sits inside the delta's added-line scope can be resolved: a match → still
-  open (count it on its `[ROUND k]` line; do not list it); no match → resolved (count `Resolved: <N>`;
-  queue it for the tick set). Every prior open finding outside that scope is **carried** — the new
-  commits did not touch it, so it stays open against its own round: same count on its `[ROUND k]` line,
-  never listed under a severity heading, never ticked. A full review keeps the plain rule: no match →
-  resolved.
-- NEW = **posted** findings with no prior match, listed under their severity heading. Current round `N = 1 + highest prior round` (embed `<!-- round: N -->`); no prior round → only the `[NEW]` line.
+  finding whose file the delta deletes, or whose `path:LINE` sits inside the delta's added-line scope,
+  can be resolved: a match → still open (count it on its `[ROUND k]` line; do not list it); no match →
+  resolved (count `Resolved: <N>`; queue it for the tick set). Every other prior open finding is
+  **carried** — the new commits did not touch it, so it stays open against its own round: same count on
+  its `[ROUND k]` line, never listed under a severity heading, never ticked, unless comment input below
+  withdraws it; a withdrawal still resolves. A full review keeps the plain rule: no match → resolved.
+- NEW = **posted** findings with no prior match, listed under their severity heading. Current round `N = 1 + highest prior round`; no prior round → `N=1` and only the `[NEW]` line (embed `<!-- round: N -->`).
 - Apply comment input: match each entry to the findings it addresses — inline comments by `path` + `line` (fall back to `original_line`); a reply via `in_reply_to_id` → its parent's path/line; otherwise a quoted `file:line` or the finding Title. Verify every claim against `$WORKTREE_DIR` (bot or human alike): a claim that holds (intentional guard, unreachable path, already fixed) → withdraw the finding; a claim that does not hold, or a question, leaves it unchanged. Unmatched entries are ignored; no output section. A withdrawn prior finding counts as resolved and joins the tick set. Stateless: re-derive from the fetched input every run.
 
 ### 4. Emit
@@ -147,8 +147,9 @@ Load the `goravel-review-template` skill once, then:
 - Count per severity per status and give it the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → it emits `✅ Review clean — no findings.`
 - Write the round's state lines under the banner, from the template skill: `<!-- reviewed-head: ${HEAD_SHA} -->`
   with the full 40-character worktree head, and the `Reviewed:` line —
-  `${DIFF_BASE:0:7}..${HEAD_SHA:0:7} — <N> new commits` on an incremental review,
-  `everything up to ${HEAD_SHA:0:7} — <M> files` on a full one.
+  `${DIFF_BASE:0:7}..${HEAD_SHA:0:7} — ${COMMITS} new commits` on an incremental review,
+  `everything up to ${HEAD_SHA:0:7} — ${FILES} files` on a full one. `COMMITS` is the count of commits
+  `HEAD_SHA` gained over `DIFF_BASE`; `FILES` is the count of changed files in the range.
 - Tick resolved findings in prior comments whose endpoint is editable (`issues/comments/{id}` or `pulls/comments/{id}`, recorded as `$COMMENT_ENDPOINT` per comment in the tick set): `[ ]` → `[x]` on the anchor line of each resolved finding, matched by file path + Title, rewriting only the anchor line (`^\s*\d+\.\s*\[ \]\s*` + backticked `path:LINE`). Fetch that comment's current body, rewrite the anchor line there, then PATCH it back to the same endpoint:
 
 ```bash
@@ -173,9 +174,9 @@ mkdir -p /tmp/pr-reviews
 gh pr comment "$PR_NUM" --body-file "$REVIEW_FILE"
 ```
 
-- Record the reviewed head last, once the review reached the user — posted, or emitted when the prompt
-  asked for no post. The posted body is what the next run reads; this file is the same fact for a run
-  that posted nothing:
+- Record the reviewed head after the post and before the reaction, once the review reached the user —
+  posted, or emitted when the prompt asked for no post. The posted body is what the next run reads; this
+  file is the same fact for a run that posted nothing:
 
 ```bash
 STATE_FILE="/tmp/pr-reviews/pr-${PR_NUM}-state.json"
@@ -194,6 +195,5 @@ jq -n --arg repo "$REPO" --arg head "$HEAD_SHA" --arg at "$(date -u +%Y-%m-%dT%H
 ## Output
 Three writes: the in-place tick, the round posted in step 4 when the prompt carries
 `comment the review result to the pr` (one top-level issue comment per round, so the next run can read
-its `<!-- reviewed-head: … -->` marker; no such line → post nothing, emit only), and the reaction swap
-delegated to `subagents/reaction`. If the user explicitly asks you to post the review, post that same
-round comment with `gh pr comment <N> --body-file <tmp>`; NEVER use `gh pr review`.
+its `<!-- reviewed-head: … -->` marker), and the reaction swap delegated to `subagents/reaction`.
+The `Instruction:` line is the only trigger; without it, emit only. NEVER use `gh pr review`.
