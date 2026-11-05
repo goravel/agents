@@ -110,6 +110,14 @@ const (
 		 "repository":"goravel/goravel","sender":"bowen",
 		 "payload":"{\"number\":123,\"issue\":{\"number\":123,\"html_url\":\"https://github.com/goravel/goravel/issues/123\",\"body\":\"Tracking issue\"},\"comment\":{\"id\":24680,\"html_url\":\"https://github.com/goravel/goravel/issues/123#issuecomment-24680\",\"body\":\"@goravel-agent ship this issue in goravel/framework\"}}"}
 	],"total":1,"page":1,"limit":50}`
+
+	// solveReviewPage is one submitted review body mentioning the handle on
+	// goravel/example#170.
+	solveReviewPage = `{"data":[
+		{"id":1,"delivery_id":"d-1","event":"pull_request_review","action":"submitted",
+		 "repository":"goravel/example","sender":"bowen",
+		 "payload":"{\"pull_request\":{\"number\":170,\"html_url\":\"https://github.com/goravel/example/pull/170\"},\"review\":{\"id\":5778727749,\"node_id\":\"MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=\",\"html_url\":\"https://github.com/goravel/example/pull/170#pullrequestreview-5778727749\",\"body\":\"@goravel-agent solve the comments\"}}"}
+	],"total":1,"page":1,"limit":50}`
 )
 
 var (
@@ -438,6 +446,24 @@ func (s *AgentPollTestSuite) TestPollReviewsPullRequest() {
 	s.Require().Contains(got.prompt, "Instruction: review\ncomment the review result to the pr")
 	s.Require().NotContains(got.prompt, "Repository:")
 	s.Require().NotContains(got.prompt, "Issue:")
+}
+
+// TestPollSolvesReviewMention covers a `@goravel-agent solve the comments` review
+// body on goravel/example#170: the review anchor and the instruction reach the
+// run, so a submitted review is dispatched instead of deleted unread.
+func (s *AgentPollTestSuite) TestPollSolvesReviewMention() {
+	got := s.pollOnce(solveReviewPage)
+
+	s.Require().Empty(got.lastError)
+	s.Require().Equal([]string{"1"}, got.acknowledged,
+		"poll-events did not acknowledge the event; last error: %s", got.lastError)
+	s.Require().Equal("prj_tmp", got.project)
+	s.Require().Equal("wks_0123456789abcdef", got.workspaceID)
+	s.Require().Equal(got.title, got.workspaceTitle, "workspace title must match the run title")
+	s.Require().Contains(got.prompt, "PR: https://github.com/goravel/example/pull/170")
+	s.Require().Contains(got.prompt, "comment: https://github.com/goravel/example/pull/170#pullrequestreview-5778727749")
+	s.Require().Contains(got.prompt, "Instruction: solve the comments")
+	s.Require().NotContains(got.prompt, "Repository:")
 }
 
 // TestPollAnalyzesPullRequest covers a `@goravel-agent analyze this pull request`

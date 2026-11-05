@@ -81,10 +81,12 @@ func NewService() (*Service, error) {
 		return nil, errors.New("agent: AGENT_PROJECT_NAME must name a paseo project")
 	}
 
-	// The empty base URL keeps go-github's default (https://api.github.com/).
+	// The empty base and GraphQL URLs keep go-github's default
+	// (https://api.github.com/) and GitHub's public GraphQL endpoint.
 	reactor, err := newGitHubReactor(
 		config.GetString("agent.github_token"),
 		facades.Http().HttpClient(),
+		"",
 		"",
 	)
 	if err != nil {
@@ -159,6 +161,7 @@ func (s *Service) Poll(ctx context.Context) error {
 		ev := &env.Data[i]
 
 		if !ev.actionable() {
+			facades.Log().Debugf("agent: drop event %d: %s/%s did not introduce a mention", ev.ID, ev.Event, ev.Action)
 			toDelete = append(toDelete, ev.ID)
 			continue
 		}
@@ -265,17 +268,20 @@ func (s *Service) handle(ctx context.Context, ev *event, instruction string) err
 	})
 }
 
-// react adds the eyes reaction to the triggering comment so the sender sees the
-// mention was picked up. It is best-effort: a failure is logged and the run
-// continues, and a body-only mention (no comment) is left alone. The caller
-// bounds the call with reactTimeout so a hung request cannot stall the loop.
+// react adds the eyes reaction to the text that carried the mention: a review
+// body through GraphQL (its only Reactable API), or a comment through the REST
+// collection. It is best-effort: a failure is logged and the run continues, and a
+// body-only mention (no comment, no review) is left alone. The caller bounds the
+// call with reactTimeout so a hung request cannot stall the loop.
 func (s *Service) react(ctx context.Context, ev *event) {
-	collection, commentID, ok := ev.reaction()
-	if !ok {
-		return
+	var err error
+	if nodeID := ev.reviewNodeID(); nodeID != "" {
+		err = s.reactor.ReactToReview(ctx, ev.Repository, nodeID)
+	} else if collection, commentID, ok := ev.reaction(); ok {
+		err = s.reactor.React(ctx, ev.Repository, collection, commentID)
 	}
 
-	if err := s.reactor.React(ctx, ev.Repository, collection, commentID); err != nil {
+	if err != nil {
 		facades.Log().Errorf("agent: react to event %d: %v", ev.ID, err)
 	}
 }

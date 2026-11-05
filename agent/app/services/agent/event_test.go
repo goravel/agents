@@ -63,6 +63,32 @@ func TestParseEnvelopeInvalid(t *testing.T) {
 	require.Error(t, err)
 }
 
+// TestEventActionable pins which event/action pairs introduced the mention: the
+// create/open actions plus a submitted pull request review, whose body is
+// published exactly once.
+func TestEventActionable(t *testing.T) {
+	tests := []struct {
+		name  string
+		event event
+		want  bool
+	}{
+		{name: "issue comment created", event: event{Event: "issue_comment", Action: "created"}, want: true},
+		{name: "issue opened", event: event{Event: "issues", Action: "opened"}, want: true},
+		{name: "review submitted", event: event{Event: eventPullRequestReview, Action: eventActionSubmitted}, want: true},
+		{name: "review edited", event: event{Event: eventPullRequestReview, Action: "edited"}},
+		{name: "review dismissed", event: event{Event: eventPullRequestReview, Action: "dismissed"}},
+		{name: "issue labeled", event: event{Event: "issues", Action: "labeled"}},
+		{name: "submitted on another event", event: event{Event: "pull_request", Action: eventActionSubmitted}},
+		{name: "no action", event: event{Event: eventPullRequestReview}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, test.event.actionable())
+		})
+	}
+}
+
 func TestEventInstruction(t *testing.T) {
 	env, err := parseEnvelope([]byte(sampleRelayResponse))
 	require.NoError(t, err)
@@ -78,6 +104,7 @@ func TestEventInstruction(t *testing.T) {
 func TestEventInstructionFallbacks(t *testing.T) {
 	tests := []struct {
 		name    string
+		event   string
 		payload string
 		want    string
 		ok      bool
@@ -99,6 +126,19 @@ func TestEventInstructionFallbacks(t *testing.T) {
 			payload: `{"number":3,"pull_request":{"number":3,"body":"@goravel-agent review please"}}`,
 			want:    "review please",
 			ok:      true,
+		},
+		{
+			name:    "review body",
+			event:   eventPullRequestReview,
+			payload: `{"pull_request":{"number":170},"review":{"id":5778727749,"node_id":"MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=","body":"@goravel-agent solve the comments"}}`,
+			want:    "solve the comments",
+			ok:      true,
+		},
+		{
+			name:    "review body never falls through to the pull request body",
+			event:   eventPullRequestReview,
+			payload: `{"pull_request":{"number":170,"body":"@goravel-agent review"}}`,
+			ok:      false,
 		},
 		{
 			name:    "mention without instruction",
@@ -177,7 +217,7 @@ func TestEventInstructionFallbacks(t *testing.T) {
 
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			event := &event{Payload: test.payload}
+			event := &event{Event: test.event, Payload: test.payload}
 			got, ok := event.instruction(DefaultMention)
 			require.Equal(t, test.ok, ok)
 			require.Equal(t, test.want, got)
@@ -201,6 +241,7 @@ func TestEventTarget(t *testing.T) {
 		{name: "top-level number", payload: `{"number":123}`, want: 123},
 		{name: "issue number", payload: `{"issue":{"number":7}}`, want: 7},
 		{name: "pull request number", payload: `{"pull_request":{"number":42}}`, want: 42},
+		{name: "review pull request number", payload: `{"pull_request":{"number":170},"review":{"id":5778727749}}`, want: 170},
 		{name: "top-level wins", payload: `{"number":5,"issue":{"number":7}}`, want: 5},
 		{name: "none", payload: `{}`, want: 0},
 	}
@@ -225,6 +266,7 @@ func TestEventDefaultTitle(t *testing.T) {
 		{name: "pull request number", event: event{Repository: "goravel/framework", Payload: `{"number":42,"pull_request":{"number":42}}`}, want: "PR #42"},
 		{name: "issue number", event: event{Repository: "goravel/goravel", Payload: `{"number":123,"comment":{"body":"@goravel-agent review"}}`}, want: "Issue #123"},
 		{name: "issue number only", event: event{Repository: "goravel/goravel", Payload: `{"issue":{"number":7,"body":"@goravel-agent review"}}`}, want: "Issue #7"},
+		{name: "review pull request", event: event{Repository: "goravel/example", Payload: `{"pull_request":{"number":170,"body":"A change"},"review":{"id":5778727749}}`}, want: "PR #170"},
 		{name: "no number", event: event{Repository: "goravel/goravel", Payload: `{"comment":{"body":"@goravel-agent review"}}`}, want: ""},
 	}
 
@@ -269,6 +311,11 @@ func TestEventReaction(t *testing.T) {
 			payload: `{"number":5,"issue":{"number":5,"body":"@goravel-agent review"}}`,
 		},
 		{
+			name:    "review body only",
+			event:   eventPullRequestReview,
+			payload: `{"pull_request":{"number":170},"review":{"id":5778727749,"node_id":"MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=","body":"@goravel-agent solve the comments"}}`,
+		},
+		{
 			name:    "invalid payload",
 			event:   "issue_comment",
 			payload: `not json`,
@@ -283,6 +330,49 @@ func TestEventReaction(t *testing.T) {
 			require.Equal(t, test.wantOK, ok)
 			require.Equal(t, test.wantCollection, collection)
 			require.Equal(t, test.wantID, commentID)
+		})
+	}
+}
+
+// TestEventReviewNodeID pins which event carries a review reaction subject: a
+// review body has one, every other event — including an inline review comment —
+// has none.
+func TestEventReviewNodeID(t *testing.T) {
+	tests := []struct {
+		name  string
+		event event
+		want  string
+	}{
+		{
+			name:  "review body",
+			event: event{Event: eventPullRequestReview, Payload: `{"review":{"id":5778727749,"node_id":"MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA="}}`},
+			want:  "MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=",
+		},
+		{
+			name:  "review without node id",
+			event: event{Event: eventPullRequestReview, Payload: `{"review":{"id":5778727749}}`},
+		},
+		{
+			name:  "inline review comment",
+			event: event{Event: "pull_request_review_comment", Payload: `{"comment":{"id":98765,"body":"@goravel-agent review"}}`},
+		},
+		{
+			name:  "conversation comment",
+			event: event{Event: "issue_comment", Payload: `{"comment":{"id":24680,"body":"@goravel-agent review"}}`},
+		},
+		{
+			name:  "review object on another event",
+			event: event{Event: eventPullRequestReviewComment, Payload: `{"comment":{"id":98765,"body":"@goravel-agent review"},"review":{"id":5778727749,"node_id":"MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA="}}`},
+		},
+		{
+			name:  "invalid payload",
+			event: event{Event: eventPullRequestReview, Payload: "not json"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.Equal(t, test.want, test.event.reviewNodeID())
 		})
 	}
 }
@@ -365,6 +455,62 @@ func TestPostInstructionSuffixDoc(t *testing.T) {
 	doc, err := os.ReadFile(filepath.Join("..", "..", "..", "..", "agents", "analyze.md"))
 	require.NoError(t, err)
 	require.Contains(t, string(doc), postInstructionSuffix)
+}
+
+// TestEventPromptReview pins the review prompt: the PR link plus the review
+// anchor, labelled `comment:` so the flows' acknowledge step still finds a link
+// to swap.
+func TestEventPromptReview(t *testing.T) {
+	tests := []struct {
+		name    string
+		payload string
+	}{
+		{
+			name: "review html_url",
+			payload: `{"pull_request":{"number":170,"html_url":"https://github.com/goravel/example/pull/170"},` +
+				`"review":{"id":5778727749,"node_id":"MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=",` +
+				`"html_url":"https://github.com/goravel/example/pull/170#pullrequestreview-5778727749",` +
+				`"body":"@goravel-agent solve the comments"}}`,
+		},
+		{
+			name: "review without html_url",
+			payload: `{"pull_request":{"number":170},` +
+				`"review":{"id":5778727749,"node_id":"MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=",` +
+				`"body":"@goravel-agent solve the comments"}}`,
+		},
+	}
+
+	want := "Repository: goravel/example\n" +
+		"PR: https://github.com/goravel/example/pull/170\n" +
+		"comment: https://github.com/goravel/example/pull/170#pullrequestreview-5778727749\n" +
+		"Instruction: solve the comments"
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			event := &event{Event: eventPullRequestReview, Repository: "goravel/example", Payload: test.payload}
+			require.Equal(t, want, event.prompt("solve the comments", "goravel/example"))
+		})
+	}
+}
+
+// TestEventPromptIgnoresReviewOnOtherEvents pins that review fields are read only
+// on a review event: an inline review comment keeps its own #discussion_r link
+// even when the payload carries a review object.
+func TestEventPromptIgnoresReviewOnOtherEvents(t *testing.T) {
+	event := &event{
+		Event:      eventPullRequestReviewComment,
+		Repository: "goravel/example",
+		Payload: `{"pull_request":{"number":170,"html_url":"https://github.com/goravel/example/pull/170"},` +
+			`"comment":{"id":98765,"html_url":"https://github.com/goravel/example/pull/170#discussion_r98765",` +
+			`"body":"@goravel-agent review"},"review":{"id":5778727749,` +
+			`"html_url":"https://github.com/goravel/example/pull/170#pullrequestreview-5778727749"}}`,
+	}
+
+	want := "Repository: goravel/example\n" +
+		"PR: https://github.com/goravel/example/pull/170\n" +
+		"comment: https://github.com/goravel/example/pull/170#discussion_r98765\n" +
+		"Instruction: review"
+	require.Equal(t, want, event.prompt("review", "goravel/example"))
 }
 
 func TestEventPromptWithoutComment(t *testing.T) {

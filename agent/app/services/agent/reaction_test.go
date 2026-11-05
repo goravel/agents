@@ -2,6 +2,7 @@ package agent
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -13,10 +14,11 @@ import (
 
 // recordedRequest is one request captured by the test GitHub server.
 type recordedRequest struct {
-	method string
-	path   string
-	auth   string
-	body   string
+	method      string
+	path        string
+	auth        string
+	contentType string
+	body        string
 }
 
 // reactionRecorder collects the requests sent to the test GitHub server.
@@ -47,10 +49,11 @@ func newReactionServer(t *testing.T, status int, body string) (*reactionRecorder
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
 		requestBody, _ := io.ReadAll(req.Body)
 		recorder.add(recordedRequest{
-			method: req.Method,
-			path:   req.URL.Path,
-			auth:   req.Header.Get("Authorization"),
-			body:   string(requestBody),
+			method:      req.Method,
+			path:        req.URL.Path,
+			auth:        req.Header.Get("Authorization"),
+			contentType: req.Header.Get("Content-Type"),
+			body:        string(requestBody),
 		})
 
 		w.Header().Set("Content-Type", "application/json")
@@ -68,7 +71,7 @@ func newReactionServer(t *testing.T, status int, body string) (*reactionRecorder
 func TestGitHubReactorReacts(t *testing.T) {
 	recorder, server := newReactionServer(t, http.StatusCreated, `{"id":1,"content":"eyes"}`)
 
-	reactor, err := newGitHubReactor("test-token", server.Client(), server.URL)
+	reactor, err := newGitHubReactor("test-token", server.Client(), server.URL, server.URL+"/graphql")
 	require.NoError(t, err)
 	require.NotNil(t, reactor.client)
 
@@ -118,11 +121,12 @@ func TestGitHubReactorReacts(t *testing.T) {
 func TestGitHubReactorBlankToken(t *testing.T) {
 	recorder, server := newReactionServer(t, http.StatusCreated, `{"id":1,"content":"eyes"}`)
 
-	reactor, err := newGitHubReactor("", server.Client(), server.URL)
+	reactor, err := newGitHubReactor("", server.Client(), server.URL, server.URL+"/graphql")
 	require.NoError(t, err)
 	require.Nil(t, reactor.client)
 
 	require.NoError(t, reactor.React(context.Background(), "goravel/goravel", reactionCollectionIssue, 24680))
+	require.NoError(t, reactor.ReactToReview(context.Background(), "goravel/example", "MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA="))
 	require.Empty(t, recorder.list())
 }
 
@@ -131,7 +135,7 @@ func TestGitHubReactorBlankToken(t *testing.T) {
 func TestGitHubReactorAPIError(t *testing.T) {
 	recorder, server := newReactionServer(t, http.StatusNotFound, `{"message":"Not Found"}`)
 
-	reactor, err := newGitHubReactor("test-token", server.Client(), server.URL)
+	reactor, err := newGitHubReactor("test-token", server.Client(), server.URL, server.URL+"/graphql")
 	require.NoError(t, err)
 
 	err = reactor.React(context.Background(), "goravel/goravel", reactionCollectionIssue, 24680)
@@ -144,7 +148,7 @@ func TestGitHubReactorAPIError(t *testing.T) {
 func TestGitHubReactorInvalidRepository(t *testing.T) {
 	recorder, server := newReactionServer(t, http.StatusCreated, `{"id":1,"content":"eyes"}`)
 
-	reactor, err := newGitHubReactor("test-token", server.Client(), server.URL)
+	reactor, err := newGitHubReactor("test-token", server.Client(), server.URL, server.URL+"/graphql")
 	require.NoError(t, err)
 
 	tests := []struct {
@@ -173,7 +177,7 @@ func TestGitHubReactorInvalidRepository(t *testing.T) {
 func TestGitHubReactorUnknownCollection(t *testing.T) {
 	recorder, server := newReactionServer(t, http.StatusCreated, `{"id":1,"content":"eyes"}`)
 
-	reactor, err := newGitHubReactor("test-token", server.Client(), server.URL)
+	reactor, err := newGitHubReactor("test-token", server.Client(), server.URL, server.URL+"/graphql")
 	require.NoError(t, err)
 
 	err = reactor.React(context.Background(), "goravel/goravel", "repos/comments", 24680)
@@ -186,7 +190,118 @@ func TestGitHubReactorUnknownCollection(t *testing.T) {
 func TestNewGitHubReactorRejectsInvalidBaseURL(t *testing.T) {
 	_, server := newReactionServer(t, http.StatusCreated, `{"id":1,"content":"eyes"}`)
 
-	reactor, err := newGitHubReactor("token", server.Client(), "://bad")
+	reactor, err := newGitHubReactor("token", server.Client(), "://bad", "")
 	require.Error(t, err)
 	require.Nil(t, reactor)
+}
+
+// TestGitHubReactorReactsToReview pins the GraphQL call a review body needs:
+// POST to /graphql, bearer auth, and the addReaction mutation with the review's
+// node id as subjectId and the EYES enum value. REST has no review reaction
+// endpoint, so a REST request here would be a bug.
+func TestGitHubReactorReactsToReview(t *testing.T) {
+	recorder, server := newReactionServer(t, http.StatusOK,
+		`{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}`)
+
+	reactor, err := newGitHubReactor("test-token", server.Client(), server.URL, server.URL+"/graphql")
+	require.NoError(t, err)
+
+	require.NoError(t, reactor.ReactToReview(
+		context.Background(), "goravel/example", "MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA="))
+
+	requests := recorder.list()
+	require.Len(t, requests, 1)
+	require.Equal(t, http.MethodPost, requests[0].method)
+	require.Equal(t, "/graphql", requests[0].path)
+	require.Equal(t, "Bearer test-token", requests[0].auth)
+	require.Equal(t, "application/json", requests[0].contentType)
+
+	var request struct {
+		Query     string         `json:"query"`
+		Variables map[string]any `json:"variables"`
+	}
+	require.NoError(t, json.Unmarshal([]byte(requests[0].body), &request))
+	require.Equal(t, addReactionMutation, request.Query)
+	require.Equal(t, map[string]any{
+		"subjectId": "MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=",
+		"content":   "EYES",
+	}, request.Variables)
+}
+
+// TestNewGitHubReactorDefaultsGraphQLURL pins the production endpoint: an empty
+// GraphQL URL must fall back to GitHub's public one, or every review reaction
+// would post nowhere while the injected-URL tests stay green.
+func TestNewGitHubReactorDefaultsGraphQLURL(t *testing.T) {
+	reactor, err := newGitHubReactor("token", nil, "", "")
+	require.NoError(t, err)
+	require.Equal(t, defaultGraphQLURL, reactor.graphqlURL)
+}
+
+// TestGitHubReactorReviewErrors pins that both failure shapes surface: a GraphQL
+// rejection, which arrives as HTTP 200 with an errors array, and a transport
+// level status.
+func TestGitHubReactorReviewErrors(t *testing.T) {
+	tests := []struct {
+		name    string
+		status  int
+		body    string
+		wantErr string
+	}{
+		{
+			name:    "graphql errors",
+			status:  http.StatusOK,
+			body:    `{"errors":[{"message":"Could not resolve to a node"}]}`,
+			wantErr: "Could not resolve to a node",
+		},
+		{
+			name:    "http error",
+			status:  http.StatusUnauthorized,
+			body:    `{"message":"Bad credentials"}`,
+			wantErr: "401",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			_, server := newReactionServer(t, test.status, test.body)
+
+			reactor, err := newGitHubReactor("test-token", server.Client(), server.URL, server.URL+"/graphql")
+			require.NoError(t, err)
+
+			err = reactor.ReactToReview(context.Background(), "goravel/example", "MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=")
+			require.ErrorContains(t, err, test.wantErr)
+		})
+	}
+}
+
+// TestGitHubReactorReviewInvalidRepository pins that a malformed repository is
+// rejected before any request is sent.
+func TestGitHubReactorReviewInvalidRepository(t *testing.T) {
+	recorder, server := newReactionServer(t, http.StatusOK,
+		`{"data":{"addReaction":{"reaction":{"content":"EYES"}}}}`)
+
+	reactor, err := newGitHubReactor("test-token", server.Client(), server.URL, server.URL+"/graphql")
+	require.NoError(t, err)
+
+	tests := []struct {
+		name       string
+		repository string
+	}{
+		{name: "no owner", repository: "goravel"},
+		{name: "empty owner", repository: "/goravel"},
+		{name: "empty name", repository: "goravel/"},
+		{name: "extra segment", repository: "goravel/goravel/extra"},
+		{name: "blank", repository: ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := reactor.ReactToReview(context.Background(), test.repository, "MDE3OlB1bGxSZXF1ZXN0UmV2aWV3ODA=")
+			require.ErrorContains(t, err, "invalid repository")
+		})
+	}
+
+	err = reactor.ReactToReview(context.Background(), "goravel/example", "")
+	require.ErrorContains(t, err, "no node id")
+	require.Empty(t, recorder.list())
 }
