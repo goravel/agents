@@ -139,7 +139,7 @@ git -C "$WORKTREE_DIR" diff "$DIFF_RANGE" -U0 | rg '^diff --git |^@@'
   **carried** — the new commits did not touch it, so it stays open against its own round: same count on
   its `[ROUND k]` line, never listed under a severity heading, never ticked, unless comment input below
   withdraws it; a withdrawal still resolves. A full review keeps the plain rule: no match → resolved.
-- NEW = **posted** findings with no prior match, listed under their severity heading. Current round `N = 1 + highest prior round`; no prior round → `N=1` and only the `[NEW]` line (embed `<!-- round: N -->`).
+- NEW = **posted** findings with no prior match, listed under their severity heading. Current round `N = 1 + highest prior round` (embed `<!-- round: N -->`); no prior round → `N=1` and only the `[NEW]` line.
 - Apply comment input: match each entry to the findings it addresses — inline comments by `path` + `line` (fall back to `original_line`); a reply via `in_reply_to_id` → its parent's path/line; otherwise a quoted `file:line` or the finding Title. Verify every claim against `$WORKTREE_DIR` (bot or human alike): a claim that holds (intentional guard, unreachable path, already fixed) → withdraw the finding; a claim that does not hold, or a question, leaves it unchanged. Unmatched entries are ignored; no output section. A withdrawn prior finding counts as resolved and joins the tick set. Stateless: re-derive from the fetched input every run.
 
 ### 4. Emit
@@ -196,4 +196,5 @@ jq -n --arg repo "$REPO" --arg head "$HEAD_SHA" --arg at "$(date -u +%Y-%m-%dT%H
 Three writes: the in-place tick, the round posted in step 4 when the prompt carries
 `comment the review result to the pr` (one top-level issue comment per round, so the next run can read
 its `<!-- reviewed-head: … -->` marker), and the reaction swap delegated to `subagents/reaction`.
-The `Instruction:` line is the only trigger; without it, emit only. NEVER use `gh pr review`.
+The `Instruction:` line is the only trigger for that post; without it, leave the PR unposted.
+NEVER use `gh pr review`.
