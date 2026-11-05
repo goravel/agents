@@ -37,18 +37,22 @@ the work in the worktree.
   blank means the prompt named no branch, so a repository link works on `master`. A pull request link
   always keeps its own branch and ignores `BRANCH`; an issue link uses it instead of `issue-<n>-<TS>` —
   which costs the `Closes #<n>` line, so name such a branch `<type>/<n>-<description>` to keep it.
-- **The workspace root is always `pwd`.** No input moves it and an environment `WORKSPACE_DIR` is ignored.
+- **The checkout root is always `pwd`.** No input moves it and an environment `WORKSPACE_DIR` is ignored.
   You start in the paseo project's folder, which holds no checkout, so the checkout is
-  `<pwd>/<owner>-<repo>` — reused when its `origin` matches, cloned when it is absent — and the worktree
-  is that directory's sibling `<owner>-<repo>-<TS>`. Only when `pwd` is itself inside a matching checkout
-  is that checkout — resolved to its toplevel — reused in place, with the worktree as its sibling
-  `<toplevel>-<TS>`. **That checkout is shared by every run of the repository**, so a concurrent run may
-  be creating it: the script waits for that clone and reuses it instead of failing.
+  `<pwd>/<owner>-<repo>` — reused when its `origin` matches, cloned when it is absent. Only when `pwd` is
+  itself inside a matching checkout is that checkout — resolved to its toplevel — reused in place. **That
+  checkout is shared by every run of the repository**, so a concurrent run may be creating it: the script
+  waits for that clone and reuses it instead of failing.
+- **The worktree root is always `/tmp`.** Every run's worktree is `/tmp/<owner>-<repo>-<TS>` (local time
+  `YYYYMMDD-HHMMSS`), never beside the checkout and never inside the project folder: all of the run's
+  changes, commits and branches live there. On macOS `/tmp` resolves to `/private/tmp`, so the returned
+  path may show either.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
-From `/tmp`, a `goravel/goravel` link gives `/tmp/goravel-goravel` and its `-<TS>` sibling. Started inside
-a checkout of that repo, it gives the worktree `/tmp/goravel-goravel-<TS>` and creates nothing else.
+With `pwd=/Users/bowen/code/agent`, a `goravel/goravel` link clones
+`/Users/bowen/code/agent/goravel-goravel` and returns `/tmp/goravel-goravel-<TS>`. Started inside a
+checkout of that repo, it returns the same `/tmp/goravel-goravel-<TS>` and creates nothing beside it.
 
 ## Run
 
@@ -107,18 +111,21 @@ else
     || setup_fail "unusable branch name: $BRANCH"
 fi
 
-# A named branch, or a bare repository's mainline, is known this early so the reuse fast-forward below can
-# leave the branch this run attaches where the caller left it. Only an issue link is left to resolve.
+# A named branch, or a bare repository's mainline, is known this early so the checkout's fast-forward can
+# skip the branch this run attaches. Only an issue link is left to resolve.
 if [ -n "$BRANCH" ]; then
   BASE_BRANCH="$BRANCH"
 elif [ "$KIND" = repo ]; then
-  # A bare repository names no branch: the run works on master itself. Fixed, not looked up — a
-  # repository without origin/master fails below instead of silently picking another branch.
+  # A bare repository names no branch: the run bases on master but starts its own run branch, so it
+  # never moves the shared refs/heads/master. Fixed, not looked up — a repository without origin/master
+  # fails below instead of silently picking another branch.
   BASE_BRANCH=master
 fi
 
-# The workspace is always the current directory; an inherited WORKSPACE_DIR is overwritten.
-WORKSPACE_DIR=$(pwd)
+# The checkout root is the current directory; the worktree root is always /tmp, so a run never
+# writes beside or inside the shared checkout.
+CHECKOUT_ROOT=$(pwd)
+WORKTREE_ROOT=/tmp
 
 SAFE=$(printf '%s' "$REPO" | tr -c 'A-Za-z0-9._-' '-' | sed -E 's/^-+//; s/-+$//')
 
@@ -129,10 +136,11 @@ same_repo() {
   [ "$(printf '%s' "$1" | tr 'A-Z' 'a-z')" = "$(printf '%s' "$2" | tr 'A-Z' 'a-z')" ]
 }
 
-REPO_DIR="$WORKSPACE_DIR/$SAFE"
+REPO_DIR="$CHECKOUT_ROOT/$SAFE"
 # Start inside the run's own checkout: reuse that checkout in place, never clone a copy
 # inside it. The toplevel is resolved so a session below the root still reuses it.
-if TOPLEVEL=$(git -C "$WORKSPACE_DIR" rev-parse --show-toplevel 2>/dev/null) \
+TOPLEVEL=
+if TOPLEVEL=$(git -C "$CHECKOUT_ROOT" rev-parse --show-toplevel 2>/dev/null) \
   && PWD_ORIGIN=$(git -C "$TOPLEVEL" remote get-url origin 2>/dev/null) \
   && same_repo "$(remote_repo "$PWD_ORIGIN")" "$REPO"; then
   REPO_DIR="$TOPLEVEL"
@@ -159,15 +167,8 @@ if [ -z "$CLAIMED" ]; then
     || setup_fail "$REPO_DIR has no origin remote"
   REMOTE_REPO=$(remote_repo "$REMOTE")
   same_repo "$REMOTE_REPO" "$REPO" || setup_fail "$REPO_DIR tracks $REMOTE_REPO, not $REPO"
-  if ! git -C "$REPO_DIR" fetch --prune --no-tags origin >/dev/null 2>&1; then
-    : # offline: the last fetched refs still give a usable worktree
-  elif [ -n "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ]; then
-    : # uncommitted work in the checkout: never merge under it
-  # The branch this run attaches starts where the caller left it, so it is never fast-forwarded here.
-  elif CUR=$(git -C "$REPO_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null) \
-    && [ "$CUR" != "$BASE_BRANCH" ]; then
-    git -C "$REPO_DIR" merge --ff-only "origin/$CUR" >/dev/null 2>&1 || true
-  fi
+  # The checkout is a shared cache: refresh it now; a failed fetch leaves the last refs usable.
+  git -C "$REPO_DIR" fetch --prune --no-tags origin >/dev/null 2>&1 || true
 else
   if [ -n "$CLONE_DEPTH" ]; then
     git clone --depth "$CLONE_DEPTH" "$CLONE_PREFIX$REPO.git" "$REPO_DIR" >/dev/null 2>&1
@@ -214,7 +215,9 @@ branch_name() {
   case "$KIND" in
     pull) if [ -n "$HEAD_BRANCH" ]; then printf '%s' "$HEAD_BRANCH"; else printf 'pr-%s-%s' "$NUM" "$1"; fi ;;
     issues) printf 'issue-%s-%s' "$NUM" "$1" ;;
-    *) printf '%s' "$BASE_BRANCH" ;;
+    # A repository link gets a fresh run branch: attaching master would move the shared
+    # refs/heads/master, and the next request would inherit this run's phase commits.
+    *) printf 'run-%s' "$1" ;;
   esac
 }
 
@@ -222,14 +225,33 @@ git -C "$REPO_DIR" worktree prune
 TRIES=0
 TS=$(date +%Y%m%d-%H%M%S)
 WT_BRANCH=$(branch_name "$TS")
-WT_DIR="$REPO_DIR-$TS"
+WT_DIR="$WORKTREE_ROOT/$SAFE-$TS"
+
+# Keep the shared checkout on its own branch's tip. The run never attaches this branch (it gets
+# its own), so moving it here cannot disturb the run. A dirty checkout, a detached HEAD, a
+# branch with no upstream, a branch another worktree still holds, or a failed fetch leaves it
+# where it is; the worktree below is still created from the freshest origin refs, never from
+# this checkout's branch.
+CUR=$(git -C "$REPO_DIR" symbolic-ref --quiet --short HEAD 2>/dev/null)
+if [ -n "$CUR" ]; then
+  HELD=$(git -C "$REPO_DIR" worktree list --porcelain 2>/dev/null | grep -Fxc "branch refs/heads/$CUR")
+  if [ "$CUR" = "$WT_BRANCH" ] && [ "$REPO_DIR" != "$TOPLEVEL" ]; then
+    setup_fail "branch $WT_BRANCH is the shared checkout's branch; omit BRANCH so the run gets its own"
+  fi
+  if [ "$CUR" != "$WT_BRANCH" ] && [ "$HELD" -le 1 ] \
+    && [ -z "$(git -C "$REPO_DIR" status --porcelain 2>/dev/null)" ] \
+    && git -C "$REPO_DIR" rev-parse --verify --quiet "origin/$CUR" >/dev/null; then
+    git -C "$REPO_DIR" merge --ff-only "origin/$CUR" >/dev/null 2>&1 || true
+  fi
+fi
+
 while [ -e "$WT_DIR" ]; do
   TRIES=$((TRIES + 1))
   [ "$TRIES" -ge 5 ] && setup_fail "worktree path $WT_DIR already exists"
   sleep 1
   TS=$(date +%Y%m%d-%H%M%S)
   WT_BRANCH=$(branch_name "$TS")
-  WT_DIR="$REPO_DIR-$TS"
+  WT_DIR="$WORKTREE_ROOT/$SAFE-$TS"
 done
 if [ "$KIND" = pull ]; then
   # The PR head is mirrored to a local ref, never written into a branch: a fetch into a branch another
@@ -288,13 +310,12 @@ script did not return.
 - `git -C` for every command. Never `git checkout`, `reset`, `clean`, `stash`, `branch -D`, `branch -f`,
   `push`, or `worktree remove`, and never delete a directory this run did not claim: the checkout and its
   worktrees hold work a later run may rely on.
-- Reusing the checkout — the toplevel of `pwd` when it tracks the link, otherwise `<pwd>/<owner>-<repo>`:
-  verify it is a git checkout, verify `origin` flattens to the same `owner/repo`, fetch, then fast-forward
-  only when the tree is clean and the branch is not the one this run will attach. A dirty tree, a detached
-  HEAD, local commits or a failed fetch leaves it untouched — the worktree is then built from the
-  `origin/<base>` the last fetch left behind, and if that ref is missing the run fails rather than falling
-  back to another branch. The one exception is a named `BRANCH` that already exists locally: those commits
-  are the caller's, so it is attached as it stands without needing `origin/<branch>`.
+- Reusing the checkout — `<pwd>/<owner>-<repo>`, or the toplevel of `pwd` when `pwd` is inside a matching
+  checkout: verify it is a git checkout, verify `origin` flattens to the same `owner/repo`,
+  `fetch --prune --no-tags`, then fast-forward its checked-out branch with `merge --ff-only origin/<branch>`
+  when the tree is clean, the branch has an upstream, and no other worktree holds it. A dirty tree, a
+  detached HEAD, a failed fetch, a diverged branch, or a branch held elsewhere leaves it untouched, and the
+  worktree is still built from the `origin/<base>` (or `refs/pull/<n>/head`) the last fetch left behind.
 - A pull request starts at its head, never at the checkout's local branch: `refs/pull/<n>/head` is mirrored
   to `refs/pr/<n>/head`, and the worktree's branch is created from it — or, when the branch is already here,
   kept only if the PR head contains it and then fast-forwarded to it. A branch carrying commits the PR head
@@ -308,25 +329,25 @@ script did not return.
   pull request: the branch is created when the checkout lacks it and reused with a fast-forward when it
   has it, so a re-run on the same PR lands on the same branch. A fork PR keeps `pr-<n>-<TS>` — committing
   there cannot update it, and the write flows refuse one. An issue link keeps `issue-<n>-<TS>` at the
-  default branch. A repository link where the user named no branch lands on `master`: the local `master`
-  is created from `origin/master` when absent, and attached exactly as it stands when it is already here,
-  so a re-run keeps its commits and nothing is moved or rewritten. Those commits are never pushed: they
-  stay on the local `master`, and the next repository-link run attaches that same `master` and inherits
-  them. `master` is fixed for that link kind — a repository with no `origin/master` fails instead of
-  falling back to another branch. A named `BRANCH` replaces that branch for an issue or repository link,
-  built from `origin/<branch>` or, when only the local branch exists, attached as it stands.
+  default branch.
+- A repository link where the user named no branch starts on a fresh `run-<TS>` branch created from
+  `origin/master`. It never attaches `master`, so the shared `refs/heads/master` stays at origin and the
+  next repository-link run starts from the latest origin instead of inheriting the previous run's phase
+  commits; those commits stay on their own `run-<TS>` branch, in the worktree that is kept. `goravel-pr`
+  sees a non-default branch, so it pushes `run-<TS>` as the pull request head instead of creating a
+  `feat/…` branch. `master` is fixed for that link kind — a repository with no `origin/master` fails
+  instead of falling back to another branch. A named `BRANCH` replaces that branch for an issue or
+  repository link, built from `origin/<branch>` or, when only the local branch exists, attached as it
+  stands; naming the checkout's own branch fails, because a run must not move it.
 - Only a pull request branch is compared against its base. A `master` or named branch is never
   fast-forwarded, checked for ancestry, or reset: commits it already carries belong to the caller and
   stay. That is why the pull-request rule above does not apply to them.
-- The shared checkout and the run may hold the same `master` — or the named branch — at once, because the
-  checkout is a cache that keeps its default branch. The checkout shares that branch, so the reuse
-  fast-forward is skipped for it: moving it first would start the run somewhere the caller did not leave
-  the branch. Every other branch the checkout might hold is still fast-forwarded best-effort. Nothing in
-  the run reads the checkout's working tree, but never commit in it: its tree still holds the older
-  commit, so a `git commit -a` there reverts the run's phase commits.
-- Every link's worktree directory is still `<repo>-<TS>` (local time `YYYYMMDD-HHMMSS`), so a re-run never
-  collides on the path: if it exists, wait a second and retake it, up to five times, never deleting or
-  reusing an existing one.
+- The shared checkout is a cache, not workspace: no run writes a file there, commits there, or checks out
+  its branch. The fast-forward is skipped when the run attaches the branch the cache also holds — only
+  possible when `pwd` is that checkout — and the worktree still lives in `/tmp`.
+- Every link's worktree directory is `/tmp/<owner>-<repo>-<TS>` (local time `YYYYMMDD-HHMMSS`), so a re-run
+  never collides on the path: if it exists, wait a second and retake it, up to five times, never deleting
+  or reusing an existing one.
 - `gh` answers two things: the branch, base, and cross-repository flag of a pull request link (`gh pr view
   -R <owner/repo> --json headRefName,baseRefName,isCrossRepository`), and the default branch when
   `origin/HEAD` is missing. A PR link needs it — without it there is no branch to check out, so the run
