@@ -17,7 +17,9 @@ severity order, and finding grammar below exactly — consumers key on these exa
 # 🤖 Automated review
 This is an AI-generated code review. Please double-check each finding before acting. You don't need to address every issue if they are inaccurate, but please point them out if any exist.
 Please tick the checkboxes once you have completed the items.
-<!-- round: N -->
+<!-- round: 3 -->
+<!-- reviewed-head: 9ab31e7c0d4e5f60a1b2c3d4e5f60718293a4b5c -->
+Reviewed: 3d81f42..9ab31e7 — 2 new commits
 
 ## Summary
 <1–2 plain-language sentences: what changed and the overall verdict.>
@@ -67,16 +69,27 @@ The review agent supplies one of two data shapes. Apply the template above to wh
 
 - **NEW** — the current finding set only. Use when the output is not round-tracked (a local
   artifact, a findings-only handoff).
-- **NEW + ROUND** — the current finding set plus prior-round data: the current round number `N`
-  and, per prior round, its `html_url`, per-severity open counts, and `Resolved` count. Use when
-  the output is posted as a round-tracked PR review comment.
+- **NEW + ROUND** — the current finding set plus prior-round data: the current round number `N`,
+  the full reviewed head SHA, the new-commit count (incremental) or changed-file count (full) for the
+  `Reviewed:` line, and, per prior round, its `html_url`, per-severity open counts, and `Resolved` count.
+  Use when the output is posted as a round-tracked PR review comment. For an incremental round, also the
+  reviewed range and `Resolved` limited to findings that range fixed.
 
 ## Rules
 
-- **NEW shape.** Emit the `[NEW]` Verdict line and the findings. Omit the `<!-- round: N -->`
-  marker and every `[ROUND k]` line.
+- **NEW shape.** Emit the `[NEW]` Verdict line and the findings. Omit the `<!-- round: N -->` and
+  `<!-- reviewed-head: … -->` markers, the `Reviewed:` line, and every `[ROUND k]` line.
 - **NEW + ROUND shape.** Emit the `<!-- round: N -->` marker and one `[ROUND k](<url>)` line per
   prior round, newest-first by comment timestamp.
+- **State lines.** A NEW + ROUND body carries `<!-- round: N -->` and `<!-- reviewed-head: <sha> -->`
+  on the two lines after the tick request; the marker holds the full 40-character SHA of the commit the
+  round reviewed. A later run reads the newest marker and reviews only `<sha>..HEAD`. Never edit, drop,
+  or reorder them — not when ticking, not when re-emitting.
+- **Reviewed line.** One plain line under the markers: `<short base>..<short head> — <COMMITS> new commits`
+  for an incremental round, `everything up to <short head> — <FILES> files` for a full round.
+- **Carried findings.** In an incremental round a prior open finding in a file the delta still has,
+  outside the lines it added or modified, is not resolved and not re-listed; it keeps its count on its
+  `[ROUND k]` line. `Resolved: <N>` counts only findings the reviewed range fixed.
 - **Folded Nits (both shapes).** Always wrap the entire `### Nits` block in `<details>` /
   `<summary>Nits (<N>)</summary>`: keep every numbered anchor line byte-for-byte and leave a blank
   line after `<summary>` and before `</details>`. Omit the whole block when there are no Nits.
