@@ -51,17 +51,22 @@ reviewed head, and comment input is re-derived from the fetched comments every r
 ### 1. Set up and fetch
 Check out the PR into a worktree and gather everything the review needs.
 
-No pull request link in your prompt → say so and stop; never guess a number. Otherwise spawn
-`subagents/setup` foreground and wait. Pass that link verbatim and keep its `<number>` as `PR_NUM`.
+- Take the target from the bare `https://github.com/<owner>/<repo>/pull/<number>` link in your prompt
+  (no `#` anchor). No link → say so and stop: `review: no target — give me a pull-request link.`
+- A bare number, a branch name, or prose mentioning a pull request is never a target.
+- Two bare links naming different pull requests → say so and stop, never pick one.
+- Then spawn `subagents/setup` foreground and wait; pass the link verbatim and keep its `<number>` as
+  `PR_NUM`.
 
 > You are running as a subagent in the review flow. LINK=<the pull request link from the prompt>
 
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build a path or a
   branch yourself.
-- Keep it all: this flow removes nothing. `setup` keeps the shared checkout and creates a fresh
-  `<repo>-<TS>` worktree beside it, so a later run gets another worktree from the same checkout — the
-  range gate below, never this line, decides whether the last reviewed head is still present.
+- Keep it all: this flow removes nothing. `setup` keeps the shared checkout and creates each run's
+  worktree under `/tmp` — `/tmp/<owner>-<repo>-<TS>`, never beside the checkout — so a later run gets its
+  own worktree from the same checkout; the range gate below, never this line, decides whether the last
+  reviewed head is still present.
 - Resolve the head, the base branch and the bot login, and fetch the conversation and PR body
   (read-only; every list call uses `--paginate`):
 
