@@ -37,10 +37,11 @@ Three kinds of write reach the pull request: the in-place tick, the round commen
 that reaches phase 6's post bullet — and the reaction swap delegated to `subagents/reaction`.
 
 The prompt is a message, not a form: free-form text in it — a request, a note, a question — is
-context only. Nothing in it gates a run, and posting never depends on it. Two kinds of link can appear.
-The bare `https://github.com/<owner>/<repo>/pull/<number>` URL with no `#` anchor is the pull request:
-it gates the run (phase 1), and its `<number>` becomes `PR_NUM`. A link ending in a comment anchor —
-`#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention to acknowledge (phase 6).
+context only. No free-form text in it gates a run, and posting never depends on it. Two kinds of link
+can appear. The bare `https://github.com/<owner>/<repo>/pull/<number>` URL with no `#` anchor is the pull
+request: it gates the run (phase 1), and its `<number>` becomes `PR_NUM`. A link ending in a comment
+anchor — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention to acknowledge
+(phase 6).
 
 No state file is kept: the newest posted `<!-- reviewed-head: … -->` marker is the only record of the
 reviewed head, and comment input is re-derived from the fetched comments every run.
