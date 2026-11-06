@@ -183,11 +183,11 @@ Load the `goravel-review-template` skill once, then:
 ### 6. Post, tick, and acknowledge
 - Decide whether the user asked for the post. Only the user's own words can ask — `post it`,
   `post the round`, `comment this on the PR`, `leave the review on the PR`.
-  When the prompt carries the dispatcher's `Instruction:` line, the text on that line is the user's; the
-  `comment the review result to the pr` line the dispatcher appends below it is scaffolding, never an
-  ask, and that exact sentence is never an ask even when the user types it. An interactive prompt has no
-  such line: the whole message is the user's. No ask → do not post and do not tick: go straight to the
-  acknowledge bullet.
+  When the prompt carries the dispatcher's `Instruction:` line, everything from that label up to the
+  appended last line is the user's; the `comment the review result to the pr` line the dispatcher
+  appends below it is scaffolding, never an ask, and that exact sentence is never an ask even when the
+  user types it. An interactive prompt has no such line: the whole message is the user's. No ask → do not
+  post and do not tick: go straight to the acknowledge bullet.
 - Post the round first, when asked. Write the review to a file, exactly as emitted — the conversation copy
   and the PR copy are byte-identical — and post it as one top-level issue comment for this round:
 
@@ -200,9 +200,9 @@ gh pr comment "$PR_NUM" --body-file "$REVIEW_FILE"
 
   Post only once the review is final, and never post a body missing its markers. A run that posts nothing
   leaves no record: the `<!-- reviewed-head: … -->` marker advances only when a round is posted, so the
-  next run reviews from the last posted head — the whole base range when none exists — and may re-list
-  findings this run already reported. NEVER use `gh pr review`: the top-level issue comment above is the
-  only posting path.
+  next run reviews from the last posted head — a full review from the base branch when none exists — and
+  may re-list findings this run already reported. NEVER use `gh pr review`: the top-level issue comment
+  above is the only posting path.
 - Tick prior comments second, and only after that post succeeded — a `gh pr comment` that failed leaves
   every prior comment untouched. Never tick without a posted round: a tick with no round behind it closes a
   prior finding with no new review saying why it is done. Tick resolved findings in prior comments whose
