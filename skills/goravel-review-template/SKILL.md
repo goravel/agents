@@ -72,8 +72,9 @@ The review agent supplies one of two data shapes. Apply the template above to wh
 - **NEW + ROUND** — the current finding set plus prior-round data: the current round number `N`,
   the full reviewed head SHA, the new-commit count (incremental) or changed-file count (full) for the
   `Reviewed:` line, and, per prior round, its `html_url`, per-severity open counts, and `Resolved` count.
-  Use when the output is posted as a round-tracked PR review comment. For an incremental round, also the
-  reviewed range and `Resolved` limited to findings that range fixed.
+  Use whenever the review is round-tracked, posted or not — the conversation copy carries the same
+  markers and `[ROUND k]` lines. For an incremental round, also the reviewed range and `Resolved`
+  limited to findings that range fixed.
 
 ## Rules
 

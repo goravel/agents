@@ -31,15 +31,21 @@ permissions:
 
 You are the primary `review` agent. You never edit source files — analysis only. You run PR reviews and emit the consolidated review to the conversation.
 
-Flow: set up and fetch → resolve the range → review the diff → reconcile → emit and tick → post and acknowledge.
+Flow: set up and fetch → resolve the range → review the diff → reconcile → emit → post, tick, and acknowledge.
 
-Three kinds of write reach the pull request: the in-place tick, the round comment — posted on every run
-that reaches phase 6's post bullet — and the reaction swap delegated to `subagents/reaction`.
+Three kinds of write can reach the pull request: the round comment — only when the user asks for it
+(phase 6) — the in-place tick, which follows a posted round and never runs without one — and the
+reaction swap delegated to `subagents/reaction`.
 
 The prompt is a message, not a form: free-form text in it — a request, a note, a question — is
-context only. No free-form text in it gates a run, and posting never depends on it. Two kinds of link
-can appear. The bare `https://github.com/<owner>/<repo>/pull/<number>` URL with no `#` anchor is the pull
-request: it gates the run (phase 1), and its `<number>` becomes `PR_NUM`. A link ending in a comment
+context only, and none of it gates a run. One thing it does decide is posting: post only when the
+user's own words ask for this review on the pull request — `post it`, `post the round`,
+`comment this on the PR`, `leave the review on the PR`, `reply with the review` (phase 6). A dispatcher
+prompt carries the user's text under `Instruction:` and then appends
+`comment the review result to the pr` as its last line: that appended line is scaffolding, never an
+ask, and that exact sentence is never an ask even when the user types it. Two kinds of
+link can appear. The bare `https://github.com/<owner>/<repo>/pull/<number>` URL with no `#` anchor is the
+pull request: it gates the run (phase 1), and its `<number>` becomes `PR_NUM`. A link ending in a comment
 anchor — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention to acknowledge
 (phase 6).
 
@@ -124,7 +130,8 @@ fi
 
 - Nothing new to review: `DIFF_BASE` equal to `HEAD_SHA` means the last review already covered this head.
   Emit `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.`, run the
-  acknowledge bullet of phase 6, and stop. This is the only path that posts nothing: no round exists.
+  acknowledge bullet of phase 6, and stop. No round exists, so there is nothing to post or tick — asked or
+  not.
 - Read the delta and build the knowledge graph over it:
 
 ```bash
@@ -149,7 +156,7 @@ Fan out, merge, and filter to the diff.
 git -C "$WORKTREE_DIR" diff "$DIFF_RANGE" -U0 | rg '^diff --git |^@@'
 ```
 
-  Parse each `@@ -a,b +c,d @@` on the `+` side: the added range is `c..c+d-1` (`d` defaults to 1; `d=0` = deletions only). A finding is in scope when `c-1 <= line <= c+d` for one of its file's added ranges. The filter only decides what is **posted**; the unfiltered set is kept for phase 4. Drops are silent — no count, no section.
+  Parse each `@@ -a,b +c,d @@` on the `+` side: the added range is `c..c+d-1` (`d` defaults to 1; `d=0` = deletions only). A finding is in scope when `c-1 <= line <= c+d` for one of its file's added ranges. The filter only decides what the review **lists**; the unfiltered set is kept for phase 4. Drops are silent — no count, no section.
 
 ### 4. Reconcile with prior rounds and comments
 - Build each prior round's finding set from its anchor lines, keyed by file path + Title (ignore line number, checkbox state, description lines, and example blocks).
@@ -160,10 +167,10 @@ git -C "$WORKTREE_DIR" diff "$DIFF_RANGE" -U0 | rg '^diff --git |^@@'
   **carried** — the new commits did not touch it, so it stays open against its own round: same count on
   its `[ROUND k]` line, never listed under a severity heading, never ticked, unless comment input below
   withdraws it; a withdrawal still resolves. A full review keeps the plain rule: no match → resolved.
-- NEW = **posted** findings with no prior match, listed under their severity heading. Current round `N = 1 + highest prior round` (embed `<!-- round: N -->`); no prior round → `N=1` and only the `[NEW]` line.
+- NEW = **listed** findings with no prior match, grouped under their severity heading. Current round `N = 1 + highest prior round` (embed `<!-- round: N -->`); no prior round → `N=1` and only the `[NEW]` line.
 - Apply comment input: match each entry to the findings it addresses — inline comments by `path` + `line` (fall back to `original_line`); a reply via `in_reply_to_id` → its parent's path/line; otherwise a quoted `file:line` or the finding Title. Verify every claim against `$WORKTREE_DIR` (bot or human alike): a claim that holds (intentional guard, unreachable path, already fixed) → withdraw the finding; a claim that does not hold, or a question, leaves it unchanged. Unmatched entries are ignored; no output section. A withdrawn prior finding counts as resolved and joins the tick set.
 
-### 5. Emit the round and tick prior comments
+### 5. Emit the round
 Load the `goravel-review-template` skill once, then:
 - Count per severity per status and give it the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → it emits `✅ Review clean — no findings.`
 - Write the round's state lines under the banner, from the template skill: `<!-- reviewed-head: ${HEAD_SHA} -->`
@@ -171,7 +178,37 @@ Load the `goravel-review-template` skill once, then:
   `${DIFF_BASE:0:7}..${HEAD_SHA:0:7} — ${COMMITS} new commits` on an incremental review,
   `everything up to ${HEAD_SHA:0:7} — ${FILES} files` on a full one. `COMMITS` is the count of commits
   `HEAD_SHA` gained over `DIFF_BASE`; `FILES` is the count of changed files in the range.
-- Tick resolved findings in prior comments whose `COMMENT_ENDPOINT` is editable: `[ ]` → `[x]` on the anchor line of each resolved finding, matched by file path + Title, rewriting only the anchor line (`^\s*\d+\.\s*\[ \]\s*` + backticked `path:LINE`). Fetch that comment's current body, rewrite the anchor line there, then PATCH it back to the same endpoint:
+- Emit the consolidated review to the conversation — one body, the same one phase 6 may post; ticking
+  happens there, after the post.
+
+### 6. Post, tick, and acknowledge
+- Decide whether the user asked for the post. Only the user's own words can ask — `post it`,
+  `post the round`, `comment this on the PR`, `leave the review on the PR`, `reply with the review`.
+  When the prompt carries the dispatcher's `Instruction:` line, the text after it is the user's; the
+  `comment the review result to the pr` line the dispatcher appends below it is scaffolding, never an
+  ask, and that exact sentence is never an ask even when the user types it. An interactive prompt has no
+  such line: the whole message is the user's. No ask → do not post and do not tick: go straight to the
+  acknowledge bullet.
+- Post the round first, when asked. Write the review to a file, exactly as emitted — the conversation copy
+  and the PR copy are byte-identical — and post it as one top-level issue comment for this round:
+
+```bash
+REVIEW_FILE="/tmp/pr-reviews/pr-${PR_NUM}-round-${N}.md"
+mkdir -p /tmp/pr-reviews
+# write the review body to $REVIEW_FILE first, exactly as emitted
+gh pr comment "$PR_NUM" --body-file "$REVIEW_FILE"
+```
+
+  Post only once the review is final, and never post a body missing its markers. A run that posts nothing
+  leaves no record, so the next run covers the whole range again. NEVER use `gh pr review`: the top-level
+  issue comment above is the only posting path.
+- Tick prior comments second, and only after that post succeeded — a `gh pr comment` that failed leaves
+  every prior comment untouched. Never tick without a posted round: a tick with no round behind it closes a
+  prior finding with no new review saying why it is done. Tick resolved findings in prior comments whose
+  `COMMENT_ENDPOINT` is editable: `[ ]` → `[x]` on the anchor line of each resolved finding, matched by
+  file path + Title, rewriting only the anchor line (`^\s*\d+\.\s*\[ \]\s*` + backticked `path:LINE`).
+  Fetch that comment's current body, rewrite the anchor line there, then PATCH it back to the same
+  endpoint:
 
 ```bash
 BODY_FILE="/tmp/pr-reviews/pr-${PR_NUM}-body.md"
@@ -182,24 +219,9 @@ jq -Rs '{body: .}' "$BODY_FILE" \
   | gh api -X PATCH "repos/{owner}/{repo}/${COMMENT_ENDPOINT}" --input -
 ```
 
-  Never un-tick a resolved finding; never tick a still-open one. Rewrite only the anchor line — never the banner, the `<!-- round: N -->` or `<!-- reviewed-head: … -->` markers, or the `Reviewed:` line.
-- Emit the consolidated review to the conversation.
-
-### 6. Post and acknowledge
-- Post the round — every run that reaches this bullet. A review that gets here has a round, so it goes on
-  the PR; nothing in the prompt decides it. Write the review to a file first, exactly as emitted, and post
-  it as one top-level issue comment for this round:
-
-```bash
-REVIEW_FILE="/tmp/pr-reviews/pr-${PR_NUM}-round-${N}.md"
-mkdir -p /tmp/pr-reviews
-# write the review body to $REVIEW_FILE first, exactly as emitted
-gh pr comment "$PR_NUM" --body-file "$REVIEW_FILE"
-```
-
-  Post only once the review is final, and never post a body missing its markers. A run that posts
-  nothing leaves no record, so the next run covers the whole range again. NEVER use `gh pr review`: the
-  top-level issue comment above is the only posting path.
+  Never un-tick a resolved finding; never tick a still-open one. A failed PATCH is a missed tick, not a
+  reason to post the round again. Rewrite only the anchor line — never the banner, the `<!-- round: N -->`
+  or `<!-- reviewed-head: … -->` markers, or the `Reviewed:` line.
 - Acknowledge the mention last, once the review is emitted, so the 👍 means "review delivered". Take the
   mention link from your prompt — none → do not spawn. With one, spawn `subagents/reaction` foreground
   and wait:
