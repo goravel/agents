@@ -54,7 +54,7 @@ Check out the PR into a worktree and gather everything the review needs.
 - Take the target from the bare `https://github.com/<owner>/<repo>/pull/<number>` link in your prompt
   (no `#` anchor). No link → say so and stop: `review: no target — give me a pull-request link.`
 - A bare number, a branch name, or prose mentioning a pull request is never a target.
-- Two bare links naming different pull requests → say so and stop, never pick one.
+- Two links naming different pull requests → say so and stop, never pick one.
 - Then spawn `subagents/setup` foreground and wait; pass the link verbatim and keep its `<number>` as
   `PR_NUM`.
 
