@@ -40,14 +40,13 @@ reaction swap delegated to `subagents/reaction`.
 The prompt is a message, not a form: free-form text in it — a request, a note, a question — is
 context only, and none of it gates a run. One thing it does decide is posting: post only when the
 user's own words ask for this review on the pull request — `post it`, `post the round`,
-`comment this on the PR`, `leave the review on the PR`, `reply with the review` (phase 6). A dispatcher
-prompt carries the user's text under `Instruction:` and then appends
-`comment the review result to the pr` as its last line: that appended line is scaffolding, never an
-ask, and that exact sentence is never an ask even when the user types it. Two kinds of
-link can appear. The bare `https://github.com/<owner>/<repo>/pull/<number>` URL with no `#` anchor is the
-pull request: it gates the run (phase 1), and its `<number>` becomes `PR_NUM`. A link ending in a comment
-anchor — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention to acknowledge
-(phase 6).
+`comment this on the PR`, `leave the review on the PR` (phase 6). A dispatcher prompt carries the
+user's text under `Instruction:` and then appends `comment the review result to the pr` as its last
+line: that appended line is scaffolding, never an ask, and it is inert for this agent; that exact
+sentence is never an ask even when the user types it. Two kinds of link can appear. The bare
+`https://github.com/<owner>/<repo>/pull/<number>` URL with no `#` anchor is the pull request: it gates
+the run (phase 1), and its `<number>` becomes `PR_NUM`. A link ending in a comment anchor —
+`#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention to acknowledge (phase 6).
 
 No state file is kept: the newest posted `<!-- reviewed-head: … -->` marker is the only record of the
 reviewed head, and comment input is re-derived from the fetched comments every run.
@@ -179,12 +178,12 @@ Load the `goravel-review-template` skill once, then:
   `everything up to ${HEAD_SHA:0:7} — ${FILES} files` on a full one. `COMMITS` is the count of commits
   `HEAD_SHA` gained over `DIFF_BASE`; `FILES` is the count of changed files in the range.
 - Emit the consolidated review to the conversation — one body, the same one phase 6 may post; ticking
-  happens there, after the post.
+  happens in phase 6, after the post.
 
 ### 6. Post, tick, and acknowledge
 - Decide whether the user asked for the post. Only the user's own words can ask — `post it`,
-  `post the round`, `comment this on the PR`, `leave the review on the PR`, `reply with the review`.
-  When the prompt carries the dispatcher's `Instruction:` line, the text after it is the user's; the
+  `post the round`, `comment this on the PR`, `leave the review on the PR`.
+  When the prompt carries the dispatcher's `Instruction:` line, the text on that line is the user's; the
   `comment the review result to the pr` line the dispatcher appends below it is scaffolding, never an
   ask, and that exact sentence is never an ask even when the user types it. An interactive prompt has no
   such line: the whole message is the user's. No ask → do not post and do not tick: go straight to the
@@ -200,8 +199,10 @@ gh pr comment "$PR_NUM" --body-file "$REVIEW_FILE"
 ```
 
   Post only once the review is final, and never post a body missing its markers. A run that posts nothing
-  leaves no record, so the next run covers the whole range again. NEVER use `gh pr review`: the top-level
-  issue comment above is the only posting path.
+  leaves no record: the `<!-- reviewed-head: … -->` marker advances only when a round is posted, so the
+  next run reviews from the last posted head — the whole base range when none exists — and may re-list
+  findings this run already reported. NEVER use `gh pr review`: the top-level issue comment above is the
+  only posting path.
 - Tick prior comments second, and only after that post succeeded — a `gh pr comment` that failed leaves
   every prior comment untouched. Never tick without a posted round: a tick with no round behind it closes a
   prior finding with no new review saying why it is done. Tick resolved findings in prior comments whose
@@ -222,9 +223,9 @@ jq -Rs '{body: .}' "$BODY_FILE" \
   Never un-tick a resolved finding; never tick a still-open one. A failed PATCH is a missed tick, not a
   reason to post the round again. Rewrite only the anchor line — never the banner, the `<!-- round: N -->`
   or `<!-- reviewed-head: … -->` markers, or the `Reviewed:` line.
-- Acknowledge the mention last, once the review is emitted, so the 👍 means "review delivered". Take the
-  mention link from your prompt — none → do not spawn. With one, spawn `subagents/reaction` foreground
-  and wait:
+- Acknowledge the mention last, once the review is emitted, so the 👍 means the run delivered its review —
+  conversation copy or PR copy. Take the mention link from your prompt — none → do not spawn.
+  With one, spawn `subagents/reaction` foreground and wait:
 
   > You are running as a subagent in the review flow. COMMENT_URL=<the mention link from the prompt>
 
