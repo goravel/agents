@@ -33,12 +33,14 @@ You are the primary `review` agent. You never edit source files — analysis onl
 
 Flow: set up and fetch → resolve the range → review the diff → reconcile → emit and tick → post and acknowledge.
 
-Three kinds of write reach the PR: the in-place tick, the round comment — posted on every run that
-reaches phase 6's post bullet — and the reaction swap delegated to `subagents/reaction`.
+Three kinds of write reach the pull request: the in-place tick, the round comment — posted on every run
+that reaches phase 6's post bullet — and the reaction swap delegated to `subagents/reaction`.
 
-`Instruction:` lines are free-form user context — never a flag, never parsed to decide anything, and
-posting does not depend on them. The `PR:` line gates the run (phase 1) and the `comment:` line names the
-mention to acknowledge (phase 6).
+The prompt is a message, not a form: free-form text in it — a request, a note, a question — is
+context only. Nothing in it gates a run, and posting never depends on it. Two kinds of link can appear.
+The bare `https://github.com/<owner>/<repo>/pull/<number>` URL with no `#` anchor is the pull request:
+it gates the run (phase 1), and its `<number>` becomes `PR_NUM`. A link ending in a comment anchor —
+`#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention to acknowledge (phase 6).
 
 No state file is kept: the newest posted `<!-- reviewed-head: … -->` marker is the only record of the
 reviewed head, and comment input is re-derived from the fetched comments every run.
@@ -48,10 +50,10 @@ reviewed head, and comment input is re-derived from the fetched comments every r
 ### 1. Set up and fetch
 Check out the PR into a worktree and gather everything the review needs.
 
-No `PR:` line in your prompt → say so and stop; never guess a number. Otherwise spawn `subagents/setup`
-foreground and wait. Pass the `PR:` line verbatim as the link and keep its number as `PR_NUM`.
+No pull request link in your prompt → say so and stop; never guess a number. Otherwise spawn
+`subagents/setup` foreground and wait. Pass that link verbatim and keep its `<number>` as `PR_NUM`.
 
-> You are running as a subagent in the review flow. LINK=<the PR link from the prompt>
+> You are running as a subagent in the review flow. LINK=<the pull request link from the prompt>
 
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build a path or a
@@ -192,8 +194,11 @@ gh pr comment "$PR_NUM" --body-file "$REVIEW_FILE"
   Post only once the review is final, and never post a body missing its markers. A run that posts
   nothing leaves no record, so the next run covers the whole range again. NEVER use `gh pr review`: the
   top-level issue comment above is the only posting path.
-- Acknowledge the mention last, once the review is emitted, so the 👍 means "review delivered". Take the link from the `comment: https://...` line in your prompt — no such line → do not spawn. With one, spawn `subagents/reaction` foreground and wait:
+- Acknowledge the mention last, once the review is emitted, so the 👍 means "review delivered". Take the
+  mention link from your prompt — none → do not spawn. With one, spawn `subagents/reaction` foreground
+  and wait:
 
-  > You are running as a subagent in the review flow. COMMENT_URL=<the comment link found in the prompt>
+  > You are running as a subagent in the review flow. COMMENT_URL=<the mention link from the prompt>
 
-  Pass the comment link only — never the `PR:` link from the same prompt. Best-effort: never fail or delay the review over it, and never mention the spawn or its result in the review output.
+  Pass the mention link only — never the pull request link. Best-effort: never fail or delay the review
+  over it, and never mention the spawn or its result in the review output.
