@@ -41,12 +41,12 @@ of the output, not its content — never copy their names.
 ## 1. Prepare the PR
 
 Two kinds of link can appear in the prompt. The bare `https://github.com/<owner>/<repo>/pull/<number>`
-link with no `#` anchor is the pull request: it gates the run, and its `<number>` becomes `PR_NUM`.
-A link ending in a comment anchor — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` —
-is the mention link, the one step 7 acknowledges.
+link is the pull request. A link ending in a comment anchor — `#issuecomment-…`, `#discussion_r…`,
+`#pullrequestreview-…` — is the mention link, the one step 7 acknowledges. Either one names the pull
+request: its `<number>` becomes `PR_NUM`.
 
 No pull-request link → say so and stop; never guess a number. Otherwise spawn `subagents/setup`
-foreground and wait; pass the pull-request link verbatim.
+foreground and wait; pass that link verbatim.
 
 > You are running as a subagent in the analyze flow. LINK=<the PR link from the prompt>
 

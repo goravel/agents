@@ -42,9 +42,9 @@ context only, and none of it gates a run. One thing it does decide is posting: p
 user's own words ask for this review on the pull request — `post it`, `post the round`,
 `comment this on the PR`, `leave the review on the PR` (phase 6). The whole prompt is the user's own
 words. Two kinds of link can appear. The bare `https://github.com/<owner>/<repo>/pull/<number>` URL
-with no `#` anchor is the pull request: it gates the run (phase 1), and its `<number>` becomes
-`PR_NUM`. A link ending in a comment anchor — `#issuecomment-…`, `#discussion_r…`,
-`#pullrequestreview-…` — is the mention link, the one phase 6 acknowledges.
+is the pull request; the same URL with a comment anchor — `#issuecomment-…`, `#discussion_r…`,
+`#pullrequestreview-…` — is the mention link, the one phase 6 acknowledges. Either one names the
+pull request (phase 1), and its `<number>` becomes `PR_NUM`.
 
 No state file is kept: the newest posted `<!-- reviewed-head: … -->` marker is the only record of the
 reviewed head, and comment input is re-derived from the fetched comments every run.
@@ -54,8 +54,9 @@ reviewed head, and comment input is re-derived from the fetched comments every r
 ### 1. Set up and fetch
 Check out the PR into a worktree and gather everything the review needs.
 
-- Take the target from the bare `https://github.com/<owner>/<repo>/pull/<number>` link in your prompt
-  (no `#` anchor). No link → say so and stop: `review: no target — give me a pull-request link.`
+- Take the target from the `https://github.com/<owner>/<repo>/pull/<number>` link in your prompt — the
+  bare one or the mention link with a comment anchor. No link → say so and stop:
+  `review: no target — give me a pull-request link.`
 - A bare number, a branch name, or prose mentioning a pull request is never a target.
 - Two links naming different pull requests → say so and stop, never pick one.
 - Then spawn `subagents/setup` foreground and wait; pass the link verbatim and keep its `<number>` as
