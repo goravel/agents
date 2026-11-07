@@ -171,9 +171,10 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 
 Run after the PR exists, or when the user hands you comments to close.
 
-1. **Fetch the unresolved review threads** — REST has no resolved flag, so run the read-only GraphQL `reviewThreads` query inline (this flow loads no skill):
+1. **Fetch the unresolved review threads** — REST has no resolved flag, so run the read-only GraphQL `reviewThreads` query inline (this flow loads no skill). Resolve `PR_NUM` first — §1 fills it only for a pull-request link, so a request-started run resolves the PR §5.3 reported by the branch it is on:
 
    ```bash
+   PR_NUM=${PR_NUM:-$(gh -R "$REPO" pr view --json number --jq .number)}
    gh api graphql -F owner="${REPO%%/*}" -F name="${REPO##*/}" -F number="$PR_NUM" -f query='
      query($owner:String!,$name:String!,$number:Int!){
        repository(owner:$owner,name:$name){
