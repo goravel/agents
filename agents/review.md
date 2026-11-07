@@ -1,7 +1,6 @@
 ---
 description: Reviews a GitHub PR without editing code and emits a consolidated, round-tracked review.
 mode: primary
-model: opencode-go/deepseek-v4.1-flash#high
 permissions:
   - action: edit
     resource: "*"

@@ -1,7 +1,6 @@
 ---
 description: Reviews one diff (a branch or phase delta) and returns its consolidated round review, optionally fanning out to the six review-go SIDEs; writes <folder>/review-<PHASE>.md, <folder>/findings-by-side.json, and <folder>/considered.md.
 mode: subagent
-model: opencode-go/deepseek-v4.1-flash#high
 permissions:
   - action: edit
     resource: "*"

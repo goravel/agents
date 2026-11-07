@@ -1,7 +1,6 @@
 ---
 description: Prepares a run's environment — turns a GitHub pull request, issue, or repository link into a repository checkout plus a git worktree and returns the worktree path.
 mode: subagent
-model: opencode-go/deepseek-v4.1-flash#high
 permissions:
   - action: edit
     resource: "*"

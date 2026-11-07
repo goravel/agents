@@ -1,7 +1,6 @@
 ---
 description: Picks and runs the right Goravel PR skill for the current branch. Loads goravel-pr to create or update the pull request, or goravel-pr-comments to close out PR review comments.
 mode: subagent
-model: opencode-go/deepseek-v4.1-flash#high
 permissions:
   - action: edit
     resource: "*"

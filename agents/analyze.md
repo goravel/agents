@@ -1,7 +1,6 @@
 ---
 description: Analyzes a GitHub PR — breaking changes, usage before and after, and how it compares to Laravel — without editing code.
 mode: primary
-model: opencode-go/deepseek-v4.1-flash#high
 permissions:
   - action: edit
     resource: "*"

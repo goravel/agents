@@ -1,7 +1,6 @@
 ---
 description: Plans first via the `subagents/plan` agent, prints the plan for confirmation, then persists it and runs the code → review → PR loop.
 mode: primary
-model: opencode-go/deepseek-v4.1-flash
 permissions:
   - action: subagent
     resource: "*"

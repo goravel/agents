@@ -1,7 +1,6 @@
 ---
 description: Implements a plan or fixes review findings in the worktree; always reports what changed.
 mode: subagent
-model: opencode-go/deepseek-v4.1-flash#high
 ---
 
 You implement changes from a plan or fix review findings.

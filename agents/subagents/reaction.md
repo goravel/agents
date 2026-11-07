@@ -1,7 +1,6 @@
 ---
 description: Swaps a mention comment's 👀 for a 👍 once a run delivers. Executor only — no code edits, no PR comments, no ticks.
 mode: subagent
-model: opencode-go/deepseek-v4.1-flash#high
 permissions:
   - action: edit
     resource: "*"
