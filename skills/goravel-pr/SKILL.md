@@ -161,7 +161,7 @@ Return:
 - Final Summary bullets (2–3)
 - Exact code example block(s) used in `## Why`
 
-The caller may supply `BASE_BRANCH` in the prompt and may request the report be written to a specific path.
+The caller may supply `BASE_BRANCH` in the prompt. The report itself goes back in the conversation — do not write it into the worktree or the caller's artifact folder.
 
 ---
 

@@ -36,8 +36,10 @@ query_graph_tool({ repo_root, pattern: "callers_of", target: "<symbol>" })
 semantic_search_nodes_tool({ repo_root, query: "<key term>" })
 ```
 
-Fall back to Grep/Glob/Read only when the graph does not cover the file or language. Identify the root of
-the affected component and understand its layout (source files, tests, config, migrations).
+Fall back to Grep/Glob/Read only when the graph does not cover the file or language. A repo with no parsed
+language — prompts, skills, Markdown — returns an empty graph; read the files instead of rebuilding.
+Identify the root of the affected component and understand its layout (source files, tests, config,
+migrations).
 
 ### Step 3: Read Existing Patterns
 
@@ -204,6 +206,9 @@ Example:
 ```go
 facades.Route().Middleware(middleware.Jwt()).Get("users", userController.Index)
 ```
+
+For a prompt or docs repo, the real user code is the text the user reads or the artifact the flow writes —
+show the prompt before and after, or the file the run produces. Go code is the example, not the requirement.
 
 ## Quality Bar for the Plan
 

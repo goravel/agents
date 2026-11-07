@@ -29,7 +29,8 @@ the work in the worktree.
   | issue | `https://github.com/goravel/goravel/issues/42` | `issue-42-<TS>`, or the named branch |
   | repository | `https://github.com/goravel/goravel`, `…/goravel.git`, `…/goravel/`, `git@github.com:goravel/goravel.git`, `goravel/goravel` | `master`, or the named branch |
 
-  A `#issuecomment-…` or `#discussion_r…` suffix is fine. The input carries exactly one `LINK=<link>`; a
+  Any comment anchor is fine — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — the script
+  stops at the number. The input carries exactly one `LINK=<link>`; a
   bare `owner/repo` is accepted only as that whole value. The `owner/repo` of a
   pull request link is the repository the PR lives in, not its head: `gh -R <owner/repo>` reads the PR and
   `origin` stays the base repository.
@@ -318,17 +319,11 @@ script did not return.
 - A pull request starts at its head, never at the checkout's local branch: `refs/pull/<n>/head` is mirrored
   to `refs/pr/<n>/head`, and the worktree's branch is created from it — or, when the branch is already here,
   kept only if the PR head contains it and then fast-forwarded to it. A branch carrying commits the PR head
-  lacks fails the run rather than having them pushed into the PR. Issue and repository links start from
-  `origin/<base>` when their branch has to be created, and keep a branch that already exists as it stands.
-- Every `origin/*` branch is refreshed before the worktree is added, because a pull request can target a
-  base other than the default branch and a single-branch clone tracks only one: without it an
-  `origin/<base>...HEAD` diff has nothing to resolve. The refresh writes remote-tracking refs and moves no
-  local branch, and like every fetch here it is best-effort.
-- A same-repository pull request keeps its own branch name, `headRefName`, so the run's push updates that
-  pull request: the branch is created when the checkout lacks it and reused with a fast-forward when it
-  has it, so a re-run on the same PR lands on the same branch. A fork PR keeps `pr-<n>-<TS>` — committing
-  there cannot update it, and the write flows refuse one. An issue link keeps `issue-<n>-<TS>` at the
-  default branch.
+  lacks fails the run rather than having them pushed into the PR. A same-repository pull request keeps its
+  own branch name, `headRefName`, so the run's push updates that pull request; a fork PR keeps `pr-<n>-<TS>`,
+  which the write flows refuse; an issue link keeps `issue-<n>-<TS>` at the default branch. Only a pull
+  request branch is compared against its base: a `master` or named branch is never fast-forwarded, checked
+  for ancestry, or reset, because its commits belong to the caller.
 - A repository link where the user named no branch starts on a fresh `run-<TS>` branch created from
   `origin/master`. It never attaches `master`, so the shared `refs/heads/master` stays at origin and the
   next repository-link run starts from the latest origin instead of inheriting the previous run's phase
@@ -339,18 +334,11 @@ script did not return.
   repository link, built from `origin/<branch>` or, when only the local branch exists, attached as it
   stands; naming the checkout's own branch fails, because a run must not move it. Nothing deletes a
   `run-<TS>` branch, so they accumulate in the shared checkout by design.
-- Only a pull request branch is compared against its base. A `master` or named branch is never
-  fast-forwarded, checked for ancestry, or reset: commits it already carries belong to the caller and
-  stay. That is why the pull-request rule above does not apply to them.
 - The shared checkout is a cache, not workspace: a repository or issue run never checks out its branch —
   naming that branch as `BRANCH` fails — and no run commits there. A pull request keeps its own head
   branch, even when that is the cache's; that run's commits then leave the checkout's working tree stale,
   so its fast-forward is skipped while the tree is dirty. Never commit in the checkout — a `commit -a`
   there reverts the run's phase commits. Every worktree lives in `/tmp`.
-- Every link's worktree directory is `/tmp/<owner>-<repo>-<TS>` (local time `YYYYMMDD-HHMMSS`), so a re-run
-  never collides on the path: if it exists, wait a second and retake it, up to five times, never deleting
-  or reusing an existing one.
 - `gh` answers two things: the branch, base, and cross-repository flag of a pull request link (`gh pr view
   -R <owner/repo> --json headRefName,baseRefName,isCrossRepository`), and the default branch when
-  `origin/HEAD` is missing. A PR link needs it — without it there is no branch to check out, so the run
-  fails rather than guessing one.
+  `origin/HEAD` is missing. A PR link fails rather than guessing a branch.

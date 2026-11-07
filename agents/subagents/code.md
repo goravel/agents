@@ -1,5 +1,5 @@
 ---
-description: Write code
+description: Implements a plan or fixes review findings in the worktree; always reports what changed.
 mode: subagent
 model: opencode-go/deepseek-v4.1-flash#high
 ---
@@ -14,8 +14,7 @@ When the task adds or changes tests, load the `goravel-testing` skill first and 
 
 ## Comments
 
-A comment earns its place only by explaining why, a non-obvious constraint, or a gotcha the code
-cannot show. None is the default.
+None is the default.
 
 - One short line of plain words, in the file's language. Say why, not what.
 - No comment that repeats the name below it, restates a signature, or narrates a step

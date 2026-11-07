@@ -47,6 +47,8 @@ never re-verify or re-raise another SIDE's findings.
 
 ## Workflow
 
+Load the `goravel-review-template` skill first — step 2's comment rule and step 4's grammar both come from it.
+
 1. **Resolve working context.**
    - Both `WORKTREE_DIR=<path>` and `DIFF_BASE=<sha>` given → delta mode: use `workdir="$WORKTREE_DIR"`
      for every bash call, `repo_root="$WORKTREE_DIR"` for every graph call, and read files under
@@ -92,19 +94,9 @@ never re-verify or re-raise another SIDE's findings.
    - Naming, declarations, function organization, documentation
    - Package/module/import organization, logging conventions, linting
    - Community checklist compliance (Go Code Review, Uber Style Guide)
-   - Comments: only necessary ones, each short and plain — a comment earns its place only by
-     explaining why, a non-obvious constraint, or a gotcha the code cannot show. Flag a comment
-     this diff adds or rewrites that restates the code, narrates a step, banners a section, leaves
-     commented-out code, or is unclear, too long, or not plain. Anchor on the comment line. Report
-     these as Maybe Fix. A comment that exists to explain a bad name means the name is wrong: flag
-     the name on its own line under the normal naming rule — or, if that line is not in the diff,
-     flag the comment and say the name is the problem. A doc comment opening with the name is not
-     noise.
-
-   Extra — run read-only automated checks:
-   - Worktree mode: run inside the worktree (`workdir="$WORKTREE_DIR"`)
-   - Otherwise: run against the current directory
-   - gofmt -l, go vet ./...
+   - Comments: raise them per the `## Comment findings` section of the `goravel-review-template`
+     skill (loaded above).
+   - Checks: run `gofmt -l` and `go vet ./...` read-only in the resolved working context (`$WORKTREE_DIR` in worktree mode).
 
    ### SIDE=testing — test code and testability
    - Coverage: happy path, failure, and edge cases in table-driven tests
@@ -121,10 +113,11 @@ never re-verify or re-raise another SIDE's findings.
    - Symbol organization: file ordering, package-level structure
 
 3. **Read and verify.**
-   Start from the graph, then confirm in source: `get_minimal_context_tool(task="review <SIDE>", changed_files=<scope>, base=<base>)`
-   → `detect_changes_tool(detail_level="minimal", changed_files=<scope>, base=<base>)`
-   → `query_graph_tool(pattern="callers_of"|"tests_for", target)`
-   → `get_review_context_tool(detail_level="minimal", include_source=False)`.
+   Start from the graph, then confirm in source:
+   `get_minimal_context_tool(task="review <SIDE>", repo_root="$WORKTREE_DIR", changed_files=<scope>, base=<base>)`
+   → `detect_changes_tool(detail_level="minimal", repo_root="$WORKTREE_DIR", changed_files=<scope>, base=<base>)`
+   → `query_graph_tool(pattern="callers_of"|"tests_for", target, repo_root="$WORKTREE_DIR")`
+   → `get_review_context_tool(detail_level="minimal", repo_root="$WORKTREE_DIR", include_source=False, base=<base>)`.
    Use the resolved working context's `repo_root`/`base`; if the graph returns `status: not_ready`, fall
    back to reading files — never build or update the graph yourself.
    Read the diff file-by-file; trace callers and callees with `query_graph` as relevant to your SIDE. Use
@@ -138,6 +131,6 @@ never re-verify or re-raise another SIDE's findings.
    start with exactly ONE anchor line (`file:line` + **Title**), followed by three indented plain-language
    lines — Problem / Impact / Fix — and, when the finding concerns code behavior, one indented before/after
    example-code block, all formatted exactly per the finding grammar in the
-   `goravel-review-template` skill (load it via the skill tool). Write for a busy developer who did
+   `goravel-review-template` skill (loaded above). Write for a busy developer who did
    not write this code: plain words, short sentences, one problem per finding. Use the real file path
    and line number for every finding. If you found nothing, reply with exactly: No findings.

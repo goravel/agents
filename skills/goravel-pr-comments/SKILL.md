@@ -16,7 +16,7 @@ and a `reason` posted verbatim.
 ## Setup
 1. Resolve the PR: the `PR` value from the caller, else `gh pr view --json number --jq '.number'` for the current branch. Empty -> stop and report failure.
 2. `OWNER/REPO` = `gh repo view --json nameWithOwner --jq .nameWithOwner`.
-3. Resolve each comment reference to a numeric review-comment id: from a URL take the digits after `#discussion_r`; a bare number is used directly. Unresolvable -> record `skipped (unparseable)`.
+3. Resolve each comment reference to a numeric id: a review comment from the digits after `#discussion_r`, the top-level issue comment from the digits after `#issuecomment-` (it has no thread — see Guardrails); a bare number is a review-comment id. Unresolvable -> record `skipped (unparseable)`.
 4. Build the thread map once (unresolved review threads -> their comment ids):
 
     gh api graphql -F owner="$OWNER" -F name="$REPO" -F number="$PR" -f query='
@@ -33,10 +33,10 @@ and a `reason` posted verbatim.
    Map each `databaseId` -> `{ threadId, isResolved }`.
 
 ## Per comment
-1. **Post the reply** — write the reason to `/tmp/pr-comment-reply.md` first, so quotes and newlines are safe:
+1. **Post the reply** — write the reason to `/tmp/pr-comment-reply.md` with a bash heredoc first (file edits are denied), so quotes and newlines are safe:
    `gh api "repos/$OWNER/$REPO/pulls/$PR/comments/$COMMENT_ID/replies" -f body="$(cat /tmp/pr-comment-reply.md)"`
    Fails -> `reply failed`, do NOT resolve.
-2. **Resolve only when `status: solved`** and the comment id has a thread in the map. No matching thread -> record `skipped (no thread)`; otherwise, when not already resolved:
+2. **Resolve only when `status: solved`** and the comment id has a thread in the map. A top-level issue comment has no thread: reply with `gh pr comment "$PR" --body-file /tmp/pr-comment-reply.md` per Guardrails and record `replied (not resolvable)`. No matching review thread -> record `skipped (no thread)`; otherwise, when not already resolved:
    `gh api graphql -f query='mutation($threadId:ID!){ resolveReviewThread(input:{threadId:$threadId}){ thread{ isResolved } } }' -F threadId="$THREAD_ID"`
    `declined` -> stop after the reply.
 3. Record `solved + resolved` / `declined (open)` / `already resolved` / `skipped (no thread)`.

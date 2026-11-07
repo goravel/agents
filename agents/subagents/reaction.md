@@ -105,14 +105,8 @@ fi
 
 ## Rules
 
-- React on `$REPO` from the link, not from the checkout: you may run inside a different repository
-  from the one the mention was posted in, and the link names the repository the 👀 was added to.
-- A rejected DELETE is ignored and the POST still runs; a rejected list still posts and ends with
-  the failed line; an empty reaction list is not an error.
-- A review link has no REST reaction endpoint: resolve `node_id` from
-  `repos/$REPO/pulls/$PR_NUM/reviews/$REVIEW_ID` and use `addReaction`/`removeReaction`, never a
-  `.../reactions` REST call. A review that resolves to no node id ends with the failed line.
-- Always POST `+1`, even when nothing was deleted (reactions disabled, or a human started the run).
+- React on `$REPO` from the link, not from the checkout: you may run inside a different repository from
+  the one the mention was posted in, and the link names the repository the 👀 was added to.
 - Never fail the run: any rejected call ends with the one `reaction: failed — ...` line.
 - Nothing else happens in this run. No retry against another id, no comment shape beyond the three
   above, no writes.
