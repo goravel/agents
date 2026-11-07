@@ -78,13 +78,9 @@ git -C "$WORKTREE_DIR" log --oneline "origin/${BASE_BRANCH}..HEAD"
 
 ## 2. Count callers
 
-Only the breaking-change lines use caller counts — nothing in the report draws a graph. Build once,
-then read it — never build twice:
-
-```
-build_or_update_graph_tool({ repo_root: "$WORKTREE_DIR", base: "origin/${BASE_BRANCH}" })
-query_graph_tool({ repo_root: "$WORKTREE_DIR", pattern: "callers_of", target: "<symbol>" })
-```
+Only the breaking-change lines use caller counts — nothing in the report draws a graph. Follow the
+`goravel-graph` skill for the one build and the `callers_of` count — build once, then read it, never build
+twice; `repo_root` = `$WORKTREE_DIR`, `base` = `origin/${BASE_BRANCH}`.
 
 - `status: not_ready`, an empty graph, or a language the parser does not cover → count call sites with
   `rg -n "<Symbol>\(" "$WORKTREE_DIR" --glob '*.go'`, and say in the breaking-change line that the
@@ -109,7 +105,7 @@ Never report: config or env keys, CLI flags, error-message or JSON wording and s
 dependency bumps, schema, migrations.
 
 One line per break: `<break> → <who is hit> → <smallest fix>`. Who is hit is the caller or implementor
-count from `query_graph_tool` with `pattern: "callers_of"`. A break with no known callers → write
+count from the `callers_of` query in the `goravel-graph` skill. A break with no known callers → write
 `0 known callers` and keep the line. No break at all → the heading says `No breaking changes` and the
 section carries no body.
 
@@ -334,11 +330,9 @@ Headings and order are fixed:
   `Not checked`; it never sets the heading while any block is checked. Each block repeats its own verdict,
   so a reader sees which thing matches and which one does not.
 - Each section uses the shape its rule above shows; add no section, intro, or closing line.
-- No severity, no checkboxes, no round markers — this is not a review. The single exception is the
-  `<!-- goravel-agent: analysis -->` marker, which is identity, not a round.
-- The marker line is the only hidden line you add: it sits on the first line under the heading, renders
-  as nothing, and lets a later run find this comment. Emit it exactly, in both the conversation copy and
-  the PR copy — it is not a section, an intro, or a closing line.
+- No severity, no checkboxes, no round markers — this is not a review. The one hidden line is the
+  `<!-- goravel-agent: analysis -->` marker: first under the heading, emitted exactly, in both the
+  conversation copy and the PR copy. It marks identity, not a round, and lets a later run find the comment.
 - Post or update when the prompt asks — `post the analysis`, `comment this on the PR`. Write the report
   to a file, then put it on the PR:
 
@@ -385,8 +379,5 @@ one, spawn `subagents/reaction` foreground and wait:
 
 ## Output
 
-The report goes to the conversation every run; the PR copy is an addition, not a replacement. Step 6
-posts or updates one comment when the prompt asks. A mention on a plain issue stops at step 1 and never
-reaches a report. The other write is the reaction swap in step 7, delegated to `subagents/reaction`. If
-the user explicitly asks you to post the analysis, post one top-level issue comment with
-`gh pr comment <N> --body-file <tmp>`; NEVER use `gh pr review`.
+The report goes to the conversation every run; the PR copy is an addition, not a replacement. Steps 6 and
+7 are the only writes, both described above.

@@ -130,23 +130,21 @@ fi
   Emit `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.`, run the
   acknowledge bullet of phase 6, and stop. No round exists, so there is nothing to post or tick — asked or
   not.
-- Read the delta and build the knowledge graph over it:
+- Read the delta, then follow the `goravel-graph` skill once for this round — one build, `repo_root` =
+  `$WORKTREE_DIR`, `base` = `$GRAPH_BASE`:
 
 ```bash
 git -C "$WORKTREE_DIR" diff "$DIFF_RANGE" --name-only
-git -C "$WORKTREE_DIR" log --oneline "$DIFF_BASE..HEAD"   # incremental only: the new commits, newest first
-```
-
-```
-build_or_update_graph_tool({ repo_root: "$WORKTREE_DIR", base: "$GRAPH_BASE" })
+if [ -n "$DIFF_BASE" ]; then git -C "$WORKTREE_DIR" log --oneline "$DIFF_BASE..HEAD"; fi   # incremental only: the new commits, newest first
 ```
 
 ### 3. Review the diff
-Fan out, merge, and filter to the diff.
+Fan out, merge, and filter to the diff. Load the `goravel-review-template` skill before the fan-out — the comment
+rule below and the phase-5 grammar both come from it.
 - Detect the languages from the **review range** by extension (`.go`; `.ts/.tsx/.js/.jsx/.mjs/.cjs`; `.dart`; `.py`; mixed → each language separately).
 - **Go present** → spawn `subagents/review-go` six times in parallel, one per SIDE: safe, logic, performance, standard, testing, architecture. Prompt each with `SIDE=<name>`, the diff scope, the languages, and the phase-1 context — `WORKTREE_DIR` + `DIFF_BASE=<sha>` on an incremental review (the worker's delta mode), `WORKTREE_DIR` + `BASE_BRANCH` on a full one. Review only `$DIFF_RANGE`: earlier commits were reviewed already. Findings only (no headers/intro/summary); scoped per the review-go Scope rule — anchor on an added or modified line (±1), and anchor a change's consequence in unchanged code back to the changed line; drop the rest silently.
 - **No Go** → do not spawn it; review the diff inline over the same six dimensions using general best practices for the languages, same scope rule.
-- **Comments (both paths).** A comment earns its place only by explaining why, a non-obvious constraint, or a gotcha the code cannot show. Flag comments the diff adds or rewrites that restate the code, narrate a step, banner a section, leave commented-out code, or are unclear, too long, or not plain. When the fan-out runs the `standard` SIDE raises them; whatever you review inline, raise them yourself. Report them as Maybe Fix.
+- **Comments (both paths).** Raise comment findings per the `## Comment findings` section of the `goravel-review-template` skill: the `standard` SIDE when the fan-out runs, yourself when you review inline.
 - Merge: dedupe by `file:line` + Title (anchor line only) → the **unfiltered set**.
 - Scope filter — keep a finding only within ±1 line of an added line:
 
@@ -169,7 +167,7 @@ git -C "$WORKTREE_DIR" diff "$DIFF_RANGE" -U0 | rg '^diff --git |^@@'
 - Apply comment input: match each entry to the findings it addresses — inline comments by `path` + `line` (fall back to `original_line`); a reply via `in_reply_to_id` → its parent's path/line; otherwise a quoted `file:line` or the finding Title. Verify every claim against `$WORKTREE_DIR` (bot or human alike): a claim that holds (intentional guard, unreachable path, already fixed) → withdraw the finding; a claim that does not hold, or a question, leaves it unchanged. Unmatched entries are ignored; no output section. A withdrawn prior finding counts as resolved and joins the tick set.
 
 ### 5. Emit the round
-Load the `goravel-review-template` skill once, then:
+Emit with the `goravel-review-template` skill loaded in phase 3:
 - Count per severity per status and give it the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → it emits `✅ Review clean — no findings.`
 - Write the round's state lines under the banner, from the template skill: `<!-- reviewed-head: ${HEAD_SHA} -->`
   with the full 40-character worktree head, and the `Reviewed:` line —

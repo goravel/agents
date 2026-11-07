@@ -3,8 +3,9 @@ name: Goravel Review Template
 description: >
   Canonical output format and finding grammar for code reviews. Use when emitting, writing, or
   formatting a code review — defines the Summary/Verdict/Findings structure, Must Fix / Maybe
-  Fix / Nits headings, the one-line anchor plus Problem/Impact/Fix shape, and the two data shapes
-  (NEW and NEW + ROUND). Load via the skill tool before producing any review output.
+  Fix / Nits headings, the one-line anchor plus Problem/Impact/Fix shape, the two data shapes
+  (NEW and NEW + ROUND), and the bar a comment finding must clear. Load via the skill tool before
+  producing any review output.
 ---
 
 # Review Output Format
@@ -65,7 +66,7 @@ Reviewed: 3d81f42..9ab31e7 — 2 new commits
 
 ## Inputs
 
-The review agent supplies one of two data shapes. Apply the template above to whichever it is:
+The caller supplies one of two data shapes. Apply the template above to whichever it is:
 
 - **NEW** — the current finding set only. Use when the output is not round-tracked (a local
   artifact, a findings-only handoff).
@@ -103,7 +104,7 @@ The review agent supplies one of two data shapes. Apply the template above to wh
   within one line of such a line. Drop pre-existing issues in unchanged code, findings in files
   the diff does not touch, and unrelated refactors or "while here" suggestions. When a change
   affects unchanged code, anchor the finding to the changed line and explain the consequence
-  there. The review agent applies a final added-line filter (±1 line) after merging, so an
+  there. The caller applies a final added-line filter (±1 line) after merging, so an
   unanchored or out-of-scope finding is discarded silently.
 - Write each finding in plain language for a busy developer who did not write the code:
   - Title = a short noun phrase (≤8 words), no jargon — e.g. "Shared slice returned to caller".
@@ -115,3 +116,14 @@ The review agent supplies one of two data shapes. Apply the template above to wh
   - The indented example block: one fence max, ≤8 lines, no nested fences, `// before` / `// after`
     (`#` for Python), with a language tag matching the file.
 - Omit empty severity headings entirely.
+
+## Comment findings
+
+A comment earns its place only by explaining why, a non-obvious constraint, or a gotcha the code cannot
+show. Flag a comment the diff adds or rewrites that restates the code, narrates a step, banners a
+section, leaves commented-out code, or is unclear, too long, or not plain. Report each as Maybe Fix,
+anchored on the comment line.
+
+A comment that exists to explain a bad name means the name is wrong: flag the name on its own line under
+the normal naming rule — or, if that line is not in the diff, flag the comment and say the name is the
+problem. A doc comment opening with the name is not noise.

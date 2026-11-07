@@ -36,11 +36,11 @@ permissions:
   - action: edit
     resource: "/tmp/ship/**"
     effect: allow
+  - action: edit
+    resource: "/private/tmp/ship/**"
+    effect: allow
   - action: skill
-    resource: "go-*"
-    effect: deny
-  - action: skill
-    resource: "goravel-pr*"
+    resource: "*"
     effect: deny
 ---
 
@@ -64,7 +64,7 @@ if [ -z "$LINK" ]; then
   case "$URL" in *github.com[:/]*) ;; *) echo "origin is not a GitHub remote: $URL"; exit 1 ;; esac
   LINK=$(printf '%s' "$URL" | sed -E 's#/+$##; s#\.git$##' | awk -F'[:/]' '{print $(NF-1)"/"$NF}')
 fi
-REPO=$(printf '%s' "$LINK" | sed -nE 's#^https?://(www\.)?github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/pull/([0-9]+).*#\2/\3#p')
+REPO=$(printf '%s' "$LINK" | sed -nE 's#^https?://(www\.)?github\.com/([A-Za-z0-9._-]+)/([A-Za-z0-9._-]+)/(pull|issues)/[0-9]+.*#\2/\3#p')
 PR_NUM=$(printf '%s' "$LINK" | sed -nE 's#^https?://(www\.)?github\.com/[A-Za-z0-9._-]+/[A-Za-z0-9._-]+/pull/([0-9]+).*#\2#p')
 REPO=${REPO:-$LINK}
 
@@ -82,6 +82,9 @@ fi
 Either message the block prints → report that line and stop: without a GitHub `origin` there is no repo to
 set up, and a PR that cannot be read or comes from a fork has nothing this flow can push to.
 
+An issue or repository link has no `PR_NUM`, so the fork check is skipped and the base branch comes from
+the worktree below.
+
 Spawn `subagents/setup` foreground and wait, passing `LINK` and, when the request names one, the branch:
 
 > You are running as a subagent in the ship flow. LINK=<the value of LINK: the PR link from the prompt, else owner/repo> BRANCH=<the branch the user named in the request, else blank>
@@ -91,10 +94,9 @@ Spawn `subagents/setup` foreground and wait, passing `LINK` and, when the reques
   fresh `run-<TS>` branch from `origin/master`; a pull request keeps its own branch and an issue link gets
   `issue-<n>-<TS>`. The run's commits never move the shared checkout's `master` — setup only fast-forwards
   it to `origin/master` — and `goravel-pr` pushes `run-<TS>` as the pull request head.
-- A named `BRANCH` is the branch this run commits on, and `goravel-pr` pushes it as it is — only a default
-  branch (`master` / `main`) gets a `feat/…` work branch. The pull request still targets `BASE_BRANCH`, the
-  detected default, so `BRANCH=release-2.0` deliberately opens a `release-2.0 → master` pull request. Say
-  so when the change belongs on that branch rather than the default.
+- A named `BRANCH` is the branch this run commits on, and `goravel-pr` pushes it as it is. The pull request
+  still targets `BASE_BRANCH`, the detected default, so `BRANCH=release-2.0` deliberately opens a
+  `release-2.0 → master` pull request. Say so when the change belongs on that branch rather than the default.
 
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build the path
@@ -155,13 +157,13 @@ Write the full `PLAN` verbatim to `<folder>/plan.md`. Confirm it exists before t
 Delegate the round review to the `subagents/review-diff` agent.
 - One `review-diff` session per conversation: round 1 spawns it foreground with `agent: "subagents/review-diff"`; later rounds resume its `sessionID`.
 - Round 1 prompt:
-  > You are running as a subagent in the ship flow. Review the phase delta and nothing else. WORKTREE_DIR=<WT>; DIFF_BASE=<PHASE_BASE>; PHASE=<N>; FOLDER=<folder>; LANGUAGES=<detected from `git -C "$WT" diff "$PHASE_BASE"..HEAD --name-only`>; CONSIDERED=<folder>/considered.md; PRIOR=<folder>/findings-by-side.json (absent in round 1). Write <folder>/review-N.md and <folder>/findings-by-side.json. Do not touch the PR or the worktree.
-- Later rounds: resume with the new `PHASE_BASE`. Do not spawn `subagents/review-go` from here — `review-diff` owns the fan-out and reuses its own worker sessions.
+  > You are running as a subagent in the ship flow. Review the phase delta and nothing else. WORKTREE_DIR="$WORKTREE_DIR"; DIFF_BASE="$PHASE_BASE"; PHASE=<N>; FOLDER="<folder>"; LANGUAGES=<the extensions the delta touches, from `git -C "$WORKTREE_DIR" diff "$PHASE_BASE"..HEAD --name-only`>; CONSIDERED="<folder>/considered.md"; PRIOR="<folder>/findings-by-side.json" — omit in round 1. Write "<folder>/review-<N>.md" and "<folder>/findings-by-side.json". Do not touch the PR or the worktree.
+- Later rounds: resume the same session with the new `PHASE_BASE` and `PHASE=<N>`; do not spawn `subagents/review-go` from here — `review-diff` owns the fan-out and reuses its own worker sessions.
 
 ### 5.3 Decide
 
 Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
-- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Create or update the PR. Base: `$BASE_BRANCH`. Report: `<folder>/implementation.md`." Report the PR URL; list Nits as non-blocking.
+- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Create or update the PR. Base: `$BASE_BRANCH`. Context: `<folder>/implementation.md`. Return your output contract in the conversation." Report the PR URL; list Nits as non-blocking.
 - **Round 5**: stop, no PR. Report the outstanding Must Fix / Maybe Fix; list the Nits as non-blocking.
 - **Otherwise**: increment N and loop.
 
@@ -169,7 +171,23 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 
 Run after the PR exists, or when the user hands you comments to close.
 
-1. **Fetch unresolved review threads** (read-only; `--paginate` on REST) and decide each comment: correct (needs a code fix) vs. question/incorrect. Record a one-sentence reason per comment.
+1. **Fetch the unresolved review threads** — REST has no resolved flag, so run the read-only GraphQL `reviewThreads` query inline (this flow loads no skill). Resolve `PR_NUM` first — §1 fills it only for a pull-request link, so a request-started run resolves the PR §5.3 reported by the branch it is on:
+
+   ```bash
+   PR_NUM=${PR_NUM:-$(gh -R "$REPO" pr view --json number --jq .number)}
+   gh api graphql -F owner="${REPO%%/*}" -F name="${REPO##*/}" -F number="$PR_NUM" -f query='
+     query($owner:String!,$name:String!,$number:Int!){
+       repository(owner:$owner,name:$name){
+         pullRequest(number:$number){
+           reviewThreads(first:100){
+             nodes{ id isResolved comments(first:100){ nodes{ databaseId body path url } } }
+           }
+         }
+       }
+     }'
+   ```
+
+   Then decide each unresolved comment: correct (needs a code fix) vs. question/incorrect. Record a one-sentence reason per comment.
 2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason from the `subagents/code` agent's report (what changed, or why no change).
 3. **Close out** — spawn `subagents/pr` with the list:
    ```
@@ -203,10 +221,7 @@ the report at the end of §6 — so the 👍 means "run delivered".
 
 ## 8. Rules
 
-- Never edit code; only write under `/tmp/ship/`.
-- Use foreground subagent calls and wait for each result.
-- Commit each phase before reviewing it; diff only `"$PHASE_BASE"..HEAD`. Never review uncommitted work.
 - Nits are fixed only in a round that also has Must Fix / Maybe Fix; a Nits-only review is clean.
-- Maintain `<folder>/considered.md` (consider-and-dismiss only).
+- `<folder>/considered.md` belongs to `review-diff`; never write it yourself.
 - Keep the worktree and its branch after the PR — never remove it, never move the session back.
 - End with a concise summary: what changed, artifact paths, whether the loop converged, the PR URL (or outstanding findings), and the non-blocking Nits.
