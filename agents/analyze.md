@@ -135,15 +135,21 @@ fence per side that has reader code.
 
 Shape, for a PR that adds a capability:
 
-Custom mention handle:
+Paginated user listing:
 
-Before: not available — the handle was fixed at `@goravel-agent`.
+Before: not available — `Index` returned every user in one response.
 
-After: set `AGENT_MENTION=@my-bot` and that handle starts a run; a blank value keeps the default.
+After: `GET /users` returns one page in `users` and the row count in `meta`; a page past the end comes back empty.
 
 ```go
-// agent/config/agent.go
-"mention": config.Env("AGENT_MENTION", ""),
+var users []models.User
+var total int64
+facades.Orm().Query().Model(&models.User{}).Paginate(1, 15, &users, &total)
+
+return ctx.Response().Json(200, http.Json{
+	"users": users,
+	"meta":  http.Json{"total": total},
+})
 ```
 
 Shape, for a PR that changes one:
