@@ -66,7 +66,7 @@ Reviewed: 3d81f42..9ab31e7 — 2 new commits
 
 ## Inputs
 
-The review agent supplies one of two data shapes. Apply the template above to whichever it is:
+The caller supplies one of two data shapes. Apply the template above to whichever it is:
 
 - **NEW** — the current finding set only. Use when the output is not round-tracked (a local
   artifact, a findings-only handoff).
@@ -104,7 +104,7 @@ The review agent supplies one of two data shapes. Apply the template above to wh
   within one line of such a line. Drop pre-existing issues in unchanged code, findings in files
   the diff does not touch, and unrelated refactors or "while here" suggestions. When a change
   affects unchanged code, anchor the finding to the changed line and explain the consequence
-  there. The review agent applies a final added-line filter (±1 line) after merging, so an
+  there. The caller applies a final added-line filter (±1 line) after merging, so an
   unanchored or out-of-scope finding is discarded silently.
 - Write each finding in plain language for a busy developer who did not write the code:
   - Title = a short noun phrase (≤8 words), no jargon — e.g. "Shared slice returned to caller".

@@ -53,7 +53,8 @@ Load the `goravel-review-template` skill first — step 2's comment rule and ste
    - Both `WORKTREE_DIR=<path>` and `DIFF_BASE=<sha>` given → delta mode: use `workdir="$WORKTREE_DIR"`
      for every bash call and read files under `$WORKTREE_DIR`. Diff scope:
      `git -C "$WORKTREE_DIR" diff "$DIFF_BASE"..HEAD --name-only`.
-     The delta is the commits a ship run just committed or the commits a PR gained since its last review.
+     The delta is the commits added since the last review point — a PR's new commits, or the commits an
+     earlier round made.
      If this session is resumed for a later phase, review ONLY the new delta (the range given by
      the new `DIFF_BASE`), not the earlier phases.
    - Both `WORKTREE_DIR=<path>` and `BASE_BRANCH=<branch>` given → PR/worktree mode: use

@@ -55,7 +55,7 @@ Re-run the thread-map query — every `solved` review-comment target's thread is
 ## Guardrails
 - Only touch comments the caller listed. Never reply to or resolve an unlisted comment.
 - Never resolve a `declined` comment or one whose reply failed.
-- Never touch reactions. The 👀 on the mention is swapped by `subagents/reaction`, not here.
+- Never touch reactions. The 👀 on the mention is swapped outside this skill, not here.
 - Top-level issue comments have no thread — reply with `gh pr comment "$PR" --body-file /tmp/pr-comment-reply.md` and report `replied (not resolvable)`.
 - Never edit code; never fabricate a reason — post the caller's text verbatim.
 

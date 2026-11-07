@@ -21,10 +21,8 @@ build_or_update_graph_tool({ repo_root: "<the run's worktree>", base: "<the diff
 ```
 
 - `repo_root` is the worktree the caller works in, never the parent checkout beside it.
-- `base` is the caller's diff base: `$DIFF_BASE` in `agents/subagents/review-diff.md`, `$GRAPH_BASE` in
-  `agents/review.md` (the last reviewed head, else `origin/<BASE_BRANCH>`), and `origin/<BASE_BRANCH>` in
-  `agents/analyze.md`. A caller with no diff base omits `base` and builds on `repo_root` alone — the
-  plan agent is that case.
+- `base` is the caller's diff base: `DIFF_BASE`, `GRAPH_BASE`, or `origin/<BASE_BRANCH>`, whichever the
+  caller supplies. A caller with no diff base omits `base` and builds on `repo_root` alone.
 - One build per run, one build per review round. A new round means a new base, so build again at the start
   of the round — not once per worker, not once per finding.
 - The agent that builds is the agent that fans out. A worker it spawns reads the graph the caller built and

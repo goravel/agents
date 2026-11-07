@@ -216,7 +216,7 @@ branch_name() {
     pull) if [ -n "$HEAD_BRANCH" ]; then printf '%s' "$HEAD_BRANCH"; else printf 'pr-%s-%s' "$NUM" "$1"; fi ;;
     issues) printf 'issue-%s-%s' "$NUM" "$1" ;;
     # A repository link gets a fresh run branch: attaching master would move the shared
-    # refs/heads/master, and the next request would inherit this run's phase commits.
+    # refs/heads/master, and the next request would inherit this run's commits.
     *) printf 'run-%s' "$1" ;;
   esac
 }
@@ -326,7 +326,7 @@ script did not return.
   for ancestry, or reset, because its commits belong to the caller.
 - A repository link where the user named no branch starts on a fresh `run-<TS>` branch created from
   `origin/master`. It never attaches `master`, so the shared `refs/heads/master` stays at origin and the
-  next repository-link run starts from the latest origin instead of inheriting the previous run's phase
+  next repository-link run starts from the latest origin instead of inheriting the previous run's
   commits; those commits stay on their own `run-<TS>` branch, in the worktree that is kept. `goravel-pr`
   sees a non-default branch, so it pushes `run-<TS>` as the pull request head instead of creating a
   `feat/…` branch. `master` is fixed for that link kind — a repository with no `origin/master` fails
@@ -338,7 +338,7 @@ script did not return.
   naming that branch as `BRANCH` fails — and no run commits there. A pull request keeps its own head
   branch, even when that is the cache's; that run's commits then leave the checkout's working tree stale,
   so its fast-forward is skipped while the tree is dirty. Never commit in the checkout — a `commit -a`
-  there reverts the run's phase commits. Every worktree lives in `/tmp`.
+  there reverts the run's commits. Every worktree lives in `/tmp`.
 - `gh` answers two things: the branch, base, and cross-repository flag of a pull request link (`gh pr view
   -R <owner/repo> --json headRefName,baseRefName,isCrossRepository`), and the default branch when
   `origin/HEAD` is missing. A PR link fails rather than guessing a branch.
