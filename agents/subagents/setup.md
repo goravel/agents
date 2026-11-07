@@ -38,22 +38,21 @@ the work in the worktree.
   always keeps its own branch and ignores `BRANCH`; an issue link uses it instead of `issue-<n>-<TS>` —
   which costs the `Closes #<n>` line, so name such a branch `<type>/<n>-<description>` to keep it.
 - **The checkout root is always `pwd`.** No input moves it and an environment `WORKSPACE_DIR` is ignored.
-  You start in the paseo project's folder, which holds no checkout, so the checkout is
-  `<pwd>/<owner>-<repo>` — reused when its `origin` matches, cloned when it is absent. Only when `pwd` is
-  itself inside a matching checkout is that checkout — resolved to its toplevel — reused in place. **That
-  checkout is shared by every run of the repository**, so a concurrent run may be creating it: the script
-  waits for that clone and reuses it instead of failing.
+  The checkout is `<pwd>/<owner>-<repo>` — reused when its `origin` matches, cloned when it is absent.
+  Only when `pwd` is itself inside a matching checkout is that checkout — resolved to its toplevel —
+  reused in place. **That checkout is shared by every run of the repository**, so a concurrent run may
+  be creating it: the script waits for that clone and reuses it instead of failing.
 - **The worktree root is always `/tmp`.** Every run's worktree is `/tmp/<owner>-<repo>-<TS>` (local time
-  `YYYYMMDD-HHMMSS`), never beside the checkout and never inside the project folder: all of the run's
-  changes, commits and branches live there. On macOS `/tmp` resolves to `/private/tmp`, so the returned
+  `YYYYMMDD-HHMMSS`), never beside the checkout and never inside it: all of the run's changes, commits
+  and branches live there. On macOS `/tmp` resolves to `/private/tmp`, so the returned
   path may show either. `/tmp` is OS-managed, so a long-idle run's uncommitted files may be cleaned, and
   the predictable path is held by whichever process creates it first.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
-With `pwd=/Users/bowen/code/agent`, a `goravel/goravel` link clones
-`/Users/bowen/code/agent/goravel-goravel` and returns `/tmp/goravel-goravel-<TS>`. Started inside a
-checkout of that repo, it returns the same `/tmp/goravel-goravel-<TS>` and creates nothing beside it.
+A `goravel/goravel` link clones `<pwd>/goravel-goravel` and returns
+`/tmp/goravel-goravel-<TS>`. Started inside a checkout of that repo, it returns the same
+`/tmp/goravel-goravel-<TS>` and creates nothing beside it.
 
 ## Run
 
