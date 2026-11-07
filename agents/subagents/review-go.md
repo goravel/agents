@@ -114,10 +114,10 @@ Load the `goravel-review-template` skill first — step 2's comment rule and ste
 
 3. **Read and verify.**
    Start from the graph, then confirm in source:
-   `get_minimal_context_tool(task="review <SIDE>", repo_root="$WORKTREE_DIR", changed_files=<scope>, base=<base>)`
-   → `detect_changes_tool(detail_level="minimal", repo_root="$WORKTREE_DIR", changed_files=<scope>, base=<base>)`
-   → `query_graph_tool(pattern="callers_of"|"tests_for", target, repo_root="$WORKTREE_DIR")`
-   → `get_review_context_tool(detail_level="minimal", repo_root="$WORKTREE_DIR", include_source=False, base=<base>)`.
+   `get_minimal_context_tool(task="review <SIDE>", repo_root=<resolved>, changed_files=<scope>, base=<base>)`
+   → `detect_changes_tool(detail_level="minimal", repo_root=<resolved>, changed_files=<scope>, base=<base>)`
+   → `query_graph_tool(pattern="callers_of"|"tests_for", target, repo_root=<resolved>)`
+   → `get_review_context_tool(detail_level="minimal", repo_root=<resolved>, include_source=False, base=<base>)`.
    Use the resolved working context's `repo_root`/`base`; if the graph returns `status: not_ready`, fall
    back to reading files — never build or update the graph yourself.
    Read the diff file-by-file; trace callers and callees with `query_graph` as relevant to your SIDE. Use

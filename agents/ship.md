@@ -171,7 +171,22 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 
 Run after the PR exists, or when the user hands you comments to close.
 
-1. **Fetch the unresolved review threads** with the read-only GraphQL `reviewThreads` query from `goravel-pr-comments` — REST has no resolved flag — and decide each comment: correct (needs a code fix) vs. question/incorrect. Record a one-sentence reason per comment.
+1. **Fetch the unresolved review threads** — REST has no resolved flag, so run the read-only GraphQL `reviewThreads` query inline (this flow loads no skill):
+
+   ```bash
+   gh api graphql -F owner="${REPO%%/*}" -F name="${REPO##*/}" -F number="$PR_NUM" -f query='
+     query($owner:String!,$name:String!,$number:Int!){
+       repository(owner:$owner,name:$name){
+         pullRequest(number:$number){
+           reviewThreads(first:100){
+             nodes{ id isResolved comments(first:100){ nodes{ databaseId body path url } } }
+           }
+         }
+       }
+     }'
+   ```
+
+   Then decide each unresolved comment: correct (needs a code fix) vs. question/incorrect. Record a one-sentence reason per comment.
 2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason from the `subagents/code` agent's report (what changed, or why no change).
 3. **Close out** — spawn `subagents/pr` with the list:
    ```

@@ -134,7 +134,7 @@ fi
 
 ```bash
 git -C "$WORKTREE_DIR" diff "$DIFF_RANGE" --name-only
-[ -n "$DIFF_BASE" ] && git -C "$WORKTREE_DIR" log --oneline "$DIFF_BASE..HEAD"   # incremental only: the new commits, newest first
+if [ -n "$DIFF_BASE" ]; then git -C "$WORKTREE_DIR" log --oneline "$DIFF_BASE..HEAD"; fi   # incremental only: the new commits, newest first
 ```
 
 ```
