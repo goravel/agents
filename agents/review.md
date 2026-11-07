@@ -40,13 +40,11 @@ reaction swap delegated to `subagents/reaction`.
 The prompt is a message, not a form: free-form text in it — a request, a note, a question — is
 context only, and none of it gates a run. One thing it does decide is posting: post only when the
 user's own words ask for this review on the pull request — `post it`, `post the round`,
-`comment this on the PR`, `leave the review on the PR` (phase 6). A dispatcher prompt carries the
-user's text under `Instruction:` and then appends `comment the review result to the pr` as its last
-line: that appended line is scaffolding, never an ask, and it is inert for this agent; that exact
-sentence is never an ask even when the user types it. Two kinds of link can appear. The bare
-`https://github.com/<owner>/<repo>/pull/<number>` URL with no `#` anchor is the pull request: it gates
-the run (phase 1), and its `<number>` becomes `PR_NUM`. A link ending in a comment anchor —
-`#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention to acknowledge (phase 6).
+`comment this on the PR`, `leave the review on the PR` (phase 6). The whole prompt is the user's own
+words. Two kinds of link can appear. The bare `https://github.com/<owner>/<repo>/pull/<number>` URL
+is the pull request; the same URL with a comment anchor — `#issuecomment-…`, `#discussion_r…`,
+`#pullrequestreview-…` — is the mention link, the one phase 6 acknowledges. Either one names the
+pull request (phase 1), and its `<number>` becomes `PR_NUM`.
 
 No state file is kept: the newest posted `<!-- reviewed-head: … -->` marker is the only record of the
 reviewed head, and comment input is re-derived from the fetched comments every run.
@@ -56,8 +54,9 @@ reviewed head, and comment input is re-derived from the fetched comments every r
 ### 1. Set up and fetch
 Check out the PR into a worktree and gather everything the review needs.
 
-- Take the target from the bare `https://github.com/<owner>/<repo>/pull/<number>` link in your prompt
-  (no `#` anchor). No link → say so and stop: `review: no target — give me a pull-request link.`
+- Take the target from the `https://github.com/<owner>/<repo>/pull/<number>` link in your prompt — the
+  bare one or the mention link with a comment anchor. No link → say so and stop:
+  `review: no target — give me a pull-request link.`
 - A bare number, a branch name, or prose mentioning a pull request is never a target.
 - Two links naming different pull requests → say so and stop, never pick one.
 - Then spawn `subagents/setup` foreground and wait; pass the link verbatim and keep its `<number>` as
@@ -182,12 +181,8 @@ Load the `goravel-review-template` skill once, then:
 
 ### 6. Post, tick, and acknowledge
 - Decide whether the user asked for the post. Only the user's own words can ask — `post it`,
-  `post the round`, `comment this on the PR`, `leave the review on the PR`.
-  When the prompt carries the dispatcher's `Instruction:` line, everything from that label up to the
-  appended last line is the user's; the `comment the review result to the pr` line the dispatcher
-  appends below it is scaffolding, never an ask, and that exact sentence is never an ask even when the
-  user types it. An interactive prompt has no such line: the whole message is the user's. No ask → do not
-  post and do not tick: go straight to the acknowledge bullet.
+  `post the round`, `comment this on the PR`, `leave the review on the PR`. No ask → do not post and do
+  not tick: go straight to the acknowledge bullet.
 - Post the round first, when asked. Write the review to a file, exactly as emitted — the conversation copy
   and the PR copy are byte-identical — and post it as one top-level issue comment for this round:
 

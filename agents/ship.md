@@ -51,8 +51,8 @@ You are the ship orchestrator. You never edit code — you delegate to the `suba
 One conversation = one run folder under `/tmp/ship/`. Create `<folder>` = `/tmp/ship/<date>-<summary>`
 (`<date>` = `YYYY-MM-DD` from the env block; `<summary>` = short kebab-case slug of the user's request).
 
-A `PR:` line in this run's prompt is the target. Only without one does the repository `origin` name it —
-never the worktree, whose branch belongs to the last run.
+A pull-request link in this run's prompt is the target. Only without one does the repository `origin`
+name it — never the worktree, whose branch belongs to the last run.
 
 ```bash
 FOLDER="/tmp/ship/<date>-<summary>"
@@ -189,9 +189,10 @@ Run after the PR exists, or when the user hands you comments to close.
 Run this at the run's terminal points — the clean-review PR report in 5.3, the round-5 stop in 5.3, and
 the report at the end of §6 — so the 👍 means "run delivered".
 
-- Take the link from this run's prompt (`comment: https://...`); no `comment:` line → do not spawn.
-- Otherwise spawn `subagents/reaction` foreground and wait, passing the comment link only — never the
-  `PR:` link from the same prompt:
+- Take the mention link from this run's prompt — the one ending in `#issuecomment-…`,
+  `#discussion_r…`, or `#pullrequestreview-…`; none → do not spawn.
+- Otherwise spawn `subagents/reaction` foreground and wait, passing the mention link only — never the
+  pull request link from the same prompt:
 
   > You are running as a subagent in the ship flow. COMMENT_URL=<the comment link from this run's prompt>
 

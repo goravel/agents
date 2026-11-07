@@ -40,8 +40,13 @@ of the output, not its content — never copy their names.
 
 ## 1. Prepare the PR
 
-No `PR:` line in your prompt → say so and stop; never guess a number. Otherwise spawn `subagents/setup`
-foreground and wait; pass the `PR:` line verbatim as the link and keep its number as `PR_NUM`.
+Two kinds of link can appear in the prompt. The bare `https://github.com/<owner>/<repo>/pull/<number>`
+link is the pull request. A link ending in a comment anchor — `#issuecomment-…`, `#discussion_r…`,
+`#pullrequestreview-…` — is the mention link, the one step 7 acknowledges. Either one names the pull
+request: its `<number>` becomes `PR_NUM`.
+
+No pull-request link → say so and stop; never guess a number. Otherwise spawn `subagents/setup`
+foreground and wait; pass that link verbatim.
 
 > You are running as a subagent in the analyze flow. LINK=<the PR link from the prompt>
 
@@ -334,10 +339,8 @@ Headings and order are fixed:
 - The marker line is the only hidden line you add: it sits on the first line under the heading, renders
   as nothing, and lets a later run find this comment. Emit it exactly, in both the conversation copy and
   the PR copy — it is not a section, an intro, or a closing line.
-- Post or update when the prompt asks. A pull request mention appends
-  `comment the review result to the pr` under `Instruction:` — the line says review because it is shared
-  with the review agent; for you it means the report you just emitted. Write the report to a file, then
-  put it on the PR:
+- Post or update when the prompt asks — `post the analysis`, `comment this on the PR`. Write the report
+  to a file, then put it on the PR:
 
   ```bash
   mkdir -p /tmp/pr-analysis
@@ -366,24 +369,24 @@ Headings and order are fixed:
   - No login → no PR copy. Without it you cannot tell your comments from anyone else's, so a PATCH could
     overwrite theirs and a create would stack duplicates. The conversation report is already out.
   - Post it unchanged: no intro, no closing line. Emitting to the conversation is not replaced by this:
-    do both. No such line under `Instruction:` → post nothing. NEVER use `gh pr review`.
+    do both. No ask → post nothing. NEVER use `gh pr review`.
 
 ## 7. Acknowledge the mention
 
 Run this last — once the report is emitted and, when the prompt asked, the PR copy posted or updated — so
-the 👍 means "analysis delivered". Take the link from the `comment: https://...` line in your prompt — no
-such line → do not spawn. With one, spawn `subagents/reaction` foreground and wait:
+the 👍 means "analysis delivered". Take the mention link from your prompt — none → do not spawn. With
+one, spawn `subagents/reaction` foreground and wait:
 
 > You are running as a subagent in the analyze flow. COMMENT_URL=<the comment link found in the prompt>
 
-- Pass the comment link only — never the `PR:` link from the same prompt.
+- Pass the mention link only — never the pull request link from the same prompt.
 - Best-effort: never fail or delay the report over it, and never mention the spawn or its result in
   the report.
 
 ## Output
 
-The report goes to the conversation every run; the PR copy is an addition, not a replacement. A pull
-request mention always carries the post line, and step 6 posts or updates one comment. A mention on a
-plain issue stops at step 1 and never reaches a report. The other write is the reaction swap in step 7,
-delegated to `subagents/reaction`. If the user explicitly asks you to post the analysis, post one
-top-level issue comment with `gh pr comment <N> --body-file <tmp>`; NEVER use `gh pr review`.
+The report goes to the conversation every run; the PR copy is an addition, not a replacement. Step 6
+posts or updates one comment when the prompt asks. A mention on a plain issue stops at step 1 and never
+reaches a report. The other write is the reaction swap in step 7, delegated to `subagents/reaction`. If
+the user explicitly asks you to post the analysis, post one top-level issue comment with
+`gh pr comment <N> --body-file <tmp>`; NEVER use `gh pr review`.
