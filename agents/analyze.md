@@ -40,8 +40,13 @@ of the output, not its content — never copy their names.
 
 ## 1. Prepare the PR
 
-No pull-request link in your prompt → say so and stop; never guess a number. Otherwise spawn
-`subagents/setup` foreground and wait; pass that link verbatim and keep its number as `PR_NUM`.
+Two kinds of link can appear in the prompt. The bare `https://github.com/<owner>/<repo>/pull/<number>`
+link with no `#` anchor is the pull request: it gates the run, and its `<number>` becomes `PR_NUM`.
+A link ending in a comment anchor — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` —
+is the mention link, the one step 7 acknowledges.
+
+No pull-request link → say so and stop; never guess a number. Otherwise spawn `subagents/setup`
+foreground and wait; pass the pull-request link verbatim.
 
 > You are running as a subagent in the analyze flow. LINK=<the PR link from the prompt>
 
@@ -334,7 +339,8 @@ Headings and order are fixed:
 - The marker line is the only hidden line you add: it sits on the first line under the heading, renders
   as nothing, and lets a later run find this comment. Emit it exactly, in both the conversation copy and
   the PR copy — it is not a section, an intro, or a closing line.
-- Post or update when the prompt asks. Write the report to a file, then put it on the PR:
+- Post or update when the prompt asks — `post the analysis`, `comment this on the PR`. Write the report
+  to a file, then put it on the PR:
 
   ```bash
   mkdir -p /tmp/pr-analysis

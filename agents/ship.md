@@ -189,7 +189,8 @@ Run after the PR exists, or when the user hands you comments to close.
 Run this at the run's terminal points — the clean-review PR report in 5.3, the round-5 stop in 5.3, and
 the report at the end of §6 — so the 👍 means "run delivered".
 
-- Take the mention link from this run's prompt; no link → do not spawn.
+- Take the mention link from this run's prompt — the one ending in `#issuecomment-…`,
+  `#discussion_r…`, or `#pullrequestreview-…`; none → do not spawn.
 - Otherwise spawn `subagents/reaction` foreground and wait, passing the mention link only — never the
   pull request link from the same prompt:
 

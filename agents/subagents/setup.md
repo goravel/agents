@@ -50,9 +50,9 @@ the work in the worktree.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
-A `goravel/goravel` link clones `<pwd>/goravel-goravel` and returns
-`/tmp/goravel-goravel-<TS>`. Started inside a checkout of that repo, it returns the same
-`/tmp/goravel-goravel-<TS>` and creates nothing beside it.
+A `goravel/goravel` link clones `<pwd>/goravel-goravel` and returns `/tmp/goravel-goravel-<TS>`.
+Started inside a checkout of that repo, it returns the same `/tmp/goravel-goravel-<TS>` and creates
+nothing beside it.
 
 ## Run
 

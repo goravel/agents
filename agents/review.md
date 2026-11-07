@@ -44,7 +44,7 @@ user's own words ask for this review on the pull request — `post it`, `post th
 words. Two kinds of link can appear. The bare `https://github.com/<owner>/<repo>/pull/<number>` URL
 with no `#` anchor is the pull request: it gates the run (phase 1), and its `<number>` becomes
 `PR_NUM`. A link ending in a comment anchor — `#issuecomment-…`, `#discussion_r…`,
-`#pullrequestreview-…` — is the mention to acknowledge (phase 6).
+`#pullrequestreview-…` — is the mention link, the one phase 6 acknowledges.
 
 No state file is kept: the newest posted `<!-- reviewed-head: … -->` marker is the only record of the
 reviewed head, and comment input is re-derived from the fetched comments every run.
@@ -180,8 +180,8 @@ Load the `goravel-review-template` skill once, then:
 
 ### 6. Post, tick, and acknowledge
 - Decide whether the user asked for the post. Only the user's own words can ask — `post it`,
-  `post the round`, `comment this on the PR`, `leave the review on the PR`. The whole prompt is the
-  user's own words. No ask → do not post and do not tick: go straight to the acknowledge bullet.
+  `post the round`, `comment this on the PR`, `leave the review on the PR`. No ask → do not post and do
+  not tick: go straight to the acknowledge bullet.
 - Post the round first, when asked. Write the review to a file, exactly as emitted — the conversation copy
   and the PR copy are byte-identical — and post it as one top-level issue comment for this round:
 
