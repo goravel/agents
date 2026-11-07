@@ -78,13 +78,9 @@ git -C "$WORKTREE_DIR" log --oneline "origin/${BASE_BRANCH}..HEAD"
 
 ## 2. Count callers
 
-Only the breaking-change lines use caller counts — nothing in the report draws a graph. Build once,
-then read it — never build twice:
-
-```
-build_or_update_graph_tool({ repo_root: "$WORKTREE_DIR", base: "origin/${BASE_BRANCH}" })
-query_graph_tool({ repo_root: "$WORKTREE_DIR", pattern: "callers_of", target: "<symbol>" })
-```
+Only the breaking-change lines use caller counts — nothing in the report draws a graph. Follow the
+`goravel-graph` skill for the one build and the `callers_of` count — build once, then read it, never build
+twice; `repo_root` = `$WORKTREE_DIR`, `base` = `origin/${BASE_BRANCH}`.
 
 - `status: not_ready`, an empty graph, or a language the parser does not cover → count call sites with
   `rg -n "<Symbol>\(" "$WORKTREE_DIR" --glob '*.go'`, and say in the breaking-change line that the
@@ -109,7 +105,7 @@ Never report: config or env keys, CLI flags, error-message or JSON wording and s
 dependency bumps, schema, migrations.
 
 One line per break: `<break> → <who is hit> → <smallest fix>`. Who is hit is the caller or implementor
-count from `query_graph_tool` with `pattern: "callers_of"`. A break with no known callers → write
+count from the `callers_of` query in the `goravel-graph` skill. A break with no known callers → write
 `0 known callers` and keep the line. No break at all → the heading says `No breaking changes` and the
 section carries no body.
 

@@ -42,17 +42,14 @@ Take these from the prompt; an explicit value wins. Otherwise:
 
 Diff scope: `git -C "$WORKTREE_DIR" diff "$DIFF_BASE"..HEAD --name-only`.
 
-Build the knowledge graph once per round, before any worker (the SIDE workers never build it):
-
-```
-build_or_update_graph_tool({ repo_root: "$WORKTREE_DIR", base: "$DIFF_BASE" })
-```
+Load and follow the `goravel-graph` skill to build the code graph once per round, before any worker — one
+build, `repo_root` = `$WORKTREE_DIR`, `base` = `$DIFF_BASE`. The SIDE workers never build it.
 
 Rebuild it every round — `DIFF_BASE` changes per phase. If it reports `not_ready`, continue anyway; each worker falls back to reading files.
 
 ## 2. Review
 
-Load the `goravel-review-template` skill first — the comment rule below and the §4 grammar both come from it.
+Load the `goravel-review-template` skill before the fan-out — the comment rule below and the §4 grammar both come from it.
 Use `LANGUAGES` when the prompt gives it; otherwise detect the languages in the diff scope by extension. The six-way fan-out is optional; review inline when it is not practical.
 
 - **Go present** → spawn `subagents/review-go` six times in parallel, one per SIDE: safe, logic, performance, standard, testing, architecture. Give each `SIDE`, `WORKTREE_DIR`, `DIFF_BASE`, the languages, its own `PRIOR` anchors (from `<folder>/findings-by-side.json`). Findings only.

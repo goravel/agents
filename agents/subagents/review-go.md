@@ -51,20 +51,18 @@ Load the `goravel-review-template` skill first — step 2's comment rule and ste
 
 1. **Resolve working context.**
    - Both `WORKTREE_DIR=<path>` and `DIFF_BASE=<sha>` given → delta mode: use `workdir="$WORKTREE_DIR"`
-     for every bash call, `repo_root="$WORKTREE_DIR"` for every graph call, and read files under
-     `$WORKTREE_DIR`. Set `base="$DIFF_BASE"`. Diff scope:
+     for every bash call and read files under `$WORKTREE_DIR`. Diff scope:
      `git -C "$WORKTREE_DIR" diff "$DIFF_BASE"..HEAD --name-only`.
      The delta is the commits a ship run just committed or the commits a PR gained since its last review.
      If this session is resumed for a later phase, review ONLY the new delta (the range given by
      the new `DIFF_BASE`), not the earlier phases.
    - Both `WORKTREE_DIR=<path>` and `BASE_BRANCH=<branch>` given → PR/worktree mode: use
-     `workdir="$WORKTREE_DIR"` for every bash call, `repo_root="$WORKTREE_DIR"` for every graph call, and
-     read files under `$WORKTREE_DIR`. Diff scope:
+     `workdir="$WORKTREE_DIR"` for every bash call and read files under `$WORKTREE_DIR`. Diff scope:
      `git -C "$WORKTREE_DIR" diff "origin/$BASE_BRANCH"...HEAD --name-only`.
    - Otherwise → local mode: diff scope `git diff HEAD --name-only` in the current directory (a working
      tree with no commits yet has `HEAD` at the base, so this captures the change).
-   - Use the full codebase to UNDERSTAND and VERIFY the change (read surrounding code, trace callers and
-     callees with `query_graph`, check related schemas/config/migrations) — it is not a source of findings.
+   - Use the full codebase to UNDERSTAND and VERIFY the change (read surrounding code, find callers and
+     callees by searching the tree, check related schemas/config/migrations) — it is not a source of findings.
 
 2. **Apply the SIDE standard** below.
 
@@ -113,16 +111,11 @@ Load the `goravel-review-template` skill first — step 2's comment rule and ste
    - Symbol organization: file ordering, package-level structure
 
 3. **Read and verify.**
-   Start from the graph, then confirm in source:
-   `get_minimal_context_tool(task="review <SIDE>", repo_root=<resolved>, changed_files=<scope>, base=<base>)`
-   → `detect_changes_tool(detail_level="minimal", repo_root=<resolved>, changed_files=<scope>, base=<base>)`
-   → `query_graph_tool(pattern="callers_of"|"tests_for", target, repo_root=<resolved>)`
-   → `get_review_context_tool(detail_level="minimal", repo_root=<resolved>, include_source=False, base=<base>)`.
-   Use the resolved working context's `repo_root`/`base`; if the graph returns `status: not_ready`, fall
-   back to reading files — never build or update the graph yourself.
-   Read the diff file-by-file; trace callers and callees with `query_graph` as relevant to your SIDE. Use
-   exact `file:line`. Drop any finding you cannot justify with a line reference. For a finding on a
-   MODIFIED line, confirm it against the pre-change file and DROP it if the flagged code is unchanged:
+   Read the diff file-by-file in the resolved working context, then open the surrounding code for each
+   changed symbol. Find callers and callees by searching the tree — `rg -n "<symbol>\("` for a call site,
+   `rg -n "<symbol>"` for a reference — and open every hit you rely on. Use exact `file:line`. Drop any
+   finding you cannot justify with a line reference. For a finding on a MODIFIED line, confirm it against
+   the pre-change file and DROP it if the flagged code is unchanged:
    `git show HEAD:<file>` for the working tree, `git show "$DIFF_BASE":<file>` in delta mode, or
    `git show origin/${BASE_BRANCH}:<file>` in worktree/PR mode (HEAD is the PR tip, not the baseline).
    Then apply the Scope rule and drop the rest silently.

@@ -130,19 +130,16 @@ fi
   Emit `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.`, run the
   acknowledge bullet of phase 6, and stop. No round exists, so there is nothing to post or tick — asked or
   not.
-- Read the delta and build the knowledge graph over it:
+- Read the delta, then follow the `goravel-graph` skill once for this round — one build, `repo_root` =
+  `$WORKTREE_DIR`, `base` = `$GRAPH_BASE`:
 
 ```bash
 git -C "$WORKTREE_DIR" diff "$DIFF_RANGE" --name-only
 if [ -n "$DIFF_BASE" ]; then git -C "$WORKTREE_DIR" log --oneline "$DIFF_BASE..HEAD"; fi   # incremental only: the new commits, newest first
 ```
 
-```
-build_or_update_graph_tool({ repo_root: "$WORKTREE_DIR", base: "$GRAPH_BASE" })
-```
-
 ### 3. Review the diff
-Fan out, merge, and filter to the diff. Load the `goravel-review-template` skill first — the comment
+Fan out, merge, and filter to the diff. Load the `goravel-review-template` skill before the fan-out — the comment
 rule below and the phase-5 grammar both come from it.
 - Detect the languages from the **review range** by extension (`.go`; `.ts/.tsx/.js/.jsx/.mjs/.cjs`; `.dart`; `.py`; mixed → each language separately).
 - **Go present** → spawn `subagents/review-go` six times in parallel, one per SIDE: safe, logic, performance, standard, testing, architecture. Prompt each with `SIDE=<name>`, the diff scope, the languages, and the phase-1 context — `WORKTREE_DIR` + `DIFF_BASE=<sha>` on an incremental review (the worker's delta mode), `WORKTREE_DIR` + `BASE_BRANCH` on a full one. Review only `$DIFF_RANGE`: earlier commits were reviewed already. Findings only (no headers/intro/summary); scoped per the review-go Scope rule — anchor on an added or modified line (±1), and anchor a change's consequence in unchanged code back to the changed line; drop the rest silently.

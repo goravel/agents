@@ -28,18 +28,9 @@ Extract from the user's message:
 
 ### Step 2: Locate the Affected Code
 
-Find the primary service, module, or package. Use the knowledge graph before reading files:
-
-```
-build_or_update_graph_tool({ repo_root })
-query_graph_tool({ repo_root, pattern: "callers_of", target: "<symbol>" })
-semantic_search_nodes_tool({ repo_root, query: "<key term>" })
-```
-
-Fall back to Grep/Glob/Read only when the graph does not cover the file or language. A repo with no parsed
-language — prompts, skills, Markdown — returns an empty graph; read the files instead of rebuilding.
-Identify the root of the affected component and understand its layout (source files, tests, config,
-migrations).
+Find the primary service, module, or package, then read the files that define it. Search by symbol or
+keyword — grep, glob, read — and follow the hits into the source. Identify the root of the affected
+component and understand its layout (source files, tests, config, migrations).
 
 ### Step 3: Read Existing Patterns
 
