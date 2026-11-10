@@ -52,7 +52,9 @@ the work in the worktree.
   the commits it finishes are the ones that branch already has, in the tree those runs worked in. A run
   commits every phase before it ends, so that tree is normally clean; files it does hold are what a run
   that was interrupted before its phase commit left behind. That is the only case where the returned path
-  is not this run's `<TS>`, and the shared checkout is never that worktree.
+  is not this run's `<TS>`, and the shared checkout is never that worktree. A reused worktree is claimed
+  for the run by a sibling `<path>.claim` directory, outside the tree; one already claimed is never handed
+  to a second run, which gets a worktree of its own instead.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
@@ -131,6 +133,8 @@ fi
 # writes beside or inside the shared checkout.
 CHECKOUT_ROOT=$(pwd)
 WORKTREE_ROOT=/tmp
+# Git reports a worktree under the path the root resolves to, so both spellings are matched.
+WORKTREE_ROOT_REAL=$(cd "$WORKTREE_ROOT" 2>/dev/null && pwd -P)
 
 SAFE=$(printf '%s' "$REPO" | tr -c 'A-Za-z0-9._-' '-' | sed -E 's/^-+//; s/-+$//')
 
@@ -226,24 +230,24 @@ branch_name() {
   esac
 }
 
-# The newest /tmp worktree that still holds this branch at its tip, so a run continuing an earlier run's
-# work finds its commits in the tree those runs worked in. Dirtiness is not a criterion: a run commits
-# each phase, so anything left is an interrupted run's edits, handed over as they stand. Empty when none
-# does: the shared checkout, a worktree on another branch, one not at the branch tip, and one outside
-# /tmp or /private/tmp are never reused.
+# The newest worktree under the root that still holds this branch at its tip, so a run continuing an
+# earlier run's work finds its commits in the tree those runs worked in. Dirtiness is not a criterion: a
+# run commits each phase, so anything left is an interrupted run's edits, handed over as they stand. Empty
+# when none does: the shared checkout, a worktree on another branch, one not at the branch tip, and one
+# outside the root in either spelling are never reused.
 reusable_worktree() {
-  HELD=$(git -C "$REPO_DIR" worktree list --porcelain 2>/dev/null \
+  HOLDERS=$(git -C "$REPO_DIR" worktree list --porcelain 2>/dev/null \
     | awk -v want="branch refs/heads/$1" '$1 == "worktree" { p = substr($0, 10); next } $0 == want { print p }')
-  [ -n "$HELD" ] || return 0
+  [ -n "$HOLDERS" ] || return 0
   TIP=$(git -C "$REPO_DIR" rev-parse --verify --quiet "refs/heads/$1" 2>/dev/null) || return 0
   HERE=$(cd "$REPO_DIR" 2>/dev/null && pwd -P)
-  printf '%s\n' "$HELD" | while IFS= read -r CAND; do
+  printf '%s\n' "$HOLDERS" | while IFS= read -r CAND; do
     REST=${CAND##*/}
     STAMP=${REST#"$SAFE-"}
     [ "$STAMP" != "$REST" ] || continue
     printf '%s' "$STAMP" | grep -Eq '^[0-9]{8}-[0-9]{6}$' || continue
     case "$CAND" in
-      "$WORKTREE_ROOT/$SAFE-"*|/private/tmp/"$SAFE-"*) : ;;
+      "$WORKTREE_ROOT/$SAFE-"*|"$WORKTREE_ROOT_REAL/$SAFE-"*) : ;;
       *) continue ;;
     esac
     [ -d "$CAND" ] || continue
@@ -307,9 +311,10 @@ if [ "$KIND" = pull ]; then
     elif git -C "$REPO_DIR" merge-base --is-ancestor "$HEAD_REF" "refs/heads/$WT_BRANCH"; then
       # Ahead of the PR head: the earlier run committed work the PR has not taken. The worktree holding
       # those commits is reused exactly as it stands — no merge, no reset, no inspection of a merge or
-      # rebase it left half-done — and when none is left the branch is attached in this run's worktree.
+      # rebase it left half-done. The claim is a sibling directory, so it never touches the tree; a claim
+      # already there means another run holds it, and this run attaches the branch in its own worktree.
       REUSED=$(reusable_worktree "$WT_BRANCH")
-      if [ -n "$REUSED" ]; then
+      if [ -n "$REUSED" ] && mkdir "$REUSED.claim" 2>/dev/null; then
         WT_DIR="$REUSED"
       else
         git -C "$REPO_DIR" worktree add --force "$WT_DIR" "$WT_BRANCH" >/dev/null 2>&1 \
@@ -374,10 +379,12 @@ nothing on stderr either, no note that the worktree was reused.
   holding the branch at its tip is reused exactly as it stands, and, when no worktree holds it, the branch
   is attached in this run's `/tmp/<owner>-<repo>-<TS>`. That tree is normally clean — a run commits every
   phase before it ends — so anything in it is an interrupted run's edits, not expected output; reuse
-  inspects no merge or rebase state and says nothing about itself. The shared checkout, a worktree on
-  another branch, one not at the branch tip, and one outside `/tmp` or `/private/tmp` are never reused,
-  and reuse moves no branch and removes no directory. Commits on both sides are a genuine divergence and
-  fail the run with `has diverged from PR #<n>`, because a push from here would not be a fast-forward. A
+  inspects no merge or rebase state and says nothing about itself. The reused tree is claimed with a
+  sibling `<path>.claim` directory, so a tree another run has already claimed is not handed over and the
+  branch is attached in a worktree of this run's own. The shared checkout, a worktree on another branch,
+  one not at the branch tip, and one outside `/tmp` or the path it resolves to are never reused, and
+  reuse moves no branch and removes no directory. Commits on both sides are a genuine divergence and fail
+  the run with `has diverged from PR #<n>`, because a push from here would not be a fast-forward. A
   same-repository pull request keeps its own branch name, `headRefName`, so the run's push updates that
   pull request; a fork PR keeps `pr-<n>-<TS>`, which the write flows refuse; an issue link keeps
   `issue-<n>-<TS>` at the default branch. Only a pull request branch is compared against its base: a

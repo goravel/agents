@@ -66,10 +66,12 @@ Check out the PR into a worktree and gather everything the review needs.
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build a path or a
   branch yourself.
-- Keep it all: this flow removes nothing. `setup` keeps the shared checkout and creates each run's
-  worktree under `/tmp` — `/tmp/<owner>-<repo>-<TS>`, never beside the checkout — so a later run gets its
-  own worktree from the same checkout; the range gate below, never this line, decides whether the last
-  reviewed head is still present.
+- Keep it all: this flow removes nothing. `setup` keeps the shared checkout and puts each run's worktree
+  under `/tmp` — `/tmp/<owner>-<repo>-<TS>`, never beside the checkout — one per run, except on a pull
+  request whose branch is ahead of the PR head: there it hands back the earlier run's worktree, so that
+  work is continued where it stands. Either way the reviewed tree can hold commits the PR head does not,
+  which the `PR_HEAD` ≠ `HEAD_SHA` line below covers; the range gate, never this line, decides whether the
+  last reviewed head is still present.
 - Resolve the head, the base branch and the bot login, and fetch the conversation and PR body
   (read-only; every list call uses `--paginate`):
 
