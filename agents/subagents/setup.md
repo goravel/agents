@@ -46,7 +46,13 @@ the work in the worktree.
   `YYYYMMDD-HHMMSS`), never beside the checkout and never inside it: all of the run's changes, commits
   and branches live there. On macOS `/tmp` resolves to `/private/tmp`, so the returned
   path may show either. `/tmp` is OS-managed, so a long-idle run's uncommitted files may be cleaned, and
-  the predictable path is held by whichever process creates it first.
+  the predictable path is held by whichever process creates it first. A pull-request run whose branch
+  already carries commits the PR head lacks is the continuation of an earlier run: it reuses that run's
+  worktree — the newest `/tmp/<owner>-<repo>-<TS>` still holding that branch — instead of creating one, so
+  the commits it finishes are the ones that branch already has, in the tree those runs worked in. A run
+  commits every phase before it ends, so that tree is normally clean; files it does hold are what a run
+  that was interrupted before its phase commit left behind. That is the only case where the returned path
+  is not this run's `<TS>`, and the shared checkout is never that worktree.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
@@ -220,6 +226,34 @@ branch_name() {
   esac
 }
 
+# The newest /tmp worktree that still holds this branch at its tip, so a run continuing an earlier run's
+# work finds its commits in the tree those runs worked in. Dirtiness is not a criterion: a run commits
+# each phase, so anything left is an interrupted run's edits, handed over as they stand. Empty when none
+# does: the shared checkout, a worktree on another branch, one not at the branch tip, and one outside
+# /tmp or /private/tmp are never reused.
+reusable_worktree() {
+  HELD=$(git -C "$REPO_DIR" worktree list --porcelain 2>/dev/null \
+    | awk -v want="branch refs/heads/$1" '$1 == "worktree" { p = substr($0, 10); next } $0 == want { print p }')
+  [ -n "$HELD" ] || return 0
+  TIP=$(git -C "$REPO_DIR" rev-parse --verify --quiet "refs/heads/$1" 2>/dev/null) || return 0
+  HERE=$(cd "$REPO_DIR" 2>/dev/null && pwd -P)
+  printf '%s\n' "$HELD" | while IFS= read -r CAND; do
+    REST=${CAND##*/}
+    STAMP=${REST#"$SAFE-"}
+    [ "$STAMP" != "$REST" ] || continue
+    printf '%s' "$STAMP" | grep -Eq '^[0-9]{8}-[0-9]{6}$' || continue
+    case "$CAND" in
+      "$WORKTREE_ROOT/$SAFE-"*|/private/tmp/"$SAFE-"*) : ;;
+      *) continue ;;
+    esac
+    [ -d "$CAND" ] || continue
+    [ "$(cd "$CAND" 2>/dev/null && pwd -P)" != "$HERE" ] || continue
+    [ "$(git -C "$CAND" symbolic-ref --quiet HEAD 2>/dev/null)" = "refs/heads/$1" ] || continue
+    [ "$(git -C "$CAND" rev-parse --verify --quiet HEAD 2>/dev/null)" = "$TIP" ] || continue
+    printf '%s\t%s\n' "$STAMP" "$CAND"
+  done | sort -r | head -n 1 | cut -f2
+}
+
 git -C "$REPO_DIR" worktree prune
 TRIES=0
 TS=$(date +%Y%m%d-%H%M%S)
@@ -259,16 +293,31 @@ if [ "$KIND" = pull ]; then
   git -C "$REPO_DIR" fetch --no-tags origin "+refs/pull/$NUM/head:${HEAD_REF}" >/dev/null 2>&1 \
     || setup_fail "fetch PR #$NUM of $REPO failed"
   if git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$WT_BRANCH"; then
-    # The branch is already here — a re-run on the same PR. It is kept only when the PR head contains it:
-    # an ahead-only branch carries commits the PR lacks, and this run's push would slip them into the PR.
-    # Then --force lets it be checked out beside an earlier run's worktree that still holds it, and the
-    # fast-forward carries it to the PR head. Nothing is moved back and nothing is removed.
-    git -C "$REPO_DIR" merge-base --is-ancestor "refs/heads/$WT_BRANCH" "$HEAD_REF" \
-      || setup_fail "local branch $WT_BRANCH has diverged from PR #$NUM"
-    git -C "$REPO_DIR" worktree add --force "$WT_DIR" "$WT_BRANCH" >/dev/null 2>&1 \
-      || setup_fail "worktree add $WT_DIR failed"
-    git -C "$WT_DIR" merge --ff-only "$HEAD_REF" >/dev/null 2>&1 \
-      || setup_fail "local branch $WT_BRANCH has diverged from PR #$NUM"
+    # The branch is already here — a re-run on the same PR, or work an earlier run left behind. Read the
+    # PR head against it: the PR head contains it (behind or equal) is fast-forwarded to the PR head; it
+    # contains the PR head (ahead only) is work the PR has not taken yet and is continued where it stands;
+    # commits on both sides have diverged, and a push from here would not be a fast-forward.
+    if git -C "$REPO_DIR" merge-base --is-ancestor "refs/heads/$WT_BRANCH" "$HEAD_REF"; then
+      # --force lets it be checked out beside an earlier run's worktree that still holds it, and the
+      # fast-forward carries it to the PR head. Nothing is moved back and nothing is removed.
+      git -C "$REPO_DIR" worktree add --force "$WT_DIR" "$WT_BRANCH" >/dev/null 2>&1 \
+        || setup_fail "worktree add $WT_DIR failed"
+      git -C "$WT_DIR" merge --ff-only "$HEAD_REF" >/dev/null 2>&1 \
+        || setup_fail "local branch $WT_BRANCH has diverged from PR #$NUM"
+    elif git -C "$REPO_DIR" merge-base --is-ancestor "$HEAD_REF" "refs/heads/$WT_BRANCH"; then
+      # Ahead of the PR head: the earlier run committed work the PR has not taken. The worktree holding
+      # those commits is reused exactly as it stands — no merge, no reset, no inspection of a merge or
+      # rebase it left half-done — and when none is left the branch is attached in this run's worktree.
+      REUSED=$(reusable_worktree "$WT_BRANCH")
+      if [ -n "$REUSED" ]; then
+        WT_DIR="$REUSED"
+      else
+        git -C "$REPO_DIR" worktree add --force "$WT_DIR" "$WT_BRANCH" >/dev/null 2>&1 \
+          || setup_fail "worktree add $WT_DIR failed"
+      fi
+    else
+      setup_fail "local branch $WT_BRANCH has diverged from PR #$NUM"
+    fi
   else
     git -C "$REPO_DIR" worktree add "$WT_DIR" -b "$WT_BRANCH" "$HEAD_REF" >/dev/null 2>&1 \
       || setup_fail "worktree add $WT_DIR failed"
@@ -302,7 +351,9 @@ printf '%s\n' "$WT_DIR"
 
 Success is one line: the absolute worktree path, nothing else — never the branch, the base branch, or
 the checkout path. Failure is one line, `setup: failed — <reason>`, and no path — never print one the
-script did not return.
+script did not return. A pull-request run that continues earlier work returns the worktree that work left
+behind, so the path can be one an earlier run created. It is still the whole answer, and the only line:
+nothing on stderr either, no note that the worktree was reused.
 
 ## Rules
 
@@ -317,12 +368,21 @@ script did not return.
   worktree is still built from the `origin/<base>` (or `refs/pull/<n>/head`) the last fetch left behind.
 - A pull request starts at its head, never at the checkout's local branch: `refs/pull/<n>/head` is mirrored
   to `refs/pr/<n>/head`, and the worktree's branch is created from it — or, when the branch is already here,
-  kept only if the PR head contains it and then fast-forwarded to it. A branch carrying commits the PR head
-  lacks fails the run rather than having them pushed into the PR. A same-repository pull request keeps its
-  own branch name, `headRefName`, so the run's push updates that pull request; a fork PR keeps `pr-<n>-<TS>`,
-  which the write flows refuse; an issue link keeps `issue-<n>-<TS>` at the default branch. Only a pull
-  request branch is compared against its base: a `master` or named branch is never fast-forwarded, checked
-  for ancestry, or reset, because its commits belong to the caller.
+  read three ways. The PR head contains it (behind or equal): it is checked out beside an earlier run's
+  worktree with `--force` and fast-forwarded to the PR head. It contains the PR head (ahead only): an
+  earlier run committed work the PR has not taken, so the newest `/tmp/<owner>-<repo>-<TS>` worktree still
+  holding the branch at its tip is reused exactly as it stands, and, when no worktree holds it, the branch
+  is attached in this run's `/tmp/<owner>-<repo>-<TS>`. That tree is normally clean — a run commits every
+  phase before it ends — so anything in it is an interrupted run's edits, not expected output; reuse
+  inspects no merge or rebase state and says nothing about itself. The shared checkout, a worktree on
+  another branch, one not at the branch tip, and one outside `/tmp` or `/private/tmp` are never reused,
+  and reuse moves no branch and removes no directory. Commits on both sides are a genuine divergence and
+  fail the run with `has diverged from PR #<n>`, because a push from here would not be a fast-forward. A
+  same-repository pull request keeps its own branch name, `headRefName`, so the run's push updates that
+  pull request; a fork PR keeps `pr-<n>-<TS>`, which the write flows refuse; an issue link keeps
+  `issue-<n>-<TS>` at the default branch. Only a pull request branch is compared against its base: a
+  `master` or named branch is never fast-forwarded, checked for ancestry, or reset, because its commits
+  belong to the caller.
 - A repository link where the user named no branch starts on a fresh `run-<TS>` branch created from
   `origin/master`. It never attaches `master`, so the shared `refs/heads/master` stays at origin and the
   next repository-link run starts from the latest origin instead of inheriting the previous run's
