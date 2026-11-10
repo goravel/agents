@@ -219,7 +219,7 @@ jq -Rs '{body: .}' "$BODY_FILE" \
   Never un-tick a resolved finding; never tick a still-open one. A failed PATCH is a missed tick, not a
   reason to post the round again. Rewrite only the anchor line — never the banner, the `<!-- round: N -->`
   or `<!-- reviewed-head: … -->` markers, or the `Reviewed:` line.
-- Acknowledge the mention last, once the review is emitted, so the 👍 means the run delivered its review —
+- Acknowledge the mention once the review is emitted, so the 👍 means the run delivered its review —
   conversation copy or PR copy. Take the mention link from your prompt — none → do not spawn.
   With one, spawn `subagents/reaction` foreground and wait:
 
@@ -227,3 +227,8 @@ jq -Rs '{body: .}' "$BODY_FILE" \
 
   Pass the mention link only — never the pull request link. Best-effort: never fail or delay the review
   over it, and never mention the spawn or its result in the review output.
+
+### 7. Release the worktree
+
+The run is done with the tree, so release its claim — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` —
+and a later run can continue there instead of waiting out the lease.

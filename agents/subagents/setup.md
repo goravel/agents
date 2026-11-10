@@ -54,8 +54,9 @@ the work in the worktree.
   that was interrupted before its phase commit left behind. That is the only case where the returned path
   is not this run's `<TS>`, and the shared checkout is never that worktree. Every pull-request worktree
   setup hands out is claimed by a sibling `<path>.claim` directory, outside the tree; a second run that
-  finds the claim live is given a worktree of its own instead. A claim older than `CLAIM_LEASE` minutes is
-  an abandoned run's, so it is cleared and the tree can be reused again rather than being excluded for good.
+  finds the claim live is given a worktree of its own instead. A run releases its claim when it ends, so
+  the next run can continue in that tree straight away; a run that never got there leaves its claim to
+  expire after `CLAIM_LEASE` minutes, so no tree is excluded for good and none waits a day.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
@@ -136,8 +137,8 @@ CHECKOUT_ROOT=$(pwd)
 WORKTREE_ROOT=/tmp
 # Git reports a worktree under the path the root resolves to, so both spellings are matched.
 WORKTREE_ROOT_REAL=$(cd "$WORKTREE_ROOT" 2>/dev/null && pwd -P)
-# Minutes a <path>.claim marker is honoured: past it the run that took it is gone.
-CLAIM_LEASE=1440
+# Minutes a <path>.claim is honoured: a run that never got to release it is treated as gone past this.
+CLAIM_LEASE=30
 
 SAFE=$(printf '%s' "$REPO" | tr -c 'A-Za-z0-9._-' '-' | sed -E 's/^-+//; s/-+$//')
 
@@ -388,8 +389,8 @@ nothing on stderr either, no note that the worktree was reused.
 
 - `git -C` for every command. Never `git checkout`, `reset`, `clean`, `stash`, `branch -D`, `branch -f`,
   `push`, or `worktree remove`, and never delete a directory this run did not claim: the checkout and its
-  worktrees hold work a later run may rely on. The one directory a run may remove is a stale
-  `<path>.claim` — an empty lock of its own, and only once it is past `CLAIM_LEASE`.
+  worktrees hold work a later run may rely on. The one directory a run may remove is a `<path>.claim`
+  lock — this run's own, or one past its lease — because it is an empty marker, never work.
 - Reusing the checkout — `<pwd>/<owner>-<repo>`, or the toplevel of `pwd` when `pwd` is inside a matching
   checkout: verify it is a git checkout, verify `origin` flattens to the same `owner/repo`,
   `fetch --prune --no-tags`, then fast-forward its checked-out branch with `merge --ff-only origin/<branch>`
@@ -406,17 +407,16 @@ nothing on stderr either, no note that the worktree was reused.
   phase before it ends — so anything in it is an interrupted run's edits, not expected output; reuse
   inspects no merge or rebase state and says nothing about itself. Every worktree it hands out is claimed
   with a sibling `<path>.claim` directory, outside the tree, so a tree another run holds is never handed
-  over and the branch is attached in a worktree of this run's own; a claim past `CLAIM_LEASE` minutes is
-  an abandoned run's and is cleared, so no tree stays excluded for good. The shared checkout, a worktree on
-  another branch, one not at the branch tip, and one outside `/tmp` or the path it resolves to are never
-  reused, and reuse moves no branch and removes no directory. Commits on both sides are a genuine
-  divergence and fail the run with `has diverged from PR #<n>`, because a push from here would not be a
-  fast-forward. A
-  same-repository pull request keeps its own branch name, `headRefName`, so the run's push updates that
-  pull request; a fork PR keeps `pr-<n>-<TS>`, which the write flows refuse; an issue link keeps
-  `issue-<n>-<TS>` at the default branch. Only a pull request branch is compared against its base: a
-  `master` or named branch is never fast-forwarded, checked for ancestry, or reset, because its commits
-  belong to the caller.
+  over and the branch is attached in a worktree of this run's own; a run that ends releases its claim, and
+  one that never got there has it cleared once it is `CLAIM_LEASE` minutes old, so no tree stays excluded
+  for good. The shared checkout, a worktree on another branch, one not at the branch tip, and one outside
+  `/tmp` or the path it resolves to are never reused, and reuse moves no branch and removes no directory.
+  Commits on both sides are a genuine divergence and fail the run with `has diverged from PR #<n>`, because
+  a push from here would not be a fast-forward. A same-repository pull request keeps its own branch name,
+  `headRefName`, so the run's push updates that pull request; a fork PR keeps `pr-<n>-<TS>`, which the write
+  flows refuse; an issue link keeps `issue-<n>-<TS>` at the default branch. Only a pull request branch is
+  compared against its base: a `master` or named branch is never fast-forwarded, checked for ancestry, or
+  reset, because its commits belong to the caller.
 - A repository link where the user named no branch starts on a fresh `run-<TS>` branch created from
   `origin/master`. It never attaches `master`, so the shared `refs/heads/master` stays at origin and the
   next repository-link run starts from the latest origin instead of inheriting the previous run's

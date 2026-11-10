@@ -162,8 +162,8 @@ Delegate the round review to the `subagents/review-diff` agent.
 ### 5.3 Decide
 
 Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
-- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Create or update the PR. Base: `$BASE_BRANCH`. Context: `<folder>/implementation.md`. Return your output contract in the conversation." Report the PR URL; list Nits as non-blocking.
-- **Round 5**: stop, no PR. Report the outstanding Must Fix / Maybe Fix; list the Nits as non-blocking.
+- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Create or update the PR. Base: `$BASE_BRANCH`. Context: `<folder>/implementation.md`. Return your output contract in the conversation." Report the PR URL; list Nits as non-blocking. Then release the run's claim on the worktree — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — so a follow-up run can continue here at once.
+- **Round 5**: stop, no PR. Report the outstanding Must Fix / Maybe Fix; list the Nits as non-blocking. Release the same claim: `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true`.
 - **Otherwise**: increment N and loop.
 
 ## 6. Close out PR review comments
@@ -199,7 +199,7 @@ Run after the PR exists, or when the user hands you comments to close.
      status: declined
      reason: <why no change>
    ```
-4. **Report** per comment: decision + reason, and confirm each `solved` thread is resolved.
+4. **Report** per comment: decision + reason, and confirm each `solved` thread is resolved. Then release the run's claim on the worktree: `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true`.
 
 ## 7. Acknowledge the mention
 
