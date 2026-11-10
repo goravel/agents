@@ -221,11 +221,13 @@ the report at the end of §6 — so the 👍 means "run delivered".
   reaction yourself.
 - Stopping at the step-3 plan question is not a terminal point: no acknowledgement there.
 
-Then release the run's claim on the worktree — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — whether
-or not there was a mention to acknowledge. This is the run's only release, so the tree stays claimed through
-§6's edits, and a follow-up run can continue here at once.
+## 8. Release the worktree
 
-## 8. Rules
+Release the run's claim on the worktree — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — whether or
+not there was a mention to acknowledge. This is the run's only release: the tree stays claimed through
+§6's edits, and a later run can continue there instead of waiting out the lease.
+
+## 9. Rules
 
 - Nits are fixed only in a round that also has Must Fix / Maybe Fix; a Nits-only review is clean.
 - `<folder>/considered.md` belongs to `review-diff`; never write it yourself.

@@ -26,44 +26,39 @@ the work in the worktree.
   |---|---|---|
   | pull request | `https://github.com/goravel/goravel/pull/42` | the PR's own branch: `headRefName`, or `pr-42-<TS>` when it comes from a fork |
   | issue | `https://github.com/goravel/goravel/issues/42` | `issue-42-<TS>`, or the named branch |
-  | repository | `https://github.com/goravel/goravel`, `…/goravel.git`, `…/goravel/`, `git@github.com:goravel/goravel.git`, `goravel/goravel` | `master`, or the named branch |
+  | repository | `https://github.com/goravel/goravel`, `…/goravel.git`, `…/goravel/`, `git@github.com:goravel/goravel.git`, `goravel/goravel` | `run-<TS>` from `origin/master`, or the named branch |
 
   Any comment anchor is fine — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — the script
-  stops at the number. The input carries exactly one `LINK=<link>`; a
-  bare `owner/repo` is accepted only as that whole value. The `owner/repo` of a
-  pull request link is the repository the PR lives in, not its head: `gh -R <owner/repo>` reads the PR and
-  `origin` stays the base repository.
-- **The branch is named only when the user named one.** The input carries at most one `BRANCH=<name>`;
-  blank means the prompt named no branch, so a repository link works on `master`. A pull request link
-  always keeps its own branch and ignores `BRANCH`; an issue link uses it instead of `issue-<n>-<TS>` —
-  which costs the `Closes #<n>` line, so name such a branch `<type>/<n>-<description>` to keep it.
-- **The checkout root is always `pwd`.** No input moves it and an environment `WORKSPACE_DIR` is ignored.
-  The checkout is `<pwd>/<owner>-<repo>` — reused when its `origin` matches, cloned when it is absent.
-  Only when `pwd` is itself inside a matching checkout is that checkout — resolved to its toplevel —
-  reused in place. **That checkout is shared by every run of the repository**, so a concurrent run may
-  be creating it: the script waits for that clone and reuses it instead of failing.
-- **The worktree root is always `/tmp`.** Every run's worktree is `/tmp/<owner>-<repo>-<TS>` (local time
-  `YYYYMMDD-HHMMSS`), never beside the checkout and never inside it: all of the run's changes, commits
-  and branches live there. On macOS `/tmp` resolves to `/private/tmp`, so the returned
-  path may show either. `/tmp` is OS-managed, so a long-idle run's uncommitted files may be cleaned, and
-  the predictable path is held by whichever process creates it first. A pull-request run whose branch
-  already carries commits the PR head lacks is the continuation of an earlier run: it reuses that run's
-  worktree — the newest `/tmp/<owner>-<repo>-<TS>` still holding that branch — instead of creating one, so
-  the commits it finishes are the ones that branch already has, in the tree those runs worked in. A run
-  commits every phase before it ends, so that tree is normally clean; files it does hold are what a run
-  that was interrupted before its phase commit left behind. That is the only case where the returned path
-  is not this run's `<TS>`, and the shared checkout is never that worktree. Every pull-request worktree
-  setup hands out is claimed by a sibling `<path>.claim` directory, outside the tree; a second run that
-  finds the claim live is given a worktree of its own instead. A run releases its claim when it ends and
-  keeps it fresh while it works, so the next run can continue in that tree straight away; a run that never
-  got there leaves its claim to expire after `CLAIM_LEASE` minutes, so no tree is excluded for good and
-  none waits a day.
+  stops at the number. The input carries exactly one `LINK=<link>`, and a bare `owner/repo` is accepted
+  only as that whole value. A pull request's `owner/repo` is the repository the PR lives in, not its head:
+  `gh -R <owner/repo>` reads the PR and `origin` stays the base repository.
+- **`BRANCH` is set only when the user named a branch.** At most one `BRANCH=<name>`; blank means none.
+  A pull-request link always keeps its own branch and ignores `BRANCH`; an issue or repository link uses
+  it — for an issue that costs the `Closes #<n>` line, so name it `<type>/<n>-<description>` to keep that.
+- **The checkout root is `pwd`.** Nothing moves it and an environment `WORKSPACE_DIR` is ignored. The
+  checkout is `<pwd>/<owner>-<repo>`: reused when its `origin` matches, cloned when it is absent. When
+  `pwd` is itself inside a matching checkout, that checkout — resolved to its toplevel — is reused in
+  place. Every run of the repository shares it, so the script waits for a concurrent clone instead of
+  failing.
+- **The worktree root is `/tmp`.** Each run's worktree is `/tmp/<owner>-<repo>-<TS>` (`TS` = local
+  `YYYYMMDD-HHMMSS`), never beside the checkout and never inside it, and holds all of the run's changes,
+  commits, and branches. macOS resolves it to `/private/tmp`, so the returned path may show either.
+- **Only one run owns a path.** `/tmp` is OS-managed: a long-idle run's uncommitted files may be cleaned,
+  and the predictable path goes to whichever process creates it first.
+- **A pull request ahead of its PR head continues an earlier run.** When its branch already carries
+  commits the PR head lacks, the run reuses the newest `/tmp/<owner>-<repo>-<TS>` still holding that
+  branch at its tip, so it finishes the commits those runs left. A run commits each phase, so that tree is
+  normally clean; files it holds are an interrupted run's. This is the only case where the returned path
+  is not this run's `<TS>`, and the shared checkout is never that worktree.
+- **Every worktree is claimed by a sibling `<path>.claim` directory**, outside the tree, so a live claim
+  stops a second run from being handed the same one. A run releases its claim when it ends and keeps it
+  fresh while it works, so the next run continues in that tree at once; a claim left by a run that never
+  got there expires after `CLAIM_LEASE` minutes, so no tree is excluded for good.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
-A `goravel/goravel` link clones `<pwd>/goravel-goravel` and returns `/tmp/goravel-goravel-<TS>`.
-Started inside a checkout of that repo, it returns the same `/tmp/goravel-goravel-<TS>` and creates
-nothing beside it.
+A `goravel/goravel` link clones `<pwd>/goravel-goravel` and returns `/tmp/goravel-goravel-<TS>`; started
+inside a checkout of that repo, it returns the same path and creates nothing beside it.
 
 ## Run
 
@@ -350,9 +345,6 @@ if [ "$KIND" = pull ]; then
     git -C "$REPO_DIR" worktree add "$WT_DIR" -b "$WT_BRANCH" "$HEAD_REF" >/dev/null 2>&1 \
       || setup_fail "worktree add $WT_DIR failed"
   fi
-  # Whatever tree this run hands out is reserved too, so no second run is handed the same one.
-  [ -n "$WT_CLAIMED" ] || claim_worktree "$WT_DIR" \
-    || setup_fail "worktree $WT_DIR is claimed by another run"
 else
   BASE_REF="origin/$BASE_BRANCH"
   if ! git -C "$REPO_DIR" rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
@@ -373,6 +365,9 @@ else
       || setup_fail "worktree add $WT_DIR failed"
   fi
 fi
+# Whatever tree this run hands out is reserved, so no second run is handed the same one.
+[ -n "$WT_CLAIMED" ] || claim_worktree "$WT_DIR" \
+  || setup_fail "worktree $WT_DIR is claimed by another run"
 
 git -C "$WT_DIR" rev-parse --verify --quiet HEAD >/dev/null || setup_fail "worktree $WT_DIR is not usable"
 printf '%s\n' "$WT_DIR"
@@ -381,58 +376,39 @@ printf '%s\n' "$WT_DIR"
 ## Return
 
 Success is one line: the absolute worktree path, nothing else — never the branch, the base branch, or
-the checkout path. Failure is one line, `setup: failed — <reason>`, and no path — never print one the
+the checkout path. Failure is one line, `setup: failed — <reason>`, and no path: never print one the
 script did not return. A pull-request run that continues earlier work returns the worktree that work left
-behind, so the path can be one an earlier run created. It is still the whole answer, and the only line:
-nothing on stderr either, no note that the worktree was reused.
+behind, so the path can be one an earlier run created; it is still the whole answer — no note that it was
+reused, nothing on stderr either.
 
 ## Rules
 
-- `git -C` for every command. Never `git checkout`, `reset`, `clean`, `stash`, `branch -D`, `branch -f`,
+- **`git -C` for every command.** Never `checkout`, `reset`, `clean`, `stash`, `branch -D`, `branch -f`,
   `push`, or `worktree remove`, and never delete a directory this run did not claim: the checkout and its
   worktrees hold work a later run may rely on. The one directory a run may remove is a `<path>.claim`
   lock — this run's own, or one past its lease — because it is an empty marker, never work.
-- Reusing the checkout — `<pwd>/<owner>-<repo>`, or the toplevel of `pwd` when `pwd` is inside a matching
-  checkout: verify it is a git checkout, verify `origin` flattens to the same `owner/repo`,
-  `fetch --prune --no-tags`, then fast-forward its checked-out branch with `merge --ff-only origin/<branch>`
-  when the tree is clean, the branch has an upstream, and no other worktree holds it. A dirty tree, a
-  detached HEAD, a failed fetch, a diverged branch, or a branch held elsewhere leaves it untouched, and the
-  worktree is still built from the `origin/<base>` (or `refs/pull/<n>/head`) the last fetch left behind.
-- A pull request starts at its head, never at the checkout's local branch: `refs/pull/<n>/head` is mirrored
-  to `refs/pr/<n>/head`, and the worktree's branch is created from it — or, when the branch is already here,
-  read three ways. The PR head contains it (behind or equal): it is checked out beside an earlier run's
-  worktree with `--force` and fast-forwarded to the PR head. It contains the PR head (ahead only): an
-  earlier run committed work the PR has not taken, so the newest `/tmp/<owner>-<repo>-<TS>` worktree still
-  holding the branch at its tip is reused exactly as it stands, and, when no worktree holds it, the branch
-  is attached in this run's `/tmp/<owner>-<repo>-<TS>`. That tree is normally clean — a run commits every
-  phase before it ends — so anything in it is an interrupted run's edits, not expected output; reuse
-  inspects no merge or rebase state and says nothing about itself. Every worktree it hands out is claimed
-  with a sibling `<path>.claim` directory, outside the tree, so a tree another run holds is never handed
-  over and the branch is attached in a worktree of this run's own; a run that ends releases its claim, and
-  one that never got there has it cleared once it is `CLAIM_LEASE` minutes old, so no tree stays excluded
-  for good. The shared checkout, a worktree on another branch, one not at the branch tip, and one outside
-  `/tmp` or the path it resolves to are never reused, and reuse moves no branch and removes no directory.
-  Commits on both sides are a genuine divergence and fail the run with `has diverged from PR #<n>`, because
-  a push from here would not be a fast-forward. A same-repository pull request keeps its own branch name,
-  `headRefName`, so the run's push updates that pull request; a fork PR keeps `pr-<n>-<TS>`, which the write
-  flows refuse; an issue link keeps `issue-<n>-<TS>` at the default branch. Only a pull request branch is
-  compared against its base: a `master` or named branch is never fast-forwarded, checked for ancestry, or
-  reset, because its commits belong to the caller.
-- A repository link where the user named no branch starts on a fresh `run-<TS>` branch created from
-  `origin/master`. It never attaches `master`, so the shared `refs/heads/master` stays at origin and the
-  next repository-link run starts from the latest origin instead of inheriting the previous run's
-  commits; those commits stay on their own `run-<TS>` branch, in the worktree that is kept. `goravel-pr`
-  sees a non-default branch, so it pushes `run-<TS>` as the pull request head instead of creating a
-  `feat/…` branch. `master` is fixed for that link kind — a repository with no `origin/master` fails
-  instead of falling back to another branch. A named `BRANCH` replaces that branch for an issue or
-  repository link, built from `origin/<branch>` or, when only the local branch exists, attached as it
-  stands; naming the checkout's own branch fails, because a run must not move it. Nothing deletes a
-  `run-<TS>` branch, so they accumulate in the shared checkout by design.
-- The shared checkout is a cache, not workspace: a repository or issue run never checks out its branch —
-  naming that branch as `BRANCH` fails — and no run commits there. A pull request keeps its own head
-  branch, even when that is the cache's; that run's commits then leave the checkout's working tree stale,
-  so its fast-forward is skipped while the tree is dirty. Never commit in the checkout — a `commit -a`
-  there reverts the run's commits. Every worktree lives in `/tmp`.
-- `gh` answers two things: the branch, base, and cross-repository flag of a pull request link (`gh pr view
-  -R <owner/repo> --json headRefName,baseRefName,isCrossRepository`), and the default branch when
-  `origin/HEAD` is missing. A PR link fails rather than guessing a branch.
+- **The shared checkout is a cache, not workspace.** Never commit in it: a `commit -a` there reverts the
+  run's commits. A repository or issue link never checks out its branch there, so naming the checkout's own
+  branch as `BRANCH` fails. A pull request keeps its own head branch even when that is the cache's; its
+  fast-forward is skipped while that leaves the tree dirty.
+- **Reuse only a checkout that proves itself.** It is a git checkout, its `origin` flattens to the same
+  `owner/repo`, `fetch --prune --no-tags` runs, and its checked-out branch fast-forwards only when the tree
+  is clean, the branch has an upstream, no other worktree holds it, and it is not the branch this run will
+  use. Anything else leaves it untouched; the worktree is still built from the last fetched `origin/<base>`
+  or `refs/pull/<n>/head`.
+- **A pull request starts at its head**, never at the checkout's local branch. Its branch is created from
+  `refs/pull/<n>/head`; an existing branch behind that head is fast-forwarded to it, one ahead of it is an
+  earlier run's work and is reused where it stands, and one that has diverged fails the run — a push from
+  here would not be a fast-forward. A same-repository PR keeps `headRefName`, so the run's push updates it;
+  a fork PR keeps `pr-<n>-<TS>`, which the write flows refuse; an issue link keeps `issue-<n>-<TS>`.
+- **A repository link starts on a fresh `run-<TS>` from `origin/master`.** It never attaches `master`, so
+  the shared `refs/heads/master` stays at origin and the next run starts from the latest origin instead of
+  inheriting this run's commits; those stay on their own `run-<TS>` branch, which `goravel-pr` pushes as
+  the PR head. `master` is fixed — a repository without `origin/master` fails instead of falling back. A
+  named `BRANCH` replaces it for an issue or repository link, built from `origin/<branch>` or, when only
+  the local branch exists, attached as it stands. Nothing deletes a `run-<TS>` branch, so they accumulate
+  by design.
+- **Only a pull-request branch is compared against its base.** A `master` or named branch is never
+  fast-forwarded, checked for ancestry, or reset — its commits belong to the caller.
+- **`gh` answers two things:** the branch, base, and cross-repository flag of a pull request link, and the
+  default branch when `origin/HEAD` is missing. A PR link fails rather than guessing a branch.
