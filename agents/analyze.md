@@ -366,8 +366,8 @@ Headings and order are fixed:
 
 ## 7. Acknowledge the mention
 
-Run this last — once the report is emitted and, when the prompt asked, the PR copy posted or updated — so
-the 👍 means "analysis delivered". Take the mention link from your prompt — none → do not spawn. With
+Run this once the report is emitted and, when the prompt asked, the PR copy posted or updated, so the 👍
+means "analysis delivered". Take the mention link from your prompt — none → do not spawn. With
 one, spawn `subagents/reaction` foreground and wait:
 
 > You are running as a subagent in the analyze flow. COMMENT_URL=<the comment link found in the prompt>
@@ -376,7 +376,12 @@ one, spawn `subagents/reaction` foreground and wait:
 - Best-effort: never fail or delay the report over it, and never mention the spawn or its result in
   the report.
 
+## 8. Release the worktree
+
+The report is out, so release the run's claim — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — and a
+later run can continue in that tree instead of waiting out the lease.
+
 ## Output
 
 The report goes to the conversation every run; the PR copy is an addition, not a replacement. Steps 6 and
-7 are the only writes, both described above.
+7 are the only writes to the PR, both described above.

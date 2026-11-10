@@ -66,10 +66,12 @@ Check out the PR into a worktree and gather everything the review needs.
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build a path or a
   branch yourself.
-- Keep it all: this flow removes nothing. `setup` keeps the shared checkout and creates each run's
-  worktree under `/tmp` — `/tmp/<owner>-<repo>-<TS>`, never beside the checkout — so a later run gets its
-  own worktree from the same checkout; the range gate below, never this line, decides whether the last
-  reviewed head is still present.
+- Keep it all: this flow removes nothing. `setup` keeps the shared checkout and puts each run's worktree
+  under `/tmp` — `/tmp/<owner>-<repo>-<TS>`, never beside the checkout — one per run, except on a pull
+  request whose branch is ahead of the PR head: there it hands back the earlier run's worktree, so that
+  work is continued where it stands. Either way the reviewed tree can hold commits the PR head does not,
+  which the `PR_HEAD` ≠ `HEAD_SHA` line below covers; the range gate, never this line, decides whether the
+  last reviewed head is still present.
 - Resolve the head, the base branch and the bot login, and fetch the conversation and PR body
   (read-only; every list call uses `--paginate`):
 
@@ -89,8 +91,10 @@ gh api --paginate "repos/{owner}/{repo}/pulls/${PR_NUM}/reviews" \
   --jq '.[] | {id, html_url, user: .user.login, state, submitted_at, body}'
 ```
 
-- A `PR_HEAD` that differs from `HEAD_SHA` is a stale worktree: review `HEAD_SHA` (the tree the diff and
-  the findings describe) and say so in one line in the summary.
+- A `PR_HEAD` that differs from `HEAD_SHA` is a worktree out of step with the PR in one direction or the
+  other: behind the head, a stale run whose commits the PR has moved past, or ahead of it, an earlier run's
+  commits the PR has not taken yet. Either way review `HEAD_SHA` — the tree the diff and the findings
+  describe — and say which case it is in one line in the summary.
 
 - Classify every fetched body:
   - **Prior automated reviews** — any body containing the `🤖 Automated review` banner. Group into rounds: bodies sharing a `<!-- round: N -->` marker are one round (use the oldest comment's `html_url`); marker-less bodies are each their own round, numbered chronologically above every marker (oldest = `1 + max(marker)`, or 1 if none). Record each editable comment's `COMMENT_ENDPOINT` (`issues/comments/{id}` or `pulls/comments/{id}`; review bodies are not editable), `id`, `html_url`, body, and timestamp — this is the **tick set**.
@@ -215,7 +219,7 @@ jq -Rs '{body: .}' "$BODY_FILE" \
   Never un-tick a resolved finding; never tick a still-open one. A failed PATCH is a missed tick, not a
   reason to post the round again. Rewrite only the anchor line — never the banner, the `<!-- round: N -->`
   or `<!-- reviewed-head: … -->` markers, or the `Reviewed:` line.
-- Acknowledge the mention last, once the review is emitted, so the 👍 means the run delivered its review —
+- Acknowledge the mention once the review is emitted, so the 👍 means the run delivered its review —
   conversation copy or PR copy. Take the mention link from your prompt — none → do not spawn.
   With one, spawn `subagents/reaction` foreground and wait:
 
@@ -223,3 +227,8 @@ jq -Rs '{body: .}' "$BODY_FILE" \
 
   Pass the mention link only — never the pull request link. Best-effort: never fail or delay the review
   over it, and never mention the spawn or its result in the review output.
+
+### 7. Release the worktree
+
+The run is done with the tree, so release its claim — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` —
+and a later run can continue there instead of waiting out the lease.

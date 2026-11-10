@@ -149,7 +149,10 @@ Write the full `PLAN` verbatim to `<folder>/plan.md`. Confirm it exists before t
   ```
   git -C "$WORKTREE_DIR" add -A
   git -C "$WORKTREE_DIR" commit --no-verify -m "phase <N>"
+  touch "$WORKTREE_DIR.claim" 2>/dev/null || true
   ```
+  The touch keeps a live run's claim fresh, so a run that is still working is not mistaken for an
+  interrupted one.
 
 ### 5.2 Review
 
@@ -187,7 +190,7 @@ Run after the PR exists, or when the user hands you comments to close.
    ```
 
    Then decide each unresolved comment: correct (needs a code fix) vs. question/incorrect. Record a one-sentence reason per comment.
-2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason from the `subagents/code` agent's report (what changed, or why no change).
+2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason from the `subagents/code` agent's report (what changed, or why no change). This is another long write phase, so after it returns run `touch "$WORKTREE_DIR.claim" 2>/dev/null || true` — the claim must stay fresh until the run's single release.
 3. **Close out** — spawn `subagents/pr` with the list:
    ```
    PR: <the PR number or URL from 5.3, or from the comments the user handed you>
@@ -218,7 +221,13 @@ the report at the end of §6 — so the 👍 means "run delivered".
   reaction yourself.
 - Stopping at the step-3 plan question is not a terminal point: no acknowledgement there.
 
-## 8. Rules
+## 8. Release the worktree
+
+Release the run's claim on the worktree — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — whether or
+not there was a mention to acknowledge. This is the run's only release: the tree stays claimed through
+§6's edits, and a later run can continue there instead of waiting out the lease.
+
+## 9. Rules
 
 - Nits are fixed only in a round that also has Must Fix / Maybe Fix; a Nits-only review is clean.
 - `<folder>/considered.md` belongs to `review-diff`; never write it yourself.
