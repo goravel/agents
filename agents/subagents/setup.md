@@ -52,9 +52,10 @@ the work in the worktree.
   the commits it finishes are the ones that branch already has, in the tree those runs worked in. A run
   commits every phase before it ends, so that tree is normally clean; files it does hold are what a run
   that was interrupted before its phase commit left behind. That is the only case where the returned path
-  is not this run's `<TS>`, and the shared checkout is never that worktree. A reused worktree is claimed
-  for the run by a sibling `<path>.claim` directory, outside the tree; one already claimed is never handed
-  to a second run, which gets a worktree of its own instead.
+  is not this run's `<TS>`, and the shared checkout is never that worktree. Every pull-request worktree
+  setup hands out is claimed by a sibling `<path>.claim` directory, outside the tree; a second run that
+  finds the claim live is given a worktree of its own instead. A claim older than `CLAIM_LEASE` minutes is
+  an abandoned run's, so it is cleared and the tree can be reused again rather than being excluded for good.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
@@ -135,6 +136,8 @@ CHECKOUT_ROOT=$(pwd)
 WORKTREE_ROOT=/tmp
 # Git reports a worktree under the path the root resolves to, so both spellings are matched.
 WORKTREE_ROOT_REAL=$(cd "$WORKTREE_ROOT" 2>/dev/null && pwd -P)
+# Minutes a <path>.claim marker is honoured: past it the run that took it is gone.
+CLAIM_LEASE=1440
 
 SAFE=$(printf '%s' "$REPO" | tr -c 'A-Za-z0-9._-' '-' | sed -E 's/^-+//; s/-+$//')
 
@@ -258,7 +261,21 @@ reusable_worktree() {
   done | sort -r | head -n 1 | cut -f2
 }
 
+# Reserves a worktree for this run through the sibling <path>.claim marker, which is why it sits outside
+# the tree: a run never dirties the work it claims. A claim past its lease belongs to a run that never
+# finished, so it is cleared and the reservation retried once.
+claim_worktree() {
+  CLAIM="$1.claim"
+  mkdir "$CLAIM" 2>/dev/null && return 0
+  [ -d "$CLAIM" ] || return 1
+  find "$CLAIM" -maxdepth 0 -mmin +"$CLAIM_LEASE" -exec rmdir {} \; 2>/dev/null
+  mkdir "$CLAIM" 2>/dev/null
+}
+
 git -C "$REPO_DIR" worktree prune
+# A claim past its lease is an abandoned run's lock, and clearing it is what keeps a tree reusable.
+find "$WORKTREE_ROOT_REAL" -maxdepth 1 -name "$SAFE-*.claim" -mmin +"$CLAIM_LEASE" -exec rmdir {} \; 2>/dev/null || true
+
 TRIES=0
 TS=$(date +%Y%m%d-%H%M%S)
 WT_BRANCH=$(branch_name "$TS")
@@ -282,7 +299,9 @@ if [ -n "$CUR" ]; then
   fi
 fi
 
-while [ -e "$WT_DIR" ]; do
+# A fresh path must hold neither the directory nor its claim: a claim without the directory is a run that
+# died between reserving the tree and creating it.
+while [ -e "$WT_DIR" ] || [ -e "$WT_DIR.claim" ]; do
   TRIES=$((TRIES + 1))
   [ "$TRIES" -ge 5 ] && setup_fail "worktree path $WT_DIR already exists"
   sleep 1
@@ -290,6 +309,7 @@ while [ -e "$WT_DIR" ]; do
   WT_BRANCH=$(branch_name "$TS")
   WT_DIR="$WORKTREE_ROOT/$SAFE-$TS"
 done
+WT_CLAIMED=
 if [ "$KIND" = pull ]; then
   # The PR head is mirrored to a local ref, never written into a branch: a fetch into a branch another
   # worktree holds is refused, and moving a branch is not this worker's job.
@@ -311,11 +331,12 @@ if [ "$KIND" = pull ]; then
     elif git -C "$REPO_DIR" merge-base --is-ancestor "$HEAD_REF" "refs/heads/$WT_BRANCH"; then
       # Ahead of the PR head: the earlier run committed work the PR has not taken. The worktree holding
       # those commits is reused exactly as it stands — no merge, no reset, no inspection of a merge or
-      # rebase it left half-done. The claim is a sibling directory, so it never touches the tree; a claim
-      # already there means another run holds it, and this run attaches the branch in its own worktree.
+      # rebase it left half-done. A live claim means another run holds it, and then this run attaches the
+      # branch in its own worktree.
       REUSED=$(reusable_worktree "$WT_BRANCH")
-      if [ -n "$REUSED" ] && mkdir "$REUSED.claim" 2>/dev/null; then
+      if [ -n "$REUSED" ] && claim_worktree "$REUSED"; then
         WT_DIR="$REUSED"
+        WT_CLAIMED=1
       else
         git -C "$REPO_DIR" worktree add --force "$WT_DIR" "$WT_BRANCH" >/dev/null 2>&1 \
           || setup_fail "worktree add $WT_DIR failed"
@@ -327,6 +348,9 @@ if [ "$KIND" = pull ]; then
     git -C "$REPO_DIR" worktree add "$WT_DIR" -b "$WT_BRANCH" "$HEAD_REF" >/dev/null 2>&1 \
       || setup_fail "worktree add $WT_DIR failed"
   fi
+  # Whatever tree this run hands out is reserved too, so no second run is handed the same one.
+  [ -n "$WT_CLAIMED" ] || claim_worktree "$WT_DIR" \
+    || setup_fail "worktree $WT_DIR is claimed by another run"
 else
   BASE_REF="origin/$BASE_BRANCH"
   if ! git -C "$REPO_DIR" rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
@@ -364,7 +388,8 @@ nothing on stderr either, no note that the worktree was reused.
 
 - `git -C` for every command. Never `git checkout`, `reset`, `clean`, `stash`, `branch -D`, `branch -f`,
   `push`, or `worktree remove`, and never delete a directory this run did not claim: the checkout and its
-  worktrees hold work a later run may rely on.
+  worktrees hold work a later run may rely on. The one directory a run may remove is a stale
+  `<path>.claim` — an empty lock of its own, and only once it is past `CLAIM_LEASE`.
 - Reusing the checkout — `<pwd>/<owner>-<repo>`, or the toplevel of `pwd` when `pwd` is inside a matching
   checkout: verify it is a git checkout, verify `origin` flattens to the same `owner/repo`,
   `fetch --prune --no-tags`, then fast-forward its checked-out branch with `merge --ff-only origin/<branch>`
@@ -379,12 +404,14 @@ nothing on stderr either, no note that the worktree was reused.
   holding the branch at its tip is reused exactly as it stands, and, when no worktree holds it, the branch
   is attached in this run's `/tmp/<owner>-<repo>-<TS>`. That tree is normally clean — a run commits every
   phase before it ends — so anything in it is an interrupted run's edits, not expected output; reuse
-  inspects no merge or rebase state and says nothing about itself. The reused tree is claimed with a
-  sibling `<path>.claim` directory, so a tree another run has already claimed is not handed over and the
-  branch is attached in a worktree of this run's own. The shared checkout, a worktree on another branch,
-  one not at the branch tip, and one outside `/tmp` or the path it resolves to are never reused, and
-  reuse moves no branch and removes no directory. Commits on both sides are a genuine divergence and fail
-  the run with `has diverged from PR #<n>`, because a push from here would not be a fast-forward. A
+  inspects no merge or rebase state and says nothing about itself. Every worktree it hands out is claimed
+  with a sibling `<path>.claim` directory, outside the tree, so a tree another run holds is never handed
+  over and the branch is attached in a worktree of this run's own; a claim past `CLAIM_LEASE` minutes is
+  an abandoned run's and is cleared, so no tree stays excluded for good. The shared checkout, a worktree on
+  another branch, one not at the branch tip, and one outside `/tmp` or the path it resolves to are never
+  reused, and reuse moves no branch and removes no directory. Commits on both sides are a genuine
+  divergence and fail the run with `has diverged from PR #<n>`, because a push from here would not be a
+  fast-forward. A
   same-repository pull request keeps its own branch name, `headRefName`, so the run's push updates that
   pull request; a fork PR keeps `pr-<n>-<TS>`, which the write flows refuse; an issue link keeps
   `issue-<n>-<TS>` at the default branch. Only a pull request branch is compared against its base: a

@@ -91,8 +91,10 @@ gh api --paginate "repos/{owner}/{repo}/pulls/${PR_NUM}/reviews" \
   --jq '.[] | {id, html_url, user: .user.login, state, submitted_at, body}'
 ```
 
-- A `PR_HEAD` that differs from `HEAD_SHA` is a stale worktree: review `HEAD_SHA` (the tree the diff and
-  the findings describe) and say so in one line in the summary.
+- A `PR_HEAD` that differs from `HEAD_SHA` is a worktree out of step with the PR in one direction or the
+  other: behind the head, a stale run whose commits the PR has moved past, or ahead of it, an earlier run's
+  commits the PR has not taken yet. Either way review `HEAD_SHA` — the tree the diff and the findings
+  describe — and say which case it is in one line in the summary.
 
 - Classify every fetched body:
   - **Prior automated reviews** — any body containing the `🤖 Automated review` banner. Group into rounds: bodies sharing a `<!-- round: N -->` marker are one round (use the oldest comment's `html_url`); marker-less bodies are each their own round, numbered chronologically above every marker (oldest = `1 + max(marker)`, or 1 if none). Record each editable comment's `COMMENT_ENDPOINT` (`issues/comments/{id}` or `pulls/comments/{id}`; review bodies are not editable), `id`, `html_url`, body, and timestamp — this is the **tick set**.
