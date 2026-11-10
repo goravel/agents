@@ -54,9 +54,10 @@ the work in the worktree.
   that was interrupted before its phase commit left behind. That is the only case where the returned path
   is not this run's `<TS>`, and the shared checkout is never that worktree. Every pull-request worktree
   setup hands out is claimed by a sibling `<path>.claim` directory, outside the tree; a second run that
-  finds the claim live is given a worktree of its own instead. A run releases its claim when it ends, so
-  the next run can continue in that tree straight away; a run that never got there leaves its claim to
-  expire after `CLAIM_LEASE` minutes, so no tree is excluded for good and none waits a day.
+  finds the claim live is given a worktree of its own instead. A run releases its claim when it ends and
+  keeps it fresh while it works, so the next run can continue in that tree straight away; a run that never
+  got there leaves its claim to expire after `CLAIM_LEASE` minutes, so no tree is excluded for good and
+  none waits a day.
 - **`GITHUB_CLONE_PREFIX`** (default `https://github.com/`, or `git@github.com:` for SSH) and
   **`CLONE_DEPTH`** (`1` for a shallow clone) are the only knobs.
 
@@ -137,7 +138,7 @@ CHECKOUT_ROOT=$(pwd)
 WORKTREE_ROOT=/tmp
 # Git reports a worktree under the path the root resolves to, so both spellings are matched.
 WORKTREE_ROOT_REAL=$(cd "$WORKTREE_ROOT" 2>/dev/null && pwd -P)
-# Minutes a <path>.claim is honoured: a run that never got to release it is treated as gone past this.
+# Minutes a <path>.claim is honoured: a run that is still working refreshes it, so past this it is gone.
 CLAIM_LEASE=30
 
 SAFE=$(printf '%s' "$REPO" | tr -c 'A-Za-z0-9._-' '-' | sed -E 's/^-+//; s/-+$//')

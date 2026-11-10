@@ -149,7 +149,10 @@ Write the full `PLAN` verbatim to `<folder>/plan.md`. Confirm it exists before t
   ```
   git -C "$WORKTREE_DIR" add -A
   git -C "$WORKTREE_DIR" commit --no-verify -m "phase <N>"
+  touch "$WORKTREE_DIR.claim" 2>/dev/null || true
   ```
+  The touch keeps a live run's claim fresh, so a run that is still working is not mistaken for an
+  interrupted one.
 
 ### 5.2 Review
 
@@ -162,8 +165,8 @@ Delegate the round review to the `subagents/review-diff` agent.
 ### 5.3 Decide
 
 Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
-- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Create or update the PR. Base: `$BASE_BRANCH`. Context: `<folder>/implementation.md`. Return your output contract in the conversation." Report the PR URL; list Nits as non-blocking. Then release the run's claim on the worktree — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — so a follow-up run can continue here at once.
-- **Round 5**: stop, no PR. Report the outstanding Must Fix / Maybe Fix; list the Nits as non-blocking. Release the same claim: `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true`.
+- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Create or update the PR. Base: `$BASE_BRANCH`. Context: `<folder>/implementation.md`. Return your output contract in the conversation." Report the PR URL; list Nits as non-blocking.
+- **Round 5**: stop, no PR. Report the outstanding Must Fix / Maybe Fix; list the Nits as non-blocking.
 - **Otherwise**: increment N and loop.
 
 ## 6. Close out PR review comments
@@ -187,7 +190,7 @@ Run after the PR exists, or when the user hands you comments to close.
    ```
 
    Then decide each unresolved comment: correct (needs a code fix) vs. question/incorrect. Record a one-sentence reason per comment.
-2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason from the `subagents/code` agent's report (what changed, or why no change).
+2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason from the `subagents/code` agent's report (what changed, or why no change). This is another long write phase, so after it returns run `touch "$WORKTREE_DIR.claim" 2>/dev/null || true` — the claim must stay fresh until the run's single release.
 3. **Close out** — spawn `subagents/pr` with the list:
    ```
    PR: <the PR number or URL from 5.3, or from the comments the user handed you>
@@ -199,7 +202,7 @@ Run after the PR exists, or when the user hands you comments to close.
      status: declined
      reason: <why no change>
    ```
-4. **Report** per comment: decision + reason, and confirm each `solved` thread is resolved. Then release the run's claim on the worktree: `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true`.
+4. **Report** per comment: decision + reason, and confirm each `solved` thread is resolved.
 
 ## 7. Acknowledge the mention
 
@@ -217,6 +220,10 @@ the report at the end of §6 — so the 👍 means "run delivered".
   PR body or an artifact. The swap is idempotent, so a later terminal point re-spawns it — never swap the
   reaction yourself.
 - Stopping at the step-3 plan question is not a terminal point: no acknowledgement there.
+
+Then release the run's claim on the worktree — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — whether
+or not there was a mention to acknowledge. This is the run's only release, so the tree stays claimed through
+§6's edits, and a follow-up run can continue here at once.
 
 ## 8. Rules
 
