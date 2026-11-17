@@ -26,7 +26,7 @@ the work in the worktree.
   |---|---|---|
   | pull request | `https://github.com/goravel/goravel/pull/42` | the PR's own branch: `headRefName`, or `pr-42-<TS>` when it comes from a fork |
   | issue | `https://github.com/goravel/goravel/issues/42` | `issue-42-<TS>`, or the named branch |
-  | repository | `https://github.com/goravel/goravel`, `…/goravel.git`, `…/goravel/`, `git@github.com:goravel/goravel.git`, `goravel/goravel` | `run-<TS>` from `origin/master`, or the named branch |
+  | repository | `https://github.com/goravel/goravel`, `…/goravel.git`, `…/goravel/`, `git@github.com:goravel/goravel.git`, `goravel/goravel` | `run-<TS>` from the repository's default branch (`origin/master` or `origin/main`), or the named branch |
 
   Any comment anchor is fine — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — the script
   stops at the number. The input carries exactly one `LINK=<link>`, and a bare `owner/repo` is accepted
@@ -117,14 +117,10 @@ else
     || setup_fail "unusable branch name: $BRANCH"
 fi
 
-# A named branch, or a bare repository's mainline, is settled here; only an issue link is left to resolve.
+# A named branch is the only base settled here. A repository or issue link names no branch and leaves
+# BASE_BRANCH blank: it resolves the repository's default branch once the checkout has been fetched below.
 if [ -n "$BRANCH" ]; then
   BASE_BRANCH="$BRANCH"
-elif [ "$KIND" = repo ]; then
-  # A bare repository names no branch: the run bases on master but starts its own run branch, so it
-  # never moves the shared refs/heads/master. Fixed, not looked up — a repository without origin/master
-  # fails below instead of silently picking another branch.
-  BASE_BRANCH=master
 fi
 
 # The checkout root is the current directory; the worktree root is always /tmp, so a run never
@@ -194,11 +190,15 @@ fi
 # branch so an `origin/<base>...HEAD` diff resolves, moving no local branch.
 git -C "$REPO_DIR" fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*' >/dev/null 2>&1 || true
 
-# A named branch and a bare repository's mainline are settled above; an issue link alone is left, and it
-# resolves the default branch of the checkout it has just fetched.
+# A named branch is settled above. An issue or repository link resolves the default branch of the checkout
+# it has just fetched, so a repository on master and one on main both work.
 if [ "$KIND" != pull ] && [ -z "$BASE_BRANCH" ]; then
   BASE_BRANCH=$(git -C "$REPO_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
-  [ -z "$BASE_BRANCH" ] && BASE_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null)
+  # origin/HEAD is a memory, not a fact: a checkout made before a rename still names the old branch, so it
+  # counts only while an origin ref actually carries it. Otherwise GitHub is asked for the default branch.
+  if [ -z "$BASE_BRANCH" ] || ! git -C "$REPO_DIR" show-ref --verify --quiet "refs/remotes/origin/$BASE_BRANCH"; then
+    BASE_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null)
+  fi
   [ -n "$BASE_BRANCH" ] || setup_fail "cannot resolve the default branch of $REPO"
 fi
 
@@ -224,8 +224,8 @@ branch_name() {
   case "$KIND" in
     pull) if [ -n "$HEAD_BRANCH" ]; then printf '%s' "$HEAD_BRANCH"; else printf 'pr-%s-%s' "$NUM" "$1"; fi ;;
     issues) printf 'issue-%s-%s' "$NUM" "$1" ;;
-    # A repository link gets a fresh run branch: attaching master would move the shared
-    # refs/heads/master, and the next request would inherit this run's commits.
+    # A repository link gets a fresh run branch: attaching the default branch would move the shared
+    # refs/heads/<default>, and the next request would inherit this run's commits.
     *) printf 'run-%s' "$1" ;;
   esac
 }
@@ -349,7 +349,7 @@ else
   BASE_REF="origin/$BASE_BRANCH"
   if ! git -C "$REPO_DIR" rev-parse --verify --quiet "$BASE_REF" >/dev/null; then
     # A named branch that exists only here is still attachable: its commits are the caller's. A bare
-    # repository link has no such fallback — its mainline has to come from origin.
+    # repository link has no such fallback — its default branch has to come from origin.
     if [ -z "$BRANCH" ] || ! git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$BASE_BRANCH"; then
       setup_fail "missing $BASE_REF in $REPO_DIR"
     fi
@@ -401,14 +401,17 @@ reused, nothing on stderr either.
   earlier run's work and is reused where it stands, and one that has diverged fails the run — a push from
   here would not be a fast-forward. A same-repository PR keeps `headRefName`, so the run's push updates it;
   a fork PR keeps `pr-<n>-<TS>`, which the write flows refuse; an issue link keeps `issue-<n>-<TS>`.
-- **A repository link starts on a fresh `run-<TS>` from `origin/master`.** It never attaches `master`, so
-  the shared `refs/heads/master` stays at origin and the next run starts from the latest origin instead of
-  inheriting this run's commits; those stay on their own `run-<TS>` branch, which `goravel-pr` pushes as
-  the PR head. `master` is fixed — a repository without `origin/master` fails instead of falling back. A
-  named `BRANCH` replaces it for an issue or repository link, built from `origin/<branch>` or, when only
-  the local branch exists, attached as it stands. Nothing deletes a `run-<TS>` branch, so they accumulate
-  by design.
-- **Only a pull-request branch is compared against its base.** A `master` or named branch is never
+- **A repository link starts on a fresh `run-<TS>` from the repository's default branch.** The default is
+  read, never assumed: `origin/HEAD` while it names an `origin/*` ref the checkout has, else
+  `gh repo view --json defaultBranchRef`, so `master` and `main` both work. It never attaches that branch,
+  so the shared `refs/heads/<default>` stays at origin and the next run starts from the latest origin
+  instead of inheriting this run's commits; those stay on their own `run-<TS>` branch, which `goravel-pr`
+  pushes as the PR head. A repository whose default branch cannot be resolved fails instead of falling
+  back to `master`. A named `BRANCH` replaces it for an issue or repository link, built from
+  `origin/<branch>` or, when only the local branch exists, attached as it stands. Nothing deletes a
+  `run-<TS>` branch, so they accumulate by design.
+- **Only a pull-request branch is compared against its base.** A default or named branch is never
   fast-forwarded, checked for ancestry, or reset — its commits belong to the caller.
 - **`gh` answers two things:** the branch, base, and cross-repository flag of a pull request link, and the
-  default branch when `origin/HEAD` is missing. A PR link fails rather than guessing a branch.
+  default branch when `origin/HEAD` is missing or names a branch no `origin/*` ref carries. A PR link fails
+  rather than guessing a branch.
