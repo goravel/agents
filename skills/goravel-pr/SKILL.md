@@ -99,14 +99,14 @@ facades.Route().Middleware(middleware.Jwt()).Get("users", userController.Index)
 1. **Detect branch**
    - Run `git branch --show-current` → `branch`.
    - If empty, stop and report failure.
-   - If the branch is the default (`master` / `main`), create a feature branch first: `git checkout -b feat/<short-description>`, then set `branch` to that name.
+   - If the branch is the repository's default branch (`master` or `main`), create a feature branch first: `git checkout -b feat/<short-description>`, then set `branch` to that name.
 
 2. **Detect issue number**
    - Only two branch shapes carry an issue: `issue-<n>-<TS>` (a run started from an issue link) and a head
      branch shaped `<type>/<n>-<description>`, `<n>` 1–5 digits at the start of the last segment:
      `feat/1234-description` → `1234`.
-   - Never read digits out of `pr-<n>-<TS>`: there they are a pull request. A `master` branch carries no
-     digits, and `feat/<short-description>` carries none by design.
+   - Never read digits out of `pr-<n>-<TS>`: there they are a pull request. A default branch (`master` or
+     `main`) carries no digits, and `feat/<short-description>` carries none by design.
    - Found → `closing_line = Closes https://github.com/goravel/goravel/issues/<number>`; otherwise omit it.
 
 3. **Detect existing PR**

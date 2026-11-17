@@ -90,21 +90,27 @@ Spawn `subagents/setup` foreground and wait, passing `LINK` and, when the reques
 
 - `BRANCH` stays blank unless the user's own words name a branch — never guess one from `origin` or from
   the worktree, whose branch belongs to the last run. For a repository link, blank starts the run on a
-  fresh `run-<TS>` branch from `origin/master`; a pull request keeps its own branch and an issue link gets
-  `issue-<n>-<TS>`. The run's commits never move the shared checkout's `master` — setup only fast-forwards
-  it to `origin/master` — and `goravel-pr` pushes `run-<TS>` as the pull request head.
+  fresh `run-<TS>` branch from the repository's default branch — `master` or `main`, whichever the
+  repository has; a pull request keeps its own branch and an issue link gets `issue-<n>-<TS>`. The run's
+  commits never move the shared checkout's default branch — setup only fast-forwards it to
+  `origin/<default>` — and `goravel-pr` pushes `run-<TS>` as the pull request head.
 - A named `BRANCH` is the branch this run commits on, and `goravel-pr` pushes it as it is. The pull request
-  still targets `BASE_BRANCH`, the detected default, so `BRANCH=release-2.0` deliberately opens a
-  `release-2.0 → master` pull request. Say so when the change belongs on that branch rather than the default.
+  still targets `BASE_BRANCH`, the detected default, so `BRANCH=release-2.0` on a `main` repository
+  deliberately opens a `release-2.0 → main` pull request. Say so when the change belongs on that branch
+  rather than the default.
 
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build the path
   yourself.
-- Resolve the base branch from the worktree when the prompt did not, then set the commit identity:
+- Resolve the base branch from the worktree when the prompt did not, then set the commit identity. The
+  same guard setup uses applies here: `origin/HEAD` counts only while an `origin/*` ref carries it, so a
+  stale symref cannot record a base the worktree was not built from.
   ```
   [ -n "$BASE_BRANCH" ] || {
-    BASE_BRANCH=$(git -C "$WORKTREE_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
-    [ -z "$BASE_BRANCH" ] && BASE_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name)
+    BASE_BRANCH=$(git -C "$WORKTREE_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
+    if [ -z "$BASE_BRANCH" ] || ! git -C "$WORKTREE_DIR" show-ref --verify --quiet "refs/remotes/origin/$BASE_BRANCH"; then
+      BASE_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name)
+    fi
   }
   git -C "$WORKTREE_DIR" config user.email >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.email "ship-agent@localhost"
   git -C "$WORKTREE_DIR" config user.name  >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.name  "ship agent"
