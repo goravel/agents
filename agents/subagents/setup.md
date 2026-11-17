@@ -193,9 +193,12 @@ git -C "$REPO_DIR" fetch --no-tags origin '+refs/heads/*:refs/remotes/origin/*' 
 # A named branch is settled above. An issue or repository link resolves the default branch of the checkout
 # it has just fetched, so a repository on master and one on main both work.
 if [ "$KIND" != pull ] && [ -z "$BASE_BRANCH" ]; then
+  # origin/HEAD is a memory, not a fact: ask the remote to refresh it, so a rename that left the old branch
+  # in place is followed too. A checkout that cannot reach the remote keeps what it has.
+  git -C "$REPO_DIR" remote set-head origin --auto >/dev/null 2>&1 || true
   BASE_BRANCH=$(git -C "$REPO_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
-  # origin/HEAD is a memory, not a fact: a checkout made before a rename still names the old branch, so it
-  # counts only while an origin ref actually carries it. Otherwise GitHub is asked for the default branch.
+  # A symref can still name a branch no origin ref carries, so it counts only while one does; otherwise
+  # GitHub is asked for the default branch.
   if [ -z "$BASE_BRANCH" ] || ! git -C "$REPO_DIR" show-ref --verify --quiet "refs/remotes/origin/$BASE_BRANCH"; then
     BASE_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name 2>/dev/null)
   fi
@@ -402,14 +405,15 @@ reused, nothing on stderr either.
   here would not be a fast-forward. A same-repository PR keeps `headRefName`, so the run's push updates it;
   a fork PR keeps `pr-<n>-<TS>`, which the write flows refuse; an issue link keeps `issue-<n>-<TS>`.
 - **A repository link starts on a fresh `run-<TS>` from the repository's default branch.** The default is
-  read, never assumed: `origin/HEAD` while it names an `origin/*` ref the checkout has, else
-  `gh repo view --json defaultBranchRef`, so `master` and `main` both work. It never attaches that branch,
-  so the shared `refs/heads/<default>` stays at origin and the next run starts from the latest origin
-  instead of inheriting this run's commits; those stay on their own `run-<TS>` branch, which `goravel-pr`
-  pushes as the PR head. A repository whose default branch cannot be resolved fails instead of falling
-  back to `master`. A named `BRANCH` replaces it for an issue or repository link, built from
-  `origin/<branch>` or, when only the local branch exists, attached as it stands. Nothing deletes a
-  `run-<TS>` branch, so they accumulate by design.
+  read, never assumed: `remote set-head origin --auto` refreshes `origin/HEAD` from the remote, and that
+  symref counts while it names an `origin/*` ref the checkout has — otherwise
+  `gh repo view --json defaultBranchRef` is asked, so `master` and `main` both work. It never attaches
+  that branch, so the shared `refs/heads/<default>` stays at origin and the next run starts from the
+  latest origin instead of inheriting this run's commits; those stay on their own `run-<TS>` branch,
+  which `goravel-pr` pushes as the PR head. A repository whose default branch cannot be resolved fails
+  instead of falling back to `master`. A named `BRANCH` replaces it for an issue or repository link,
+  built from `origin/<branch>` or, when only the local branch exists, attached as it stands. Nothing
+  deletes a `run-<TS>` branch, so they accumulate by design.
 - **Only a pull-request branch is compared against its base.** A default or named branch is never
   fast-forwarded, checked for ancestry, or reset — its commits belong to the caller.
 - **`gh` answers two things:** the branch, base, and cross-repository flag of a pull request link, and the

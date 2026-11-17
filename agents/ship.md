@@ -102,11 +102,15 @@ Spawn `subagents/setup` foreground and wait, passing `LINK` and, when the reques
 - The reply is one line: the absolute worktree path, wherever it landed. Keep it as `WORKTREE_DIR` and
   use it as given. A reply starting `setup: failed` → report that line and stop; never build the path
   yourself.
-- Resolve the base branch from the worktree when the prompt did not, then set the commit identity:
+- Resolve the base branch from the worktree when the prompt did not, then set the commit identity. The
+  same guard setup uses applies here: `origin/HEAD` counts only while an `origin/*` ref carries it, so a
+  stale symref cannot record a base the worktree was not built from.
   ```
   [ -n "$BASE_BRANCH" ] || {
-    BASE_BRANCH=$(git -C "$WORKTREE_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD | sed 's@^origin/@@')
-    [ -z "$BASE_BRANCH" ] && BASE_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name)
+    BASE_BRANCH=$(git -C "$WORKTREE_DIR" symbolic-ref --quiet --short refs/remotes/origin/HEAD 2>/dev/null | sed 's@^origin/@@')
+    if [ -z "$BASE_BRANCH" ] || ! git -C "$WORKTREE_DIR" show-ref --verify --quiet "refs/remotes/origin/$BASE_BRANCH"; then
+      BASE_BRANCH=$(gh repo view "$REPO" --json defaultBranchRef --jq .defaultBranchRef.name)
+    fi
   }
   git -C "$WORKTREE_DIR" config user.email >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.email "ship-agent@localhost"
   git -C "$WORKTREE_DIR" config user.name  >/dev/null 2>&1 || git -C "$WORKTREE_DIR" config user.name  "ship agent"
