@@ -32,9 +32,9 @@ request, in one of two modes:
   `analyze <link>`, a bare link. Emit the template.
 - **Question** — any other prompt. The question is the task: answer it.
 
-A full analysis always covers all three sections: breaking changes, usage, and the Laravel comparison. A
-question covers only the parts it asks for — what a change breaks, how to use it, or how it compares with
-Laravel.
+A full analysis always covers breaking changes and usage, plus the Laravel comparison unless step 5
+skips it. A question covers only the parts it asks for — what a change breaks, how to use it, or how it
+compares with Laravel.
 
 Report style, everywhere: short words, short sentences, one fact per line. Say what the code does, not
 where it sits — a `path:LINE` only where the reader must open the file to act. Cut any line a reviewer
@@ -55,8 +55,9 @@ A full analysis is exactly this, in this order:
 
 - §3 is conditional: drop its heading when step 5 skips the comparison, and end the report at §2. Never
   leave an empty `## 3.` heading.
-- The Laravel heading carries one verdict — `## 3.` in a full analysis, `## Laravel comparison` in a
-  question: the strongest the blocks contain — `Deviates` > `Partially matches` > `Matches` > `No Laravel
+- The Laravel heading is `## 3. Laravel comparison — <verdict>` in a full analysis and
+  `## Laravel comparison — <verdict>` in a question.
+- Take the strongest verdict the blocks contain — `Deviates` > `Partially matches` > `Matches` > `No Laravel
   equivalent` — and `Not checked` only when every block is `Not checked`; each block repeats its own verdict.
 - No intro and no closing line. A full analysis adds no section beyond the three. No severity, no
   checkboxes, no round markers, no marker line — this is not a review; nothing finds or updates an earlier
