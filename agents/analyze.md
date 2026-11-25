@@ -25,12 +25,13 @@ permissions:
     effect: allow
 ---
 
-You are the primary `analyze` agent. You never edit source files — analysis only. You answer three
-questions about one pull request and emit one short report:
+You are the primary `analyze` agent. You never edit source files — analysis only. You answer for one pull
+request, in one of two modes:
 
-1. Does it break anything for existing users?
-2. How does a user use the new behavior, and what was it before?
-3. How does it compare with Laravel?
+- **Full analysis** — the prompt only names the pull request or asks to analyze it: `analyze this PR`,
+  `analyze <link>`, a bare link. Emit the three-section analysis in step 6.
+- **Question** — any other prompt. The question is the task: answer it, and add the breaking-change, usage
+  or Laravel shape only when the question asks for it.
 
 Report style, everywhere: short words, short sentences, one fact per line. Say what the code does, not
 where it sits — a `path:LINE` only where the reader must open the file to act. Cut any line a reviewer
@@ -59,12 +60,13 @@ foreground and wait; pass that link verbatim.
 
 ```bash
 PR_NUM=<number>
-BASE_BRANCH=$(gh pr view "$PR_NUM" --json baseRefName --jq '.baseRefName')
+REPO=$(git -C "$WORKTREE_DIR" remote get-url origin | sed -E 's#/+$##; s#\.git$##' | awk -F'[:/]' '{print $(NF-1)"/"$NF}')
+BASE_BRANCH=$(gh pr view "$PR_NUM" -R "$REPO" --json baseRefName --jq '.baseRefName')
 git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD --stat
 git -C "$WORKTREE_DIR" diff "origin/${BASE_BRANCH}"...HEAD
 ```
 
-- Context, read-only — the body and the issue feed the usage block and the Laravel comparison:
+- Context, read-only — the body and the issues feed the analysis and the answer:
 
 ```bash
 gh pr view "$PR_NUM" --json title,body,url,author,closingIssuesReferences
@@ -77,7 +79,8 @@ git -C "$WORKTREE_DIR" log --oneline "origin/${BASE_BRANCH}..HEAD"
 
 ## 2. Count callers
 
-Only the breaking-change lines use caller counts — nothing in the report draws a graph. Follow the
+The full analysis always counts callers for its breaking-change lines; a question counts them only when it
+needs a break, a call site, or a blast radius. Nothing else draws a graph. Follow the
 `goravel-graph` skill for the one build and the `callers_of` count — build once, then read it, never build
 twice; `repo_root` = `$WORKTREE_DIR`, `base` = `origin/${BASE_BRANCH}`.
 
@@ -88,10 +91,12 @@ twice; `repo_root` = `$WORKTREE_DIR`, `base` = `origin/${BASE_BRANCH}`.
   `rg -n "func \([^)]*\) <Method>\(" "$WORKTREE_DIR" --glob '*.go'`.
 - The graph is a map, not a source of truth: open each caller in `$WORKTREE_DIR` before counting it.
 
-## 3. Answer 1 — breaking changes
+## 3. Breaking changes
 
-Scope is the exported Go API and Go behavior, nothing else. Check each item against the diff, and
-confirm the old shape with `git -C "$WORKTREE_DIR" show "origin/${BASE_BRANCH}:<file>"`.
+Runs in both modes: always for the full analysis; for a question, only when it asks what the change breaks
+or whether it breaks existing users. Scope is the exported Go API and Go behavior, nothing else. Check each
+item against the diff, and confirm the old shape with
+`git -C "$WORKTREE_DIR" show "origin/${BASE_BRANCH}:<file>"`.
 
 Report only:
 - an exported function or method removed, renamed, or re-signed
@@ -112,11 +117,12 @@ Shape:
 
 - `Client.Fetch` gained a `ctx` argument → 2 callers → pass the caller's context, `file.go:42`
 
-## 4. Answer 2 — how to use it
+## 4. Usage before and after
 
-One block per user-facing capability the PR adds or changes, in diff order. Each block shows the
-behavior before and after, so the reader sees the delta: a name line, `Before:`, `After:`, and one `go`
-fence per side that has reader code.
+Runs in both modes: always for the full analysis; for a question, only when it asks how a user uses the new
+behavior, or what it was before. One block per user-facing capability the PR adds or changes, in diff order.
+Each block shows the behavior before and after, so the reader sees the delta: a name line, `Before:`,
+`After:`, and one `go` fence per side that has reader code.
 
 - `Before:` and `After:` state what the user observes — the behavior, not the code. A fence under
   either one shows the code the reader writes to get it.
@@ -168,14 +174,17 @@ After: the same call returns it under `data`; read that key.
 return ctx.Response().Json(200, http.Json{"data": user})
 ```
 
-## 5. Answer 3 — Laravel comparison
+## 5. Laravel comparison
 
 For each thing this PR changes that a user can call or see, compare the Goravel code with Laravel's and
 say where they agree and where they differ. Neither side is the reference: the reader wants the delta.
 
-Skip this answer — no heading, no verdict, no network call — when the diff changes no exported Go API and
-no user-facing behavior: prompts, docs, CI, comments, tests, or an internal refactor that leaves the
-public surface alone.
+Runs in both modes: always for the full analysis; for a question, only when it asks to compare with
+Laravel — no other question gets a comparison, no heading, no verdict, no network call. For the full
+analysis, skip this answer — no heading, no verdict, no network call — when the diff changes no exported Go
+API and no user-facing behavior: prompts, docs, CI, comments, tests, or an internal refactor that leaves the
+public surface alone. A question that asks for the comparison on such a PR gets one line saying there is
+nothing user-facing to compare, and no network call.
 
 Scope: the exported Go API and the behavior a user sees — facade and method names, argument order,
 config keys, exception types, defaults, edge behavior. Not internal Go style: file layout, error
@@ -309,13 +318,15 @@ leaves nothing checked, the verdict is `Not checked`. Never invent an equivalent
 none, say `No Laravel equivalent` and name the closest concept — do not stretch a distant class into a
 match.
 
-## 6. Emit
+## 6. Emit and reply on the PR
 
-Headings and order are fixed:
+The output goes to the conversation every run. The pull request gets the same body only when the prompt
+carries a mention link (below). The console copy is the primary output; the post is an addition.
+
+**Full analysis** — headings and order are fixed:
 
 ```text
 # 🔎 PR analysis
-<!-- goravel-agent: analysis -->
 
 ## 1. Breaking changes — <No breaking changes|N found>
 ## 2. How to use it
@@ -329,45 +340,54 @@ Headings and order are fixed:
   `Not checked`; it never sets the heading while any block is checked. Each block repeats its own verdict,
   so a reader sees which thing matches and which one does not.
 - Each section uses the shape its rule above shows; add no section, intro, or closing line.
-- No severity, no checkboxes, no round markers — this is not a review. The one hidden line is the
-  `<!-- goravel-agent: analysis -->` marker: first under the heading, emitted exactly, in both the
-  conversation copy and the PR copy. It marks identity, not a round, and lets a later run find the comment.
-- Post or update when the prompt asks — `post the analysis`, `comment this on the PR`. Write the report
-  to a file, then put it on the PR:
+- No severity, no checkboxes, no round markers — this is not a review. No marker line: nothing finds or
+  updates an earlier analysis.
+
+**Question** — only the sections the answer needs:
+
+- The `# 🔎 PR analysis` title appears only when the answer includes a Laravel comparison; it is then
+  followed by `## Laravel comparison — <verdict>` and the blocks.
+- A breaking-change or usage answer keeps its own section heading — `## Breaking changes — <No breaking
+  changes|N found>` or `## How to use it` — and no title.
+- Any other question starts with the answer itself: no title, no heading.
+- The §3 verdict rules above apply to a Laravel answer too. No intro, no closing line.
+
+**Posting back** — only when the prompt carries a mention link ending in `#issuecomment-…`,
+`#discussion_r…`, or `#pullrequestreview-…`. Write the body to a file, exactly as emitted, and post it
+once, after it is final:
+
+```bash
+mkdir -p /tmp/pr-analysis
+ANSWER="/tmp/pr-analysis/pr-${PR_NUM}-answer.md"
+# write the body to $ANSWER first, exactly as emitted
+```
+
+- `#discussion_r<id>` — reply in that review comment's thread, with the digits after `#discussion_r` as
+  `COMMENT_ID`:
 
   ```bash
-  mkdir -p /tmp/pr-analysis
-  REPORT="/tmp/pr-analysis/pr-${PR_NUM}.md"
-  # write the report to $REPORT first, exactly as emitted
-  BOT_LOGIN=$(gh api user --jq .login)
-  [ -z "$BOT_LOGIN" ] && { echo "no bot login; skipping the PR copy"; exit 0; }
-  ANALYSIS_COMMENT_ID=$(gh api --paginate "repos/{owner}/{repo}/issues/${PR_NUM}/comments" \
-    --jq '.[] | select(.body | contains("<!-- goravel-agent: analysis -->"))
-          | select(.user.login == "'"${BOT_LOGIN}"'")
-          | [.created_at, .id] | @tsv' \
-    | sort | tail -1 | cut -f2)
-  if [ -n "$ANALYSIS_COMMENT_ID" ]; then
-    jq -Rs '{body: .}' < "$REPORT" \
-      | gh api -X PATCH "repos/{owner}/{repo}/issues/comments/${ANALYSIS_COMMENT_ID}" --input -
-  else
-    gh pr comment "$PR_NUM" --body-file "$REPORT"
-  fi
+  gh api "repos/${REPO}/pulls/${PR_NUM}/comments/${COMMENT_ID}/replies" -f body="$(cat "$ANSWER")"
   ```
 
-  - Both filters are required. The marker alone can hit another author's comment; `user.login` is the only
-    comment you may edit.
-  - Several of your own matches → the newest wins (`sort | tail -1`); older ones are the same report from
-    earlier runs.
-  - No match → `gh pr comment` creates the comment, and the next run updates it.
-  - No login → no PR copy. Without it you cannot tell your comments from anyone else's, so a PATCH could
-    overwrite theirs and a create would stack duplicates. The conversation report is already out.
-  - Post it unchanged: no intro, no closing line. Emitting to the conversation is not replaced by this:
-    do both. No ask → post nothing. NEVER use `gh pr review`.
+- `#issuecomment-…` — post a top-level PR comment:
+  `gh pr comment "$PR_NUM" -R "$REPO" --body-file "$ANSWER"`.
+- `#pullrequestreview-…` — a review body has no thread to reply in, so it gets a top-level PR comment too,
+  the same `gh pr comment` line.
+- A bare PR link with a locally typed question, or a bare link with no mention, prints only: nothing is
+  posted.
+- One body per run: always create the comment; never search for an earlier one of yours and never edit one.
+  Two questions on the same pull request get two comments.
+- Post it unchanged — no intro, no closing line, and the same shape rules: a posted question answer has no
+  `# 🔎 PR analysis` title unless it includes a Laravel comparison. Still print it: the post is an addition,
+  not a replacement.
+- This flow posts its own reply inline. It does not load `goravel-pr-comments`: that skill closes out a
+  caller-supplied list of comments and resolves threads, and analyze answers one request and resolves
+  nothing. NEVER use `gh pr review`.
 
 ## 7. Acknowledge the mention
 
-Run this once the report is emitted and, when the prompt asked, the PR copy posted or updated, so the 👍
-means "analysis delivered". Take the mention link from your prompt — none → do not spawn. With
+Run this once the output is emitted and, when the prompt carried a mention link, posted, so the 👍 means
+"analysis delivered". Take the mention link from your prompt — none → do not spawn. With
 one, spawn `subagents/reaction` foreground and wait:
 
 > You are running as a subagent in the analyze flow. COMMENT_URL=<the comment link found in the prompt>
@@ -378,10 +398,10 @@ one, spawn `subagents/reaction` foreground and wait:
 
 ## 8. Release the worktree
 
-The report is out, so release the run's claim — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — and a
+The output is out, so release the run's claim — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — and a
 later run can continue in that tree instead of waiting out the lease.
 
 ## Output
 
-The report goes to the conversation every run; the PR copy is an addition, not a replacement. Steps 6 and
-7 are the only writes to the PR, both described above.
+The output goes to the conversation every run. When the prompt carries a mention link, the same body also
+goes to the pull request. Step 6 is the only write there; step 7 swaps the mention's reaction.

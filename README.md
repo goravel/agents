@@ -2,7 +2,7 @@
 
 Prompts and skills for the Goravel agent workflows.
 
-- `agents/` — primary agents: `ship` (plan → code → review → PR), `review` (review a pull request), `analyze` (breaking changes, usage, Laravel comparison).
+- `agents/` — primary agents: `ship` (plan → code → review → PR), `review` (review a pull request), `analyze` (analyzes a pull request, or answers a question about it).
 - `agents/subagents/` — workers a primary delegates to: `code`, `plan`, `setup`, `review-diff`, `review-go`, `pr`, `reaction`.
 - `skills/` — shared skills: `goravel-graph`, `goravel-planning`, `goravel-pr`, `goravel-pr-comments`, `goravel-review-template`, `goravel-testing`.
 
