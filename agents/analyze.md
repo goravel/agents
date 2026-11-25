@@ -183,6 +183,22 @@ return ctx.Response().Json(200, http.Json{
 })
 ```
 
+Shape, for a PR that changes one:
+
+JSON envelope:
+
+Before: the handler returned the record under `user`.
+
+```go
+return ctx.Response().Json(200, http.Json{"user": user})
+```
+
+After: the same call returns it under `data`; read that key.
+
+```go
+return ctx.Response().Json(200, http.Json{"data": user})
+```
+
 ## 5. Laravel comparison
 
 For each thing this PR changes that a user can call or see, compare the Goravel code with Laravel's and
@@ -274,6 +290,37 @@ facades.Route().Get("/users", userController.Index)
 Route::get('/users', [UserController::class, 'index']);
 ```
 
+Shape, `Partially matches` — pagination:
+
+`Partially matches` — `facades.Orm().Query().Paginate(1, 15, &users, &total)` ↔ `User::paginate(15)`
+(laravel/framework@<ref>) — same page of rows, different signature: the page comes first here, and the
+total comes back through a pointer, https://laravel.com/docs/pagination
+
+```go
+facades.Orm().Query().Model(&models.User{}).Paginate(1, 15, &users, &total)
+```
+
+```php
+$users = User::paginate(15);
+```
+
+Shape, `Deviates` — session store default:
+
+`Deviates` — `session.default` = `file` ↔ `config('session.driver')` = `database`
+(laravel/framework@<ref>) — same job, different key name and a different default: Laravel keeps sessions
+in the database, Goravel on disk, so the same app stores them in a different place,
+https://laravel.com/docs/session
+
+```go
+// config/session.go
+"default": "file",
+```
+
+```php
+// config/session.php
+'driver' => env('SESSION_DRIVER', 'database'),
+```
+
 Shape, `No Laravel equivalent` — Docker test database:
 
 `No Laravel equivalent` — `facades.Testing().Docker().Database()` (laravel/framework@<ref>) — no Laravel
@@ -283,6 +330,11 @@ database the app already has, https://laravel.com/docs/database-testing
 ```go
 database, err := facades.Testing().Docker().Database()
 ```
+
+Shape, `Not checked` — nothing reachable:
+
+`Not checked` — `https://laravel.com/docs/cache.md` returned 404 and the source call returned 403; no
+comparison this run.
 
 Never guess a Laravel API. A method you could not open is a difference you do not report, and if that
 leaves nothing checked, the verdict is `Not checked`. Never invent an equivalent: when Laravel has
