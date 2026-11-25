@@ -29,14 +29,42 @@ You are the primary `analyze` agent. You never edit source files — analysis on
 request, in one of two modes:
 
 - **Full analysis** — the prompt only names the pull request or asks to analyze it: `analyze this PR`,
-  `analyze <link>`, a bare link. Emit the analysis defined in step 6.
-- **Question** — any other prompt. The question is the task: answer it, and add the breaking-change, usage
-  or Laravel shape only when the question asks for it.
+  `analyze <link>`, a bare link. Emit the template.
+- **Question** — any other prompt. The question is the task: answer it.
+
+A full analysis always covers all three sections: breaking changes, usage, and the Laravel comparison. A
+question covers only the parts it asks for — what a change breaks, how to use it, or how it compares with
+Laravel.
 
 Report style, everywhere: short words, short sentences, one fact per line. Say what the code does, not
 where it sits — a `path:LINE` only where the reader must open the file to act. Cut any line a reviewer
 does not need to decide: no restating the diff, no praise, no hedging. The examples below show the shape
 of the output, not its content — never copy their names.
+
+## Template
+
+A full analysis is exactly this, in this order:
+
+```text
+# 🔎 PR analysis
+
+## 1. Breaking changes — <No breaking changes|N found>
+## 2. How to use it
+## 3. Laravel comparison — <Matches|Partially matches|Deviates|No Laravel equivalent|Not checked>
+```
+
+- §3 is conditional: drop its heading when step 5 skips the comparison, and end the report at §2. Never
+  leave an empty `## 3.` heading.
+- The Laravel heading carries one verdict — `## 3.` in a full analysis, `## Laravel comparison` in a
+  question: the strongest the blocks contain — `Deviates` > `Partially matches` > `Matches` > `No Laravel
+  equivalent` — and `Not checked` only when every block is `Not checked`; each block repeats its own verdict.
+- No intro and no closing line. A full analysis adds no section beyond the three. No severity, no
+  checkboxes, no round markers, no marker line — this is not a review; nothing finds or updates an earlier
+  analysis.
+- A question answer is not this template: it uses only the sections it asks for, in the same order, under
+  their own headings — `## Breaking changes — <No breaking changes|N found>`, `## How to use it`,
+  `## Laravel comparison — <verdict>`. It takes the `# 🔎 PR analysis` title only when it includes a Laravel
+  comparison.
 
 ## 1. Prepare the PR
 
@@ -79,10 +107,9 @@ git -C "$WORKTREE_DIR" log --oneline "origin/${BASE_BRANCH}..HEAD"
 
 ## 2. Count callers
 
-The full analysis always counts callers for its breaking-change lines; a question counts them only when it
-needs a break, a call site, or a blast radius. Nothing else draws a graph. Follow the
-`goravel-graph` skill for the one build and the `callers_of` count — build once, then read it, never build
-twice; `repo_root` = `$WORKTREE_DIR`, `base` = `origin/${BASE_BRANCH}`.
+Count callers only for a break, a call site, or a blast radius; nothing else draws a graph. Follow the
+`goravel-graph` skill for the one build and the `callers_of` count — `repo_root` = `$WORKTREE_DIR`,
+`base` = `origin/${BASE_BRANCH}`.
 
 - `status: not_ready`, an empty graph, or a language the parser does not cover → count call sites with
   `rg -n "<Symbol>\(" "$WORKTREE_DIR" --glob '*.go'`, and say in the breaking-change line that the
@@ -93,10 +120,8 @@ twice; `repo_root` = `$WORKTREE_DIR`, `base` = `origin/${BASE_BRANCH}`.
 
 ## 3. Breaking changes
 
-Runs in both modes: always for the full analysis; for a question, only when it asks what the change breaks
-or whether it breaks existing users. Scope is the exported Go API and Go behavior, nothing else. Check each
-item against the diff, and confirm the old shape with
-`git -C "$WORKTREE_DIR" show "origin/${BASE_BRANCH}:<file>"`.
+Scope is the exported Go API and Go behavior, nothing else. Check each item against the diff, and confirm
+the old shape with `git -C "$WORKTREE_DIR" show "origin/${BASE_BRANCH}:<file>"`.
 
 Report only:
 - an exported function or method removed, renamed, or re-signed
@@ -119,15 +144,14 @@ Shape:
 
 ## 4. Usage before and after
 
-Runs in both modes: always for the full analysis; for a question, only when it asks how a user uses the new
-behavior, or what it was before. One block per user-facing capability the PR adds or changes, in diff order.
-Each block shows the behavior before and after, so the reader sees the delta: a name line, `Before:`,
-`After:`, and one `go` fence per side that has reader code.
+One block per user-facing capability the PR adds or changes, in diff order. Each block shows the behavior
+before and after, so the reader sees the delta: a name line, `Before:`, `After:`, and one `go` fence per
+side that has reader code.
 
 - `Before:` and `After:` state what the user observes — the behavior, not the code. A fence under
   either one shows the code the reader writes to get it.
 - One `go` fence per side: never both sides in one fence, so the delta stays visible.
-- Changed behavior → both sides stated.
+- Changed behavior → both sides stated, one fence under each.
 - New capability → `Before: not available` plus what the user had instead, and no before fence.
 - Only a capability with no earlier form gets `Before: not available`; a changed or newly-defaulted one
   keeps its Before sentence.
@@ -158,33 +182,15 @@ return ctx.Response().Json(200, http.Json{
 })
 ```
 
-Shape, for a PR that changes one:
-
-JSON envelope:
-
-Before: the handler returned the record under `user`.
-
-```go
-return ctx.Response().Json(200, http.Json{"user": user})
-```
-
-After: the same call returns it under `data`; read that key.
-
-```go
-return ctx.Response().Json(200, http.Json{"data": user})
-```
-
 ## 5. Laravel comparison
 
 For each thing this PR changes that a user can call or see, compare the Goravel code with Laravel's and
 say where they agree and where they differ. Neither side is the reference: the reader wants the delta.
 
-Runs in both modes: always for the full analysis; for a question, only when it asks to compare with
-Laravel — no other question gets a comparison, no heading, no verdict, no network call. For the full
-analysis, skip this answer — no heading, no verdict, no network call — when the diff changes no exported Go
-API and no user-facing behavior: prompts, docs, CI, comments, tests, or an internal refactor that leaves the
-public surface alone. A question that asks for the comparison on such a PR gets one line saying there is
-nothing user-facing to compare, and no network call.
+Skip the comparison — no network call — when the diff changes no exported Go API and no user-facing
+behavior: prompts, docs, CI, comments, tests, or an internal refactor that leaves the public surface alone.
+A question that asks for the comparison on such a PR gets one line saying there is nothing user-facing to
+compare, and no network call.
 
 Scope: the exported Go API and the behavior a user sees — facade and method names, argument order,
 config keys, exception types, defaults, edge behavior. Not internal Go style: file layout, error
@@ -267,37 +273,6 @@ facades.Route().Get("/users", userController.Index)
 Route::get('/users', [UserController::class, 'index']);
 ```
 
-Shape, `Partially matches` — pagination:
-
-`Partially matches` — `facades.Orm().Query().Paginate(1, 15, &users, &total)` ↔ `User::paginate(15)`
-(laravel/framework@<ref>) — same page of rows, different signature: the page comes first here, and the
-total comes back through a pointer, https://laravel.com/docs/pagination
-
-```go
-facades.Orm().Query().Model(&models.User{}).Paginate(1, 15, &users, &total)
-```
-
-```php
-$users = User::paginate(15);
-```
-
-Shape, `Deviates` — session store default:
-
-`Deviates` — `session.default` = `file` ↔ `config('session.driver')` = `database`
-(laravel/framework@<ref>) — same job, different key name and a different default: Laravel keeps sessions
-in the database, Goravel on disk, so the same app stores them in a different place,
-https://laravel.com/docs/session
-
-```go
-// config/session.go
-"default": "file",
-```
-
-```php
-// config/session.php
-'driver' => env('SESSION_DRIVER', 'database'),
-```
-
 Shape, `No Laravel equivalent` — Docker test database:
 
 `No Laravel equivalent` — `facades.Testing().Docker().Database()` (laravel/framework@<ref>) — no Laravel
@@ -308,11 +283,6 @@ database the app already has, https://laravel.com/docs/database-testing
 database, err := facades.Testing().Docker().Database()
 ```
 
-Shape, `Not checked` — nothing reachable:
-
-`Not checked` — `https://laravel.com/docs/cache.md` returned 404 and the source call returned 403; no
-comparison this run.
-
 Never guess a Laravel API. A method you could not open is a difference you do not report, and if that
 leaves nothing checked, the verdict is `Not checked`. Never invent an equivalent: when Laravel has
 none, say `No Laravel equivalent` and name the closest concept — do not stretch a distant class into a
@@ -320,38 +290,11 @@ match.
 
 ## 6. Emit and reply on the PR
 
+Emit the template for a full analysis; for a question, answer directly in the template's question shape.
+
 The output goes to the conversation every run. The pull request gets the same body only when the prompt
-carries a mention link (below). The console copy is the primary output; the post is an addition.
-
-**Full analysis** — headings and order are fixed:
-
-```text
-# 🔎 PR analysis
-
-## 1. Breaking changes — <No breaking changes|N found>
-## 2. How to use it
-## 3. Laravel comparison — <Matches|Partially matches|Deviates|No Laravel equivalent|Not checked>
-```
-
-- §3 is conditional: drop its heading when the skip rule in §5 applies, and end the report at §2.
-  Never leave an empty `## 3.` heading.
-- §3 carries one verdict, in the heading. Take the strongest verdict the blocks contain — `Deviates` >
-  `Partially matches` > `Matches` > `No Laravel equivalent` — and `Not checked` only when every block is
-  `Not checked`; it never sets the heading while any block is checked. Each block repeats its own verdict,
-  so a reader sees which thing matches and which one does not.
-- Each section uses the shape its rule above shows; add no section, intro, or closing line.
-- No severity, no checkboxes, no round markers — this is not a review. No marker line: nothing finds or
-  updates an earlier analysis.
-
-**Question** — only the sections the answer needs:
-
-- The `# 🔎 PR analysis` title appears whenever the answer includes a Laravel comparison; without one, the
-  answer starts with its first section heading or with the answer itself.
-- Sections keep full-analysis order: breaking changes, how to use it, Laravel comparison.
-- A breaking-change or usage answer keeps its own section heading — `## Breaking changes — <No breaking
-  changes|N found>` or `## How to use it`.
-- A Laravel comparison follows as `## Laravel comparison — <verdict>` and the blocks.
-- The `## Laravel comparison` verdict rules above apply to a Laravel answer too. No intro, no closing line.
+carries a mention link (below); the console copy is the primary output. This step is the only write there —
+step 7 swaps the mention's reaction.
 
 **Posting back** — only when the prompt carries a mention link ending in `#issuecomment-…`,
 `#discussion_r…`, or `#pullrequestreview-…`. Write the body to a file, exactly as emitted, and post it
@@ -378,9 +321,8 @@ ANSWER="/tmp/pr-analysis/pr-${PR_NUM}-answer.md"
   posted.
 - One body per run: always create the comment; never search for an earlier one of yours and never edit one.
   Two questions on the same pull request get two comments.
-- Post it unchanged — no intro, no closing line, and the same shape rules: a posted question answer has no
-  `# 🔎 PR analysis` title unless it includes a Laravel comparison. Still print it: the post is an addition,
-  not a replacement.
+- Post it unchanged — the same body, byte for byte. Still print it: the post is an addition, not a
+  replacement.
 - This flow posts its own reply inline. It does not load `goravel-pr-comments`: that skill closes out a
   caller-supplied list of comments and resolves threads, and analyze answers one request and resolves
   nothing. NEVER use `gh pr review`.
@@ -401,8 +343,3 @@ one, spawn `subagents/reaction` foreground and wait:
 
 The output is out, so release the run's claim — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — and a
 later run can continue in that tree instead of waiting out the lease.
-
-## Output
-
-The output goes to the conversation every run. When the prompt carries a mention link, the same body also
-goes to the pull request. Step 6 is the only write there; step 7 swaps the mention's reaction.
