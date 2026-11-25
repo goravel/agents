@@ -41,6 +41,7 @@ context only, and none of it gates a run. One thing it does decide is posting: p
 user's own words ask for this review to be published — `post this review on the PR`, `post it`,
 `post the round`, `comment this on the PR`, `leave the review on the PR` (phase 6). Asking for a
 review is not asking for a post: `review this PR`, a PR mention, or a bare link never authorizes one.
+A mention earns the 👍, which marks the console review as delivered; publishing it still needs the ask.
 The whole prompt is the user's own words. Two kinds of link can appear. The bare
 `https://github.com/<owner>/<repo>/pull/<number>` URL is the pull request; the same URL with a comment
 anchor — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention link, the one
@@ -221,9 +222,9 @@ jq -Rs '{body: .}' "$BODY_FILE" \
   Never un-tick a resolved finding; never tick a still-open one. A failed PATCH is a missed tick, not a
   reason to post the round again. Rewrite only the anchor line — never the banner, the `<!-- round: N -->`
   or `<!-- reviewed-head: … -->` markers, or the `Reviewed:` line.
-- Acknowledge the mention once the review is emitted, so the 👍 means the run delivered its review —
-  conversation copy or PR copy. Take the mention link from your prompt — none → do not spawn.
-  With one, spawn `subagents/reaction` foreground and wait:
+- Acknowledge the mention once the review is emitted, so the 👍 means the console review is delivered;
+  when the post was asked for, it also marks the PR copy. Take the mention link from your prompt — none →
+  do not spawn. With one, spawn `subagents/reaction` foreground and wait:
 
   > You are running as a subagent in the review flow. COMMENT_URL=<the mention link from the prompt>
 

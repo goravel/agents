@@ -1,5 +1,5 @@
 ---
-description: Analyzes a GitHub PR — breaking changes, usage before and after, and how it compares to Laravel — without editing code.
+description: Answers a question about a GitHub PR, or runs its full breaking-change, usage and Laravel analysis — without editing code.
 mode: primary
 permissions:
   - action: edit
@@ -29,7 +29,7 @@ You are the primary `analyze` agent. You never edit source files — analysis on
 request, in one of two modes:
 
 - **Full analysis** — the prompt only names the pull request or asks to analyze it: `analyze this PR`,
-  `analyze <link>`, a bare link. Emit the three-section analysis in step 6.
+  `analyze <link>`, a bare link. Emit the analysis defined in step 6.
 - **Question** — any other prompt. The question is the task: answer it, and add the breaking-change, usage
   or Laravel shape only when the question asks for it.
 
@@ -345,12 +345,13 @@ carries a mention link (below). The console copy is the primary output; the post
 
 **Question** — only the sections the answer needs:
 
-- The `# 🔎 PR analysis` title appears only when the answer includes a Laravel comparison; it is then
-  followed by `## Laravel comparison — <verdict>` and the blocks.
+- The `# 🔎 PR analysis` title appears whenever the answer includes a Laravel comparison; without one, the
+  answer starts with its first section heading or with the answer itself.
+- Sections keep full-analysis order: breaking changes, how to use it, Laravel comparison.
 - A breaking-change or usage answer keeps its own section heading — `## Breaking changes — <No breaking
-  changes|N found>` or `## How to use it` — and no title.
-- Any other question starts with the answer itself: no title, no heading.
-- The §3 verdict rules above apply to a Laravel answer too. No intro, no closing line.
+  changes|N found>` or `## How to use it`.
+- A Laravel comparison follows as `## Laravel comparison — <verdict>` and the blocks.
+- The `## Laravel comparison` verdict rules above apply to a Laravel answer too. No intro, no closing line.
 
 **Posting back** — only when the prompt carries a mention link ending in `#issuecomment-…`,
 `#discussion_r…`, or `#pullrequestreview-…`. Write the body to a file, exactly as emitted, and post it
