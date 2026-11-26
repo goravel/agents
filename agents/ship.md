@@ -119,46 +119,52 @@ Spawn `subagents/setup` foreground and wait, passing `LINK` and, when the reques
   `BASE_BRANCH`. The session stays there for the rest of the run and after it — nothing moves it back.
   Artifacts stay at absolute paths: `<folder>/plan.md`, `<folder>/implementation.md`,
   `<folder>/review-N.md`, `<folder>/reviewers.json`, `<folder>/findings-by-side.json`,
-  `<folder>/considered.md`, `<folder>/comments.md`.
-- Resolve the comments this run's prompt names, once. When `LINK` carries a comment anchor and `PR_NUM` is
-  set, write one JSON line per comment to `<folder>/comments.md`. A `#pullrequestreview-…` link is a
-  review, and a review is its body **plus every inline comment filed under it** — the body alone is not
-  the review:
+  `<folder>/considered.md`, `<folder>/comments.jsonl`.
+- Resolve the comments this run's prompt names, once. When `LINK` carries a comment anchor, write one JSON
+  line per comment to `<folder>/comments.jsonl`. A `#pullrequestreview-…` link is a review, and a review is
+  its body **plus every inline comment filed under it** — the body alone is not the review:
 
   ```bash
-  COMMENTS_FILE="$FOLDER/comments.md"
-  : > "$COMMENTS_FILE"
+  COMMENTS_FILE="$FOLDER/comments.jsonl"
   FRAGMENT=${LINK##*#}
+  TMP="$COMMENTS_FILE.tmp"
+  : > "$TMP"
+  FAIL=
   case "$FRAGMENT" in
     pullrequestreview-*)
       REVIEW_ID=${FRAGMENT#pullrequestreview-}
-      gh api "repos/$REPO/pulls/$PR_NUM/reviews/$REVIEW_ID" \
-        --jq '{url: .html_url, author: .user.login, kind: "review-body", body: .body}' >> "$COMMENTS_FILE"
-      gh api --paginate "repos/$REPO/pulls/$PR_NUM/reviews/$REVIEW_ID/comments" \
-        --jq '.[] | {url: .html_url, author: .user.login, kind: "inline", path, line, original_line, body}' >> "$COMMENTS_FILE"
+      if [ -n "$PR_NUM" ]; then
+        gh api "repos/$REPO/pulls/$PR_NUM/reviews/$REVIEW_ID" \
+          --jq '{url: .html_url, author: .user.login, kind: "review-body", body: .body}' >> "$TMP" || FAIL=1
+        gh api --paginate "repos/$REPO/pulls/$PR_NUM/reviews/$REVIEW_ID/comments" \
+          --jq '.[] | {url: .html_url, author: .user.login, kind: "inline", path, line, original_line, body}' >> "$TMP" || FAIL=1
+      fi
       ;;
     discussion_r*)
       gh api "repos/$REPO/pulls/comments/${FRAGMENT#discussion_r}" \
-        --jq '{url: .html_url, author: .user.login, kind: "inline", path, line, original_line, body}' >> "$COMMENTS_FILE"
+        --jq '{url: .html_url, author: .user.login, kind: "inline", path, line, original_line, body}' >> "$TMP" || FAIL=1
       ;;
     issuecomment-*)
       gh api "repos/$REPO/issues/comments/${FRAGMENT#issuecomment-}" \
-        --jq '{url: .html_url, author: .user.login, kind: "issue", body: .body}' >> "$COMMENTS_FILE"
+        --jq '{url: .html_url, author: .user.login, kind: "issue", body: .body}' >> "$TMP" || FAIL=1
       ;;
   esac
+  if [ -z "$FAIL" ] && [ -s "$TMP" ]; then mv "$TMP" "$COMMENTS_FILE"; else rm -f "$TMP"; fi
   ```
 
   Each line is a comment: `url` is what §6 hands to the `subagents/pr` agent, `body` is what the code
   phase fixes, and `path` locates it — `line` and `original_line` can both be null on an outdated diff,
-  which means the code moved, not that the comment is empty. No anchor, or no `PR_NUM` → no file, and §6
-  falls back to the PR's open threads. A review with an empty `body` adds a `review-body` line with
-  nothing to fix; keep it, §6 drops it when it composes the list.
+  which means the code moved, not that the comment is empty. A review link always carries `/pull/<n>`, so
+  `PR_NUM` is there; an issue link has none, and its `#issuecomment-…` needs only `REPO`. No anchor, a
+  failed fetch, or nothing printed → no file, and §6 falls back to the PR's open threads. A review with an
+  empty `body` adds a `review-body` line with nothing to fix; keep it, §6 drops it when it composes the
+  list.
 
 ## 2. Plan
 
 Always start by getting a plan for the user's request — never code from the raw request. Spawn a new foreground subagent session with the subagent tool, `agent: "subagents/plan"`:
 
-> You are running as a subagent in the ship flow, working in the worktree (`$WORKTREE_DIR`). Produce a complete implementation plan for this task: <the user's request>. When `<folder>/comments.md` exists, every comment in it is part of the task — the plan must cover each one, the inline comments under a review mention included. Follow the goravel-planning skill's output format exactly (Summary + Rules, Files to Change, Sequence, Real User Code Example, Open Questions). Investigate the worktree and verify every file path and identifier you reference. Do not edit any files.
+> You are running as a subagent in the ship flow, working in the worktree (`$WORKTREE_DIR`). Produce a complete implementation plan for this task: <the user's request>. When `<folder>/comments.jsonl` exists, every comment there with a body is part of the task — the plan must cover each one, the inline comments under a review mention included. Follow the goravel-planning skill's output format exactly (Summary + Rules, Files to Change, Sequence, Real User Code Example, Open Questions). Investigate the worktree and verify every file path and identifier you reference. Do not edit any files.
 
 Wait for it to return, then keep the returned text as `PLAN` and **print the entire plan into the conversation as your own message**, verbatim — every section (Summary + Rules, Files to Change, Sequence, Real User Code Example, Open Questions) reproduced exactly as returned. Do not summarise, shorten, truncate, reorder, or preface it. The user must be able to read and confirm the whole plan before you ask anything.
 
@@ -214,9 +220,9 @@ Run at the end of every run whose prompt carries a comment link — `#issuecomme
 `#pullrequestreview-…` — a mention is closed out there, not only acted on. Without one, run when the user
 hands you comments to close.
 
-1. **Take the list.** `<folder>/comments.md` from §1 is the list when it exists — one line per comment the
-   prompt named, and a review mention lists its body and every inline comment filed under it. Without it,
-   fetch the PR's unresolved review threads — REST has no resolved flag, so run the read-only GraphQL
+1. **Take the list.** `<folder>/comments.jsonl` from §1 is the list when it exists — one line per comment
+   the prompt named, and a review mention lists its body and every inline comment filed under it. Without
+   it, fetch the PR's unresolved review threads — REST has no resolved flag, so run the read-only GraphQL
    `reviewThreads` query inline (this flow loads no skill). Resolve `PR_NUM` first — §1 fills it only for a
    pull-request link, so a request-started run resolves the PR §5.3 reported by the branch it is on:
 
@@ -227,7 +233,7 @@ hands you comments to close.
        repository(owner:$owner,name:$name){
          pullRequest(number:$number){
            reviewThreads(first:100){
-             nodes{ id isResolved comments(first:100){ nodes{ databaseId body path url } } }
+             nodes{ id isResolved comments(first:100){ nodes{ databaseId body path url author{ login } } } }
            }
          }
        }
@@ -236,10 +242,11 @@ hands you comments to close.
 
    Then decide each comment: correct (needs a code fix) vs. question/incorrect. Record a one-sentence
    reason per comment, keyed by its `url`. A `kind: "review-body"` line with an empty `body` is nothing to
-   close — drop it, and its review's inline comments are the whole list. Skip a comment the run's own
-   login authored. Never decide a comment you did not fetch: a review's inline comments live under
-   `pulls/<n>/reviews/<id>/comments`, not in the PR's issue comments.
-2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree, passing `<folder>/comments.md` and your one-sentence decision per `url`; compose each reason from the `subagents/code` agent's report (what changed, or why no change). This is another long write phase, so after it returns run `touch "$WORKTREE_DIR.claim" 2>/dev/null || true` — the claim must stay fresh until the run's single release.
+   close — drop it, and its review's inline comments are the whole list. Skip a comment the run's own login
+   authored — capture it once with `OWN_LOGIN=$(gh api user --jq .login)` and compare it to the line's
+   `author`, as `agents/review.md` does. Never decide a comment you did not fetch: a review's inline
+   comments live under `pulls/<n>/reviews/<id>/comments`, not in the PR's issue comments.
+2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree, passing `<folder>/comments.jsonl` and your one-sentence decision per `url`; compose each reason from the `subagents/code` agent's report (what changed, or why no change). This is another long write phase, so after it returns run `touch "$WORKTREE_DIR.claim" 2>/dev/null || true` — the claim must stay fresh until the run's single release.
 3. **Close out** — spawn `subagents/pr` with the list:
    ```
    PR: <the PR number or URL from 5.3, or from the comments the user handed you>
