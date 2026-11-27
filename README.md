@@ -4,7 +4,7 @@ Prompts and skills for the Goravel agent workflows.
 
 - `agents/` — primary agents: `ship` (plan → code → review → PR), `review` (review a pull request), `analyze` (analyzes a pull request, or answers a question about it).
 - `agents/subagents/` — workers a primary delegates to: `code`, `plan`, `setup`, `review-diff`, `review-go`, `pr`, `reaction`.
-- `skills/` — shared skills: `goravel-graph`, `goravel-planning`, `goravel-pr`, `goravel-pr-comments`, `goravel-review-template`, `goravel-testing`.
+- `skills/` — shared skills: `goravel-graph`, `goravel-planning`, `goravel-pr`, `goravel-pr-comments`, `goravel-review-template`, `goravel-testing`, `goravel-writing`.
 
 The names in backticks are load-bearing: a primary spawns a subagent, and a subagent loads a skill, by exact
 id. A rename must update every caller, every permission block, and this list.

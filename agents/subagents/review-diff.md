@@ -48,7 +48,8 @@ Rebuild it every round — `DIFF_BASE` changes per phase. If it reports `not_rea
 
 ## 2. Review
 
-Load the `goravel-review-template` skill before the fan-out — the comment rule below and the §4 grammar both come from it.
+Load the `goravel-review-template` and `goravel-writing` skills before the fan-out — the comment rule
+below and the §4 grammar come from the first, every sentence of the output from the second.
 Use `LANGUAGES` when the prompt gives it; otherwise detect the languages in the diff scope by extension. The six-way fan-out is optional; review inline when it is not practical.
 
 - **Go present** → spawn `subagents/review-go` six times in parallel, one per SIDE: safe, logic, performance, standard, testing, architecture. Give each `SIDE`, `WORKTREE_DIR`, `DIFF_BASE`, the languages, its own `PRIOR` anchors (from `<folder>/findings-by-side.json`). Findings only.

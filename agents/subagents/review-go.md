@@ -46,7 +46,8 @@ never re-verify or re-raise another SIDE's findings.
 
 ## Workflow
 
-Load the `goravel-review-template` skill first — step 2's comment rule and step 4's grammar both come from it.
+Load the `goravel-review-template` and `goravel-writing` skills first — step 2's comment rule and
+step 4's grammar come from the first, every sentence of the finding from the second.
 
 1. **Resolve working context.**
    - Both `WORKTREE_DIR=<path>` and `DIFF_BASE=<sha>` given → delta mode: use `workdir="$WORKTREE_DIR"`
@@ -121,9 +122,8 @@ Load the `goravel-review-template` skill first — step 2's comment rule and ste
    Then apply the Scope rule and drop the rest silently.
 
 4. **Report findings only** grouped by severity — Must Fix, then Maybe Fix, then Nits. Each finding MUST
-   start with exactly ONE anchor line (`file:line` + **Title**), followed by three indented plain-language
-   lines — Problem / Impact / Fix — and, when the finding concerns code behavior, one indented before/after
-   example-code block, all formatted exactly per the finding grammar in the
-   `goravel-review-template` skill (loaded above). Write for a busy developer who did
-   not write this code: plain words, short sentences, one problem per finding. Use the real file path
-   and line number for every finding. If you found nothing, reply with exactly: No findings.
+   start with exactly ONE anchor line (`file:line` + **Title**), followed by three indented lines — Problem
+   / Impact / Fix — and, when the finding concerns code behavior, one indented before/after example-code
+   block, all formatted exactly per the finding grammar in the `goravel-review-template` skill (loaded
+   above). One problem per finding, one sentence per line, written per the `goravel-writing` skill. Use
+   the real file path and line number for every finding. If you found nothing, reply with exactly: No findings.

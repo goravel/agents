@@ -150,7 +150,8 @@ For each question:
   answers.
 - In a real plan, never use `foo`, `...`, or `TBD`. The template above is the one
   exception — its placeholders are there to be replaced.
-- Avoid "utilize", "leverage", "aforementioned", "hereby", "consider whether".
+- Write each question per the `goravel-writing` skill: 20-word sentences, common words, and its
+  banned-word table — including "consider whether".
 
 Example output:
 
