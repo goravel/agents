@@ -10,8 +10,9 @@ description: >
 
 # Review Output Format
 
-Load this skill before emitting, writing, or formatting any code review. Follow the structure,
-severity order, and finding grammar below exactly — consumers key on these exact strings.
+Load this skill before emitting, writing, or formatting any code review, and load `goravel-writing`
+with it — every sentence you emit follows that skill. Follow the structure, severity order, and finding
+grammar below exactly — consumers key on these exact strings.
 
 ## Template
 
@@ -23,7 +24,7 @@ Please tick the checkboxes once you have completed the items.
 Reviewed: 3d81f42..9ab31e7 — 2 new commits
 
 ## Summary
-<1–2 plain-language sentences: what changed and the overall verdict.>
+<2 sentences, 20 words or fewer: sentence 1 says what changed; sentence 2 gives the verdict.>
 
 ## Verdict
 - [NEW] Must Fix: <N> · Maybe Fix: <N> · Nits: <N>
@@ -106,11 +107,9 @@ The caller supplies one of two data shapes. Apply the template above to whicheve
   affects unchanged code, anchor the finding to the changed line and explain the consequence
   there. The caller applies a final added-line filter (±1 line) after merging, so an
   unanchored or out-of-scope finding is discarded silently.
-- Write each finding in plain language for a busy developer who did not write the code:
-  - Title = a short noun phrase (≤8 words), no jargon — e.g. "Shared slice returned to caller".
-  - One problem per finding; never bundle two issues.
-  - One short sentence per line: Problem, then Impact, then Fix.
-  - Avoid "utilize", "leverage", "aforementioned", "hereby".
+- Write each finding per the `goravel-writing` skill: one problem per finding, one sentence per line
+  (Problem, then Impact, then Fix), common words.
+  - Title = a short noun phrase (≤8 words) — e.g. "Shared slice returned to caller".
   - Include the before/after block whenever the finding concerns code behavior (logic, safety,
     performance, tests); omit only when no meaningful snippet exists (naming, docs, layout).
   - The indented example block: one fence max, ≤8 lines, no nested fences, `// before` / `// after`

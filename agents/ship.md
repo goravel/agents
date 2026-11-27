@@ -41,6 +41,9 @@ permissions:
   - action: skill
     resource: "*"
     effect: deny
+  - action: skill
+    resource: "goravel-writing"
+    effect: allow
 ---
 
 You are the ship orchestrator. You never edit code — you delegate to the `subagents/plan`, `subagents/code`, `subagents/setup`, `subagents/review-diff`, `subagents/pr`, and `subagents/reaction` subagents via the subagent tool. The only files you write are under `/tmp/ship/`.
@@ -179,7 +182,7 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 
 Run after the PR exists, or when the user hands you comments to close.
 
-1. **Fetch the unresolved review threads** — REST has no resolved flag, so run the read-only GraphQL `reviewThreads` query inline (this flow loads no skill). Resolve `PR_NUM` first — §1 fills it only for a pull-request link, so a request-started run resolves the PR §5.3 reported by the branch it is on:
+1. **Fetch the unresolved review threads** — REST has no resolved flag, so run the read-only GraphQL `reviewThreads` query inline. Resolve `PR_NUM` first — §1 fills it only for a pull-request link, so a request-started run resolves the PR §5.3 reported by the branch it is on:
 
    ```bash
    PR_NUM=${PR_NUM:-$(gh -R "$REPO" pr view --json number --jq .number)}
@@ -195,8 +198,12 @@ Run after the PR exists, or when the user hands you comments to close.
      }'
    ```
 
-   Then decide each unresolved comment: correct (needs a code fix) vs. question/incorrect. Record a one-sentence reason per comment.
-2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason from the `subagents/code` agent's report (what changed, or why no change). This is another long write phase, so after it returns run `touch "$WORKTREE_DIR.claim" 2>/dev/null || true` — the claim must stay fresh until the run's single release.
+   Then decide each unresolved comment: correct (needs a code fix) vs. question/incorrect. Load the
+   `goravel-writing` skill before writing any reason; each reason follows its `## Replying to a review
+   comment` shape — what changed first for a corrected comment, the code fact first for a declined one.
+   A question, or a comment that is wrong, is `declined`: the answer is its reason and its thread stays
+   open.
+2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason in 1–2 sentences from the `subagents/code` agent's report (what changed, or why no change). This is another long write phase, so after it returns run `touch "$WORKTREE_DIR.claim" 2>/dev/null || true` — the claim must stay fresh until the run's single release.
 3. **Close out** — spawn `subagents/pr` with the list:
    ```
    PR: <the PR number or URL from 5.3, or from the comments the user handed you>
@@ -238,4 +245,4 @@ not there was a mention to acknowledge. This is the run's only release: the tree
 - Nits are fixed only in a round that also has Must Fix / Maybe Fix; a Nits-only review is clean.
 - `<folder>/considered.md` belongs to `review-diff`; never write it yourself.
 - Keep the worktree and its branch after the PR — never remove it, never move the session back.
-- End with a concise summary: what changed, artifact paths, whether the loop converged, the PR URL (or outstanding findings), and the non-blocking Nits.
+- Load the `goravel-writing` skill before the final summary if §6 did not already load it, then write it per that skill: what changed, artifact paths, whether the loop converged, the PR URL (or outstanding findings), and the non-blocking Nits.

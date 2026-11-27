@@ -55,14 +55,18 @@ Fill in one `## Why` body — the feature block or the bug-fix block, never both
 ### Summary Rules
 
 - Include exactly 2 to 3 bullet points.
-- Bullets must describe behavior changes, not file-by-file edits.
+- Each bullet is one behavior change in 15 words or fewer, starting with the behavior:
+  "Adds `Paginate` to `facades.Orm()`" — never "This PR adds…".
+- Name the method, route, or config key in backticks; never a file path, a commit, or a test name.
 - If an issue number is detected, append a standalone closing line after the bullets:
   `Closes https://github.com/goravel/goravel/issues/<number>`
 
 ### Why Rules
 
 **All PR types**
-- Include 1 to 2 short paragraphs explaining what changed and why.
+- Include 1 to 2 paragraphs of 3 sentences or fewer, 20 words per sentence.
+- Sentence 1 says what changed for the user; the next says why it matters.
+- No line about the PR itself: drop "This PR", "I've updated", "in this change".
 - Code blocks must contain only real user-facing code; never include implementation snippets, placeholder markers, or pseudo-code inside code fences.
 
 **Feature PRs**
@@ -129,7 +133,7 @@ facades.Route().Middleware(middleware.Jwt()).Get("users", userController.Index)
    - Derive code example(s) in the style of https://github.com/goravel/example per the Why Rules above.
 
 7. **Compose PR body**
-   - Fill the PR Body Specification template using the context from step 6.
+   - Load the `goravel-writing` skill, then fill the PR Body Specification template using the context from step 6.
 
 8. **Validate before applying**
    - Confirm the composed body satisfies all constraints in the PR Body Specification.
@@ -170,4 +174,4 @@ The caller may supply `BASE_BRANCH` in the prompt. The report itself goes back i
 - Never create duplicate PRs for the same branch.
 - Never omit `## Summary` or `## Why`.
 - Never reorder sections or add extra top-level headings.
-- Prefer concise, deterministic output.
+- Write the title and body per `goravel-writing`; keep the output deterministic — the same diff yields the same title.

@@ -36,10 +36,10 @@ A full analysis always covers breaking changes and usage, plus the Laravel compa
 skips it. A question covers only the parts it asks for — what a change breaks, how to use it, or how it
 compares with Laravel.
 
-Report style, everywhere: short words, short sentences, one fact per line. Say what the code does, not
-where it sits — a `path:LINE` only where the reader must open the file to act. Cut any line a reviewer
-does not need to decide: no restating the diff, no praise, no hedging. The examples below show the shape
-of the output, not its content — never copy their names.
+Report style: load the `goravel-writing` skill before writing the report or an answer — its sentence and
+word rules apply to every line you emit or post. One rule is yours alone: say what the code does, not
+where it sits — a `path:LINE` only where the reader must open the file to act. The examples below show
+the shape of the output, not its content — never copy their names.
 
 ## Template
 

@@ -13,6 +13,13 @@ then resolve the thread when the status is `solved`. You never touch reactions a
 Each comment has a reference (review-comment URL, issue-comment URL, or numeric id), a `status`
 (`solved` or `declined`), and a `reason` posted verbatim.
 
+## Reason contract
+
+The reason is written where the decision is made and posted byte for byte. The caller shapes it per the
+`## Replying to a review comment` section of the `goravel-writing` skill: a solved comment says what
+changed first, a declined one says the code fact first and that the code stays as it is, a question gets
+its answer first. A comment that is only a question is declined, so its thread stays open.
+
 ## Setup
 1. Resolve the PR: the `PR` value from the caller, else `gh pr view --json number --jq '.number'` for the current branch. Empty -> stop and report failure.
 2. `OWNER/REPO` = `gh repo view --json nameWithOwner --jq .nameWithOwner`.
@@ -58,6 +65,7 @@ Re-run the thread-map query — every `solved` review-comment target's thread is
 - Never touch reactions. The 👀 on the mention is swapped outside this skill, not here.
 - Top-level issue comments have no thread — reply with `gh pr comment "$PR" --body-file /tmp/pr-comment-reply.md` and report `replied (not resolvable)`.
 - Never edit code; never fabricate a reason — post the caller's text verbatim.
+- Never shorten, reword, or tidy a reason — verbatim means the caller's text, as written.
 
 ## Output Contract
 PR number and URL, then one line per comment: reference -> status -> outcome (`solved + resolved` / `declined (open)` / `already resolved` / `replied (not resolvable)` / `skipped (unparseable)` / `skipped (no thread)` / `reply failed`), plus the reason posted.

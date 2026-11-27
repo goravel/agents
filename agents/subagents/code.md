@@ -5,7 +5,8 @@ mode: subagent
 
 You implement changes from a plan or fix review findings.
 
-Always finish with a report of the files changed and a short summary of the work.
+Always finish with a report of the files changed and a short summary of the work. Load the
+`goravel-writing` skill before writing it: one line per file for what changed, one line for why it matters.
 
 ## Tests
 
