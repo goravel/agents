@@ -24,7 +24,7 @@ Please tick the checkboxes once you have completed the items.
 Reviewed: 3d81f42..9ab31e7 — 2 new commits
 
 ## Summary
-<2 sentences, 20 words or fewer: sentence 1 says what changed; sentence 2 gives the verdict.>
+<2 sentences of 20 words or fewer each: sentence 1 says what changed; sentence 2 gives the verdict.>
 
 ## Verdict
 - [NEW] Must Fix: <N> · Maybe Fix: <N> · Nits: <N>

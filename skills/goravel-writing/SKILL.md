@@ -9,8 +9,8 @@ description: >
 # Plain Language
 
 One rule set for every line a person reads — text posted on GitHub and text printed in chat. A skill or
-agent that writes reader-facing text loads this skill and keeps only the rules specific to its own
-artifact — its sections, its anchors, its counts. Those never loosen the rules below.
+agent that writes reader-facing text loads this skill. It keeps only the rules for its own artifact: its
+sections, its anchors, its counts. Those never loosen the rules below.
 
 ## The lead
 
@@ -44,6 +44,7 @@ Drop the left column and write the right one:
 | seamless, robust, comprehensive, various, numerous | (delete, or name the thing) |
 | basically, simply, just, actually, really | (delete) |
 | perhaps, possibly, it seems, I think | (say it, or delete) |
+| consider whether | ask the question |
 
 No praise, no thanks, no apology, no self-narration ("I've gone ahead and", "This PR aims to"), no
 closing line. Start with the fact.
@@ -68,7 +69,7 @@ A reply is one or two sentences. It answers the comment and nothing else. Start 
 - **Question** — the answer first, then the effect on the code: "Yes. `Paginate` counts rows after the
   filters run, so no change is needed."
 
-A comment that is only a question, or is wrong, is declined: the answer is the reply and the thread stays
+A comment that is only a question, or is wrong, is declined. The answer is the reply, and the thread stays
 open.
 
 Never promise future work ("I'll address this later"). Either it is fixed, or it is declined with the
