@@ -174,7 +174,15 @@ Delegate the round review to the `subagents/review-diff` agent.
 ### 5.3 Decide
 
 Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
-- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Create or update the PR. Base: `$BASE_BRANCH`. Context: `<folder>/implementation.md`. Return your output contract in the conversation." Report the PR URL; list Nits as non-blocking.
+- **Clean** (`blockers == 0`): spawn `subagents/pr` fresh — "Review is clean. Create or update the PR. Base: `$BASE_BRANCH`. Context: `<folder>/implementation.md`. Return your output contract in the conversation." Then check the PR head before reporting:
+
+  ```bash
+  HEAD_SHA=$(git -C "$WORKTREE_DIR" rev-parse HEAD)
+  PR_HEAD=$(gh pr view --json headRefOid --jq .headRefOid)
+  [ "$PR_HEAD" = "$HEAD_SHA" ] || { echo "run not delivered — PR head is $PR_HEAD, HEAD is $HEAD_SHA"; exit 1; }
+  ```
+
+  Matched → report the PR URL; list Nits as non-blocking. Not matched → report that line and say the commits are still on the local branch.
 - **Round 5**: stop, no PR. Report the outstanding Must Fix / Maybe Fix; list the Nits as non-blocking.
 - **Otherwise**: increment N and loop.
 
