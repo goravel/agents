@@ -41,8 +41,9 @@ context only, and none of it gates a run. One thing it does decide is posting: p
 user's own words ask for this review to be published — `post this review on the PR`, `post it`,
 `post the round`, `comment this on the PR`, `leave the review on the PR` (phase 6). Asking for a
 review is not asking for a post: `review this PR`, a PR mention, or a bare link never authorizes one.
-A mention earns the 👍 when the run ends, posted or not. Publishing still needs the ask. When the user
-asks for the post, the swap waits for the post attempt and the ticks.
+A mention earns the 👍 when the run ends, posted or not — phase 6, not before. A run that stops in
+phase 1 keeps its 👀: no target, a setup failure, two links naming different pull requests. Publishing
+still needs the ask. When the user asks for the post, the swap waits for the post attempt and the ticks.
 The whole prompt is the user's own words. Two kinds of link can appear. The bare
 `https://github.com/<owner>/<repo>/pull/<number>` URL is the pull request; the same URL with a comment
 anchor — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention link, the one
