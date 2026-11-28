@@ -141,7 +141,7 @@ REVIEW_FILE="/tmp/pr-reviews/pr-${PR_NUM}-nothing.md"
 # write `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.` to $REVIEW_FILE
 ```
 
-  Then run the acknowledge bullet of phase 6 — no round exists, so nothing comes before it — and emit
+- Then run the acknowledge bullet of phase 6 — no round exists, so nothing comes before it — and emit
   `$REVIEW_FILE` per phase 7. Asked or not.
 - Read the delta, then follow the `goravel-graph` skill once for this round — one build, `repo_root` =
   `$WORKTREE_DIR`, `base` = `$GRAPH_BASE`:
@@ -182,7 +182,7 @@ git -C "$WORKTREE_DIR" diff "$DIFF_RANGE" -U0 | rg '^diff --git |^@@'
 
 ### 5. Compose the round
 Compose with the `goravel-review-template` skill loaded in phase 3:
-- Count per severity per status and give it the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → the body opens with `✅ Review clean — no findings.`, then the verdict line.
+- Count per severity per status and give it the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → after the state lines, the body holds `✅ Review clean — no findings.`, then the verdict line.
 - Write the round's state lines under the banner, from the template skill: `<!-- reviewed-head: ${HEAD_SHA} -->`
   with the full 40-character worktree head, and the `Reviewed:` line —
   `${DIFF_BASE:0:7}..${HEAD_SHA:0:7} — ${COMMITS} new commits` on an incremental review,
