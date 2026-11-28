@@ -133,7 +133,9 @@ else
 fi
 ```
 
-- Nothing new to review: `DIFF_BASE` equal to `HEAD_SHA` means the last review already covered this head.
+- Nothing new to review: `DIFF_BASE` equal to `HEAD_SHA` means the last review already covered this head:
+  write the line below to `$REVIEW_FILE`, run the acknowledge bullet of phase 6 — no round exists, so
+  nothing comes before it — then emit `$REVIEW_FILE` per phase 7. Asked or not.
 
 ```bash
 mkdir -p /tmp/pr-reviews
@@ -141,8 +143,6 @@ REVIEW_FILE="/tmp/pr-reviews/pr-${PR_NUM}-nothing.md"
 # write `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.` to $REVIEW_FILE
 ```
 
-- Then run the acknowledge bullet of phase 6 — no round exists, so nothing comes before it — and emit
-  `$REVIEW_FILE` per phase 7. Asked or not.
 - Read the delta, then follow the `goravel-graph` skill once for this round — one build, `repo_root` =
   `$WORKTREE_DIR`, `base` = `$GRAPH_BASE`:
 
