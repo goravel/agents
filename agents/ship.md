@@ -203,7 +203,7 @@ comments to close.
    `goravel-writing` skill before writing any reason; each reason follows its `## Replying to a review
    comment` shape — what changed first for a corrected comment, the code fact first for a declined one.
    A question, or a comment that is wrong, is `declined`: the answer is its reason and its thread stays
-   open. No unresolved thread → nothing to close: skip steps 2–4 and go to §7.
+   open. No unresolved thread and no handed comment → nothing to close: skip steps 2–4 and go to §7.
 2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason in 1–2 sentences from the `subagents/code` agent's report (what changed, or why no change). This is another long write phase, so after it returns run `touch "$WORKTREE_DIR.claim" 2>/dev/null || true` — the claim must stay fresh until the run's single release.
 3. **Close out** — spawn `subagents/pr` with the list:
    ```
@@ -220,11 +220,12 @@ comments to close.
 
 ## 7. Acknowledge the mention
 
-Run this once, at the end of §6 — the run's only delivering terminal point — so the 👍 means
-"run delivered".
+Run this once, at the end of §6, when §5.3 reported a PR — the run's only delivering terminal point — so
+the 👍 means "run delivered".
 
 - The clean-review PR report in 5.3 is not that point: §6 runs after it, and its close-out is part of the
-  delivery. The round-5 stop in 5.3 reports no PR, so §6 never runs and its 👀 stays.
+  delivery. The round-5 stop in 5.3 reports no PR, so it acknowledges nothing, even when §6 ran to close
+  comments the user handed over. That 👀 stays.
 - Take the mention link from this run's prompt — the one ending in `#issuecomment-…`,
   `#discussion_r…`, or `#pullrequestreview-…`; none → do not spawn.
 - Otherwise spawn `subagents/reaction` foreground and wait, passing the mention link only — never the
