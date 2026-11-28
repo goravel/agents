@@ -41,8 +41,8 @@ context only, and none of it gates a run. One thing it does decide is posting: p
 user's own words ask for this review to be published — `post this review on the PR`, `post it`,
 `post the round`, `comment this on the PR`, `leave the review on the PR` (phase 6). Asking for a
 review is not asking for a post: `review this PR`, a PR mention, or a bare link never authorizes one.
-A mention earns the 👍 once the review is finished. Publishing it still needs the ask. When the user
-asks for the post, the 👍 waits for the post attempt and the ticks.
+A mention earns the 👍 when the run ends, posted or not. Publishing still needs the ask. When the user
+asks for the post, the swap waits for the post attempt and the ticks.
 The whole prompt is the user's own words. Two kinds of link can appear. The bare
 `https://github.com/<owner>/<repo>/pull/<number>` URL is the pull request; the same URL with a comment
 anchor — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention link, the one
@@ -223,10 +223,11 @@ jq -Rs '{body: .}' "$BODY_FILE" \
   Never un-tick a resolved finding; never tick a still-open one. A failed PATCH is a missed tick, not a
   reason to post the round again. Rewrite only the anchor line — never the banner, the `<!-- round: N -->`
   or `<!-- reviewed-head: … -->` markers, or the `Reviewed:` line.
-- Acknowledge the mention last. Wait for the post above to return and for every tick to finish, whatever
-  their outcome. The 👍 marks a finished review. Never spawn it while a post or a tick is still running.
-  With nothing to post or tick — no ask, or the phase-2 stop — acknowledge at once. Take the mention link
-  from your prompt — none → do not spawn. With one, spawn `subagents/reaction` foreground and wait:
+- Acknowledge the mention last: the 👍 marks the run's end, not a posted review. Wait for the post above
+  to return and for every tick to finish, whatever their outcome. Never spawn it while a post or a tick
+  is still running. With nothing to post or tick — no ask, or the phase-2 stop — acknowledge at once. Take
+  the mention link from your prompt — none → do not spawn. With one, spawn `subagents/reaction` foreground
+  and wait:
 
   > You are running as a subagent in the review flow. COMMENT_URL=<the mention link from the prompt>
 

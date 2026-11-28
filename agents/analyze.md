@@ -383,9 +383,9 @@ ANSWER="/tmp/pr-analysis/pr-${PR_NUM}-answer.md"
 ## 7. Acknowledge the mention
 
 Run this after the output is emitted. When the prompt carried a mention link, wait for that post to
-return first, whatever its outcome. The 👍 then means "analysis delivered". Never spawn it while the post
-is still running. Take the mention link from your prompt — none → do not spawn. With one, spawn
-`subagents/reaction` foreground and wait:
+return first, whatever its outcome. The 👍 marks the run's end, not a posted analysis. Never spawn it
+while the post is still running. Take the mention link from your prompt — none → do not spawn. With one,
+spawn `subagents/reaction` foreground and wait:
 
 > You are running as a subagent in the analyze flow. COMMENT_URL=<the comment link found in the prompt>
 

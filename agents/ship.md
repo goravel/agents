@@ -220,12 +220,10 @@ comments to close.
 
 ## 7. Acknowledge the mention
 
-Run this once, at the end of §6, when §5.3 reported a PR — the run's only delivering terminal point — so
-the 👍 means "run delivered".
+Run this once, as the run's last action, so the 👍 means "run finished". It never says the PR was posted.
 
-- The clean-review PR report in 5.3 is not that point: §6 runs after it, and its close-out is part of the
-  delivery. The round-5 stop in 5.3 reports no PR, so it acknowledges nothing, even when §6 ran to close
-  comments the user handed over. That 👀 stays.
+- Place it at the end of §6 when §6 runs. When it does not — the round-5 stop — it is still the run's last
+  action. The run is over, so it acknowledges.
 - Take the mention link from this run's prompt — the one ending in `#issuecomment-…`,
   `#discussion_r…`, or `#pullrequestreview-…`; none → do not spawn.
 - Otherwise spawn `subagents/reaction` foreground and wait, passing the mention link only — never the
@@ -235,8 +233,8 @@ the 👍 means "run delivered".
 
 - Best-effort and silent: the result never changes the outcome or the summary, and never appears in the
   PR body or an artifact. One spawn per run — never spawn it twice, and never swap the reaction yourself.
-- Every earlier stop is not a terminal point: a setup failure, a fork PR, the step-3 plan question, and
-  the round-5 stop. No acknowledgement on any of them.
+- Three stops are not the run's end: a setup failure, a fork PR, and the step-3 plan question. No
+  acknowledgement on any of them.
 
 ## 8. Release the worktree
 
