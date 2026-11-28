@@ -180,7 +180,8 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 
 ## 6. Close out PR review comments
 
-Run after the PR exists, or when the user hands you comments to close.
+Run after §5.3 reported the PR — even with no unresolved review thread — or when the user hands you
+comments to close.
 
 1. **Fetch the unresolved review threads** — REST has no resolved flag, so run the read-only GraphQL `reviewThreads` query inline. Resolve `PR_NUM` first — §1 fills it only for a pull-request link, so a request-started run resolves the PR §5.3 reported by the branch it is on:
 
@@ -202,7 +203,7 @@ Run after the PR exists, or when the user hands you comments to close.
    `goravel-writing` skill before writing any reason; each reason follows its `## Replying to a review
    comment` shape — what changed first for a corrected comment, the code fact first for a declined one.
    A question, or a comment that is wrong, is `declined`: the answer is its reason and its thread stays
-   open.
+   open. No unresolved thread and no handed comment → nothing to close: skip steps 2–4 and go to §7.
 2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason in 1–2 sentences from the `subagents/code` agent's report (what changed, or why no change). This is another long write phase, so after it returns run `touch "$WORKTREE_DIR.claim" 2>/dev/null || true` — the claim must stay fresh until the run's single release.
 3. **Close out** — spawn `subagents/pr` with the list:
    ```
@@ -219,9 +220,10 @@ Run after the PR exists, or when the user hands you comments to close.
 
 ## 7. Acknowledge the mention
 
-Run this at the run's terminal points — the clean-review PR report in 5.3, the round-5 stop in 5.3, and
-the report at the end of §6 — so the 👍 means "run delivered".
+Run this once, as the run's last action, so the 👍 means "run finished". It never says the PR was posted.
 
+- Place it at the end of §6 when §6 runs. When it does not — the round-5 stop — it is still the run's last
+  action. The run is over, so it acknowledges.
 - Take the mention link from this run's prompt — the one ending in `#issuecomment-…`,
   `#discussion_r…`, or `#pullrequestreview-…`; none → do not spawn.
 - Otherwise spawn `subagents/reaction` foreground and wait, passing the mention link only — never the
@@ -230,9 +232,9 @@ the report at the end of §6 — so the 👍 means "run delivered".
   > You are running as a subagent in the ship flow. COMMENT_URL=<the comment link from this run's prompt>
 
 - Best-effort and silent: the result never changes the outcome or the summary, and never appears in the
-  PR body or an artifact. The swap is idempotent, so a later terminal point re-spawns it — never swap the
-  reaction yourself.
-- Stopping at the step-3 plan question is not a terminal point: no acknowledgement there.
+  PR body or an artifact. One spawn per run — never spawn it twice, and never swap the reaction yourself.
+- Three stops are not the run's end: a setup failure, a fork PR, and the step-3 plan question. No
+  acknowledgement on any of them.
 
 ## 8. Release the worktree
 
