@@ -41,7 +41,8 @@ context only, and none of it gates a run. One thing it does decide is posting: p
 user's own words ask for this review to be published — `post this review on the PR`, `post it`,
 `post the round`, `comment this on the PR`, `leave the review on the PR` (phase 6). Asking for a
 review is not asking for a post: `review this PR`, a PR mention, or a bare link never authorizes one.
-A mention earns the 👍, which marks the console review as delivered; publishing it still needs the ask.
+A mention earns the 👍 once the review is finished. Publishing it still needs the ask. When the user
+asks for the post, the 👍 waits for the PR copy and the ticks.
 The whole prompt is the user's own words. Two kinds of link can appear. The bare
 `https://github.com/<owner>/<repo>/pull/<number>` URL is the pull request; the same URL with a comment
 anchor — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention link, the one
@@ -132,9 +133,8 @@ fi
 ```
 
 - Nothing new to review: `DIFF_BASE` equal to `HEAD_SHA` means the last review already covered this head.
-  Emit `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.`, run the
-  acknowledge bullet of phase 6, and stop. No round exists, so there is nothing to post or tick — asked or
-  not.
+  Emit `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.`, then run the
+  acknowledge bullet of phase 6 — no round exists, so nothing comes before it — and stop. Asked or not.
 - Read the delta, then follow the `goravel-graph` skill once for this round — one build, `repo_root` =
   `$WORKTREE_DIR`, `base` = `$GRAPH_BASE`:
 
@@ -223,14 +223,15 @@ jq -Rs '{body: .}' "$BODY_FILE" \
   Never un-tick a resolved finding; never tick a still-open one. A failed PATCH is a missed tick, not a
   reason to post the round again. Rewrite only the anchor line — never the banner, the `<!-- round: N -->`
   or `<!-- reviewed-head: … -->` markers, or the `Reviewed:` line.
-- Acknowledge the mention once the review is emitted, so the 👍 means the console review is delivered;
-  when the post was asked for, it also marks the PR copy. Take the mention link from your prompt — none →
-  do not spawn. With one, spawn `subagents/reaction` foreground and wait:
+- Acknowledge the mention last. Wait for the post above to return and for every tick to finish, whatever
+  their outcome. The 👍 marks a finished review. Never spawn it while a post or a tick is still running.
+  With nothing to post or tick — no ask, or the phase-2 stop — acknowledge at once. Take the mention link
+  from your prompt — none → do not spawn. With one, spawn `subagents/reaction` foreground and wait:
 
   > You are running as a subagent in the review flow. COMMENT_URL=<the mention link from the prompt>
 
-  Pass the mention link only — never the pull request link. Best-effort: never fail or delay the review
-  over it, and never mention the spawn or its result in the review output.
+  Pass the mention link only — never the pull request link. Best-effort: a failed swap never fails the
+  run, and its result never appears in the review output.
 
 ### 7. Release the worktree
 

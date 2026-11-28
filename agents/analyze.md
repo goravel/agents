@@ -382,15 +382,15 @@ ANSWER="/tmp/pr-analysis/pr-${PR_NUM}-answer.md"
 
 ## 7. Acknowledge the mention
 
-Run this once the output is emitted and, when the prompt carried a mention link, posted, so the 👍 means
-"analysis delivered". Take the mention link from your prompt — none → do not spawn. With
-one, spawn `subagents/reaction` foreground and wait:
+Run this after the output is emitted. When the prompt carried a mention link, wait for that post to
+return first, whatever its outcome. The 👍 then means "analysis delivered". Never spawn it while the post
+is still running. Take the mention link from your prompt — none → do not spawn. With one, spawn
+`subagents/reaction` foreground and wait:
 
 > You are running as a subagent in the analyze flow. COMMENT_URL=<the comment link found in the prompt>
 
 - Pass the mention link only — never the pull request link from the same prompt.
-- Best-effort: never fail or delay the report over it, and never mention the spawn or its result in
-  the report.
+- Best-effort: a failed swap never fails the run, and its result never appears in the report.
 
 ## 8. Release the worktree
 

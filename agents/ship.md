@@ -180,7 +180,8 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 
 ## 6. Close out PR review comments
 
-Run after the PR exists, or when the user hands you comments to close.
+Run after the PR exists — even with no unresolved review thread — or when the user hands you comments to
+close.
 
 1. **Fetch the unresolved review threads** — REST has no resolved flag, so run the read-only GraphQL `reviewThreads` query inline. Resolve `PR_NUM` first — §1 fills it only for a pull-request link, so a request-started run resolves the PR §5.3 reported by the branch it is on:
 
@@ -215,13 +216,16 @@ Run after the PR exists, or when the user hands you comments to close.
      status: declined
      reason: <why no change>
    ```
-4. **Report** per comment: decision + reason, and confirm each `solved` thread is resolved.
+4. **Report** per comment: decision + reason, and confirm each `solved` thread is resolved. No unresolved
+   thread → no per-comment report, and §7 runs at the end of this step.
 
 ## 7. Acknowledge the mention
 
-Run this at the run's terminal points — the clean-review PR report in 5.3, the round-5 stop in 5.3, and
-the report at the end of §6 — so the 👍 means "run delivered".
+Run this once, at the end of the §6 report — the run's only delivering terminal point — so the 👍 means
+"run delivered".
 
+- The clean-review PR report in 5.3 is not that point: §6 runs after it, and its close-out is part of the
+  delivery. The round-5 stop in 5.3 delivers no PR, so it does not acknowledge — its 👀 stays.
 - Take the mention link from this run's prompt — the one ending in `#issuecomment-…`,
   `#discussion_r…`, or `#pullrequestreview-…`; none → do not spawn.
 - Otherwise spawn `subagents/reaction` foreground and wait, passing the mention link only — never the
@@ -230,9 +234,9 @@ the report at the end of §6 — so the 👍 means "run delivered".
   > You are running as a subagent in the ship flow. COMMENT_URL=<the comment link from this run's prompt>
 
 - Best-effort and silent: the result never changes the outcome or the summary, and never appears in the
-  PR body or an artifact. The swap is idempotent, so a later terminal point re-spawns it — never swap the
-  reaction yourself.
-- Stopping at the step-3 plan question is not a terminal point: no acknowledgement there.
+  PR body or an artifact. One spawn per run — never spawn it twice, and never swap the reaction yourself.
+- Every earlier stop is not a terminal point: a setup failure, a fork PR, the step-3 plan question, and
+  the round-5 stop. No acknowledgement on any of them.
 
 ## 8. Release the worktree
 
