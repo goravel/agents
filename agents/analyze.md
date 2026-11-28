@@ -74,8 +74,8 @@ link is the pull request. A link ending in a comment anchor — `#issuecomment-�
 `#pullrequestreview-…` — is the mention link, the one step 7 acknowledges. Either one names the pull
 request: its `<number>` becomes `PR_NUM`.
 
-No pull-request link → say so and stop; never guess a number. Otherwise spawn `subagents/setup`
-foreground and wait; pass that link verbatim.
+No pull-request link → say so and stop; never guess a number. Otherwise spawn `subagents/setup` and continue
+when its reply arrives; pass that link verbatim.
 
 > You are running as a subagent in the analyze flow. LINK=<the PR link from the prompt>
 
@@ -341,23 +341,23 @@ leaves nothing checked, the verdict is `Not checked`. Never invent an equivalent
 none, say `No Laravel equivalent` and name the closest concept — do not stretch a distant class into a
 match.
 
-## 6. Emit and reply on the PR
+## 6. Compose and reply on the PR
 
-Emit the template for a full analysis; for a question, answer directly in the template's question shape.
+Compose the template for a full analysis; for a question, answer directly in the template's question
+shape. Write the body to `$ANSWER` before any post — that file is the answer.
 
-The output goes to the conversation every run. The pull request gets the same body only when the prompt
-carries a mention link (below); the console copy is the primary output. This step is the only write there —
+The console copy goes out every run, from `$ANSWER`, as the run's last message in step 8. The pull request
+gets the same body only when the prompt carries a mention link (below). This step is the only write there —
 step 7 swaps the mention's reaction.
-
-**Posting back** — only when the prompt carries a mention link ending in `#issuecomment-…`,
-`#discussion_r…`, or `#pullrequestreview-…`. Write the body to a file, exactly as emitted, and post it
-once, after it is final:
 
 ```bash
 mkdir -p /tmp/pr-analysis
 ANSWER="/tmp/pr-analysis/pr-${PR_NUM}-answer.md"
-# write the body to $ANSWER first, exactly as emitted
+# write the body to $ANSWER, exactly as composed
 ```
+
+**Posting back** — only when the prompt carries a mention link ending in `#issuecomment-…`,
+`#discussion_r…`, or `#pullrequestreview-…`. Post `$ANSWER` unchanged once, after it is final:
 
 - `#discussion_r<id>` — reply in that review comment's thread, with the digits after `#discussion_r` as
   `COMMENT_ID`:
@@ -374,25 +374,29 @@ ANSWER="/tmp/pr-analysis/pr-${PR_NUM}-answer.md"
   posted.
 - One body per run: always create the comment; never search for an earlier one of yours and never edit one.
   Two questions on the same pull request get two comments.
-- Post it unchanged — the same body, byte for byte. Still print it: the post is an addition, not a
-  replacement.
+- Post it unchanged — `$ANSWER`, byte for byte. Step 8 emits the same body after the post and the 👍: the
+  post is an addition, not a replacement.
 - This flow posts its own reply inline. It does not load `goravel-pr-comments`: that skill closes out a
   caller-supplied list of comments and resolves threads, and analyze answers one request and resolves
   nothing. NEVER use `gh pr review`.
 
 ## 7. Acknowledge the mention
 
-Run this after the output is emitted. When the prompt carried a mention link, wait for that post to
-return first, whatever its outcome. The 👍 marks the run's end, not a posted analysis. Never spawn it
-while the post is still running. Take the mention link from your prompt — none → do not spawn. With one,
-spawn `subagents/reaction` foreground and wait:
+Run this after `$ANSWER` is final and, when the prompt carried a mention link, after that post returned,
+whatever its outcome. The 👍 marks the run's end, not a posted analysis. The spawn returns immediately:
+the reaction runs in the background, and its completion arrives as a message. Write nothing between the
+spawn and that message — no "posted", no status line. Take the mention link from your prompt — none → do
+not spawn; go to step 8. With one, spawn `subagents/reaction`:
 
 > You are running as a subagent in the analyze flow. COMMENT_URL=<the comment link found in the prompt>
 
 - Pass the mention link only — never the pull request link from the same prompt.
-- Best-effort: a failed swap never fails the run, and its result never appears in the report.
+- Best-effort: a failed spawn or swap never fails the run, and its result never appears in the report. Go
+  to step 8 either way.
 
-## 8. Release the worktree
+## 8. Emit the answer and release the worktree
 
-The output is out, so release the run's claim — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — and a
-later run can continue in that tree instead of waiting out the lease.
+Release the run's claim — `rmdir "$WORKTREE_DIR.claim" 2>/dev/null || true` — and a later run can
+continue in that tree instead of waiting out the lease. Then emit `$ANSWER` byte for byte, answering the
+reaction's completion message when one arrived. That text is the run's final message — no summary after
+it, no status line.
