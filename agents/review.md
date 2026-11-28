@@ -42,7 +42,7 @@ user's own words ask for this review to be published — `post this review on th
 `post the round`, `comment this on the PR`, `leave the review on the PR` (phase 6). Asking for a
 review is not asking for a post: `review this PR`, a PR mention, or a bare link never authorizes one.
 A mention earns the 👍 once the review is finished. Publishing it still needs the ask. When the user
-asks for the post, the 👍 waits for the PR copy and the ticks.
+asks for the post, the 👍 waits for the post attempt and the ticks.
 The whole prompt is the user's own words. Two kinds of link can appear. The bare
 `https://github.com/<owner>/<repo>/pull/<number>` URL is the pull request; the same URL with a comment
 anchor — `#issuecomment-…`, `#discussion_r…`, `#pullrequestreview-…` — is the mention link, the one

@@ -180,8 +180,8 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 
 ## 6. Close out PR review comments
 
-Run after the PR exists — even with no unresolved review thread — or when the user hands you comments to
-close.
+Run after §5.3 reported the PR — even with no unresolved review thread — or when the user hands you
+comments to close.
 
 1. **Fetch the unresolved review threads** — REST has no resolved flag, so run the read-only GraphQL `reviewThreads` query inline. Resolve `PR_NUM` first — §1 fills it only for a pull-request link, so a request-started run resolves the PR §5.3 reported by the branch it is on:
 
@@ -203,7 +203,7 @@ close.
    `goravel-writing` skill before writing any reason; each reason follows its `## Replying to a review
    comment` shape — what changed first for a corrected comment, the code fact first for a declined one.
    A question, or a comment that is wrong, is `declined`: the answer is its reason and its thread stays
-   open.
+   open. No unresolved thread → nothing to close: skip steps 2–4 and go to §7.
 2. **Fix** the valid ones via the `subagents/code` agent in the implementation worktree; compose each reason in 1–2 sentences from the `subagents/code` agent's report (what changed, or why no change). This is another long write phase, so after it returns run `touch "$WORKTREE_DIR.claim" 2>/dev/null || true` — the claim must stay fresh until the run's single release.
 3. **Close out** — spawn `subagents/pr` with the list:
    ```
@@ -216,16 +216,15 @@ close.
      status: declined
      reason: <why no change>
    ```
-4. **Report** per comment: decision + reason, and confirm each `solved` thread is resolved. No unresolved
-   thread → no per-comment report, and §7 runs at the end of this step.
+4. **Report** per comment: decision + reason, and confirm each `solved` thread is resolved.
 
 ## 7. Acknowledge the mention
 
-Run this once, at the end of the §6 report — the run's only delivering terminal point — so the 👍 means
+Run this once, at the end of §6 — the run's only delivering terminal point — so the 👍 means
 "run delivered".
 
 - The clean-review PR report in 5.3 is not that point: §6 runs after it, and its close-out is part of the
-  delivery. The round-5 stop in 5.3 delivers no PR, so it does not acknowledge — its 👀 stays.
+  delivery. The round-5 stop in 5.3 reports no PR, so §6 never runs and its 👀 stays.
 - Take the mention link from this run's prompt — the one ending in `#issuecomment-…`,
   `#discussion_r…`, or `#pullrequestreview-…`; none → do not spawn.
 - Otherwise spawn `subagents/reaction` foreground and wait, passing the mention link only — never the
