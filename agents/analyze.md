@@ -383,10 +383,10 @@ ANSWER="/tmp/pr-analysis/pr-${PR_NUM}-answer.md"
 ## 7. Acknowledge the mention
 
 Run this after `$ANSWER` is final and, when the prompt carried a mention link, after that post returned,
-whatever its outcome. The 👍 marks the run's end, not a posted analysis. The spawn returns immediately:
-the reaction runs in the background, and its completion arrives as a message. Write nothing between the
-spawn and that message — no "posted", no status line. Take the mention link from your prompt — none → do
-not spawn; go to step 8. With one, spawn `subagents/reaction`:
+whatever its outcome. The 👍 closes the PR work — not a posted analysis — and the answer follows it. The
+spawn returns immediately: the reaction runs in the background, and its completion arrives as a message.
+Write nothing between the spawn and that message — no "posted", no status line. Take the mention link
+from your prompt — none → do not spawn; go to step 8. With one, spawn `subagents/reaction`:
 
 > You are running as a subagent in the analyze flow. COMMENT_URL=<the comment link found in the prompt>
 

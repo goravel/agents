@@ -134,10 +134,15 @@ fi
 ```
 
 - Nothing new to review: `DIFF_BASE` equal to `HEAD_SHA` means the last review already covered this head.
-  Put `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.` in
-  `/tmp/pr-reviews/pr-${PR_NUM}-nothing.md`, set `REVIEW_FILE` to that path, run the acknowledge bullet of
-  phase 6 — no round exists, so nothing comes before it — then emit that file per phase 7 and stop. Asked
-  or not.
+
+```bash
+mkdir -p /tmp/pr-reviews
+REVIEW_FILE="/tmp/pr-reviews/pr-${PR_NUM}-nothing.md"
+# write `No new commits since the last review (${HEAD_SHA:0:7}) — nothing to review.` to $REVIEW_FILE
+```
+
+  Then run the acknowledge bullet of phase 6 — no round exists, so nothing comes before it — and emit
+  `$REVIEW_FILE` per phase 7. Asked or not.
 - Read the delta, then follow the `goravel-graph` skill once for this round — one build, `repo_root` =
   `$WORKTREE_DIR`, `base` = `$GRAPH_BASE`:
 
@@ -177,7 +182,7 @@ git -C "$WORKTREE_DIR" diff "$DIFF_RANGE" -U0 | rg '^diff --git |^@@'
 
 ### 5. Compose the round
 Compose with the `goravel-review-template` skill loaded in phase 3:
-- Count per severity per status and give it the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → the body is `✅ Review clean — no findings.`
+- Count per severity per status and give it the NEW + ROUND shape: the `[NEW]` line plus one `[ROUND k](<url>)` line per prior round, ordered newest-first by comment timestamp. All counts zero → the body opens with `✅ Review clean — no findings.`, then the verdict line.
 - Write the round's state lines under the banner, from the template skill: `<!-- reviewed-head: ${HEAD_SHA} -->`
   with the full 40-character worktree head, and the `Reviewed:` line —
   `${DIFF_BASE:0:7}..${HEAD_SHA:0:7} — ${COMMITS} new commits` on an incremental review,
@@ -231,9 +236,9 @@ jq -Rs '{body: .}' "$BODY_FILE" \
   Never un-tick a resolved finding; never tick a still-open one. A failed PATCH is a missed tick, not a
   reason to post the round again. Rewrite only the anchor line — never the banner, the `<!-- round: N -->`
   or `<!-- reviewed-head: … -->` markers, or the `Reviewed:` line.
-- Acknowledge the mention last: the 👍 marks the run's end, not a posted review. Wait for the post above
-  to return and for every tick to finish, whatever their outcome; the round goes out after them. With
-  nothing to post or tick — no ask, or the phase-2 stop — spawn at once. The spawn returns immediately:
+- Acknowledge the mention last: the 👍 closes the PR work, not a posted review, and the round follows it.
+  Wait for the post above to return and for every tick to finish, whatever their outcome. With nothing
+  to post or tick — no ask, or the phase-2 stop — spawn at once. The spawn returns immediately:
   the reaction runs in the background, and its completion arrives as a message. Write nothing between the
   spawn and that message — no "review emitted", no status line. Take the mention link from your prompt —
   none → do not spawn; go to phase 7. With one, spawn `subagents/reaction`:
