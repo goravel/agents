@@ -123,11 +123,12 @@ facades.Route().Middleware(middleware.Jwt()).Get("users", userController.Index)
 5. **Push**
    - Run `git push`. If the branch has no upstream (`git rev-parse --abbrev-ref --symbolic-full-name @{u}` fails), run `git push -u origin "$branch"` — `gh pr create` requires the branch on the remote.
    - If the push is rejected as non-fast-forward, run `git fetch origin` and stop to report it. Never a bare `--force`.
-   - `git push` exits 0 when the remote is already ahead. Read the remote tip itself:
+   - `git push` can exit 0 while `origin/$branch` is not the commit you just built. Read the remote tip itself:
 
      ```bash
      HEAD_SHA=$(git rev-parse HEAD)
-     REMOTE_SHA=$(git ls-remote --heads origin "refs/heads/$branch" | cut -f1)
+     REMOTE_SHA=$(git ls-remote --heads origin "refs/heads/$branch") || { echo "cannot read origin"; exit 1; }
+     REMOTE_SHA=$(printf '%s' "$REMOTE_SHA" | cut -f1)
      [ "$HEAD_SHA" = "$REMOTE_SHA" ] || { echo "push unverified — origin/$branch is ${REMOTE_SHA:-missing}, HEAD is $HEAD_SHA"; exit 1; }
      ```
 

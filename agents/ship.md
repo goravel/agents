@@ -178,11 +178,11 @@ Read `<folder>/review-N.md`; `blockers` = Must Fix + Maybe Fix.
 
   ```bash
   HEAD_SHA=$(git -C "$WORKTREE_DIR" rev-parse HEAD)
-  PR_HEAD=$(gh pr view --json headRefOid --jq .headRefOid)
-  [ "$PR_HEAD" = "$HEAD_SHA" ] || { echo "run not delivered — PR head is $PR_HEAD, HEAD is $HEAD_SHA"; exit 1; }
+  PR_HEAD=$(gh -R "$REPO" pr view "$(git -C "$WORKTREE_DIR" branch --show-current)" --json headRefOid --jq .headRefOid)
+  [ "$PR_HEAD" = "$HEAD_SHA" ] || { echo "run not delivered — PR head is ${PR_HEAD:-missing}, HEAD is $HEAD_SHA"; exit 1; }
   ```
 
-  Matched → report the PR URL; list Nits as non-blocking. Not matched → report that line and say the commits are still on the local branch.
+  Matched → report the PR URL; list Nits as non-blocking. Not matched → report that line and stop; do not report a PR URL.
 - **Round 5**: stop, no PR. Report the outstanding Must Fix / Maybe Fix; list the Nits as non-blocking.
 - **Otherwise**: increment N and loop.
 
